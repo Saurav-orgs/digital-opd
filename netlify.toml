@@ -1,0 +1,16 @@
+# Netlify config for the patient web app (monorepo root).
+# `publish` is resolved relative to `base`, i.e. patient-web-OPD/dist.
+[build]
+  base = "patient-web-OPD"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# SPA fallback: react-router owns /book, /login, /visits, ... so every
+# path must serve index.html instead of Netlify's 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
