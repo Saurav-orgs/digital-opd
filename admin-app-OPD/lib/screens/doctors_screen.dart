@@ -9,7 +9,8 @@ import '../widgets/common.dart';
 import 'doctor_schedule_screen.dart';
 
 /// Single-doctor profile: shows the clinic's one doctor with Schedule + Edit
-/// actions (no enable/disable). Replaces the old doctors list.
+/// actions (no enable/disable). The profile is seeded by the server — the
+/// SuperAdmin is the doctor — so it is never created or deleted here.
 class DoctorProfileScreen extends StatefulWidget {
   const DoctorProfileScreen({super.key});
 
@@ -42,7 +43,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     await _future;
   }
 
-  Future<void> _openForm(Doctor? doctor) async {
+  Future<void> _openForm(Doctor doctor) async {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => DoctorFormScreen(doctor: doctor)),
@@ -62,7 +63,6 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canCreate = _auth.can('doctors', 'create');
     final canUpdate = _auth.can('doctors', 'update');
     final canSchedule = _auth.can('opd_schedules', 'read');
 
@@ -82,20 +82,11 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
           if (d == null) {
             return RefreshIndicator(
               onRefresh: _refresh,
-              child: ListView(children: [
-                const SizedBox(height: 120),
-                const StateView(empty: 'No doctor profile set up yet.'),
-                if (canCreate)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openForm(null),
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Add doctor'),
-                      ),
-                    ),
-                  ),
+              child: ListView(children: const [
+                SizedBox(height: 120),
+                StateView(
+                    empty:
+                        'The doctor profile hasn’t been set up yet — restart the API to seed it.'),
               ]),
             );
           }
@@ -229,8 +220,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
 }
 
 class DoctorFormScreen extends StatefulWidget {
-  final Doctor? doctor;
-  const DoctorFormScreen({super.key, this.doctor});
+  final Doctor doctor;
+  const DoctorFormScreen({super.key, required this.doctor});
 
   @override
   State<DoctorFormScreen> createState() => _DoctorFormScreenState();
@@ -249,16 +240,16 @@ class _DoctorFormScreenState extends State<DoctorFormScreen> {
   bool _saving = false;
 
   ApiClient get _api => AuthScope.of(context).api;
-  Doctor? get _doctor => widget.doctor;
+  Doctor get _doctor => widget.doctor;
 
   @override
   void initState() {
     super.initState();
-    _name = TextEditingController(text: _doctor?.name ?? '');
-    _specialization = TextEditingController(text: _doctor?.specialization ?? '');
-    _qualifications = TextEditingController(text: _doctor?.qualifications ?? '');
-    _fee = TextEditingController(text: _doctor?.consultationFee ?? '');
-    _bio = TextEditingController(text: _doctor?.bio ?? '');
+    _name = TextEditingController(text: _doctor.name);
+    _specialization = TextEditingController(text: _doctor.specialization ?? '');
+    _qualifications = TextEditingController(text: _doctor.qualifications ?? '');
+    _fee = TextEditingController(text: _doctor.consultationFee ?? '');
+    _bio = TextEditingController(text: _doctor.bio ?? '');
   }
 
   @override
@@ -298,15 +289,11 @@ class _DoctorFormScreenState extends State<DoctorFormScreen> {
         'consultation_fee':
             _fee.text.trim().isEmpty ? null : num.tryParse(_fee.text.trim()),
       };
-      // Create/update first to obtain the id the upload endpoints need.
-      final saved = _doctor == null
-          ? await _api.createDoctor(body)
-          : await _api.updateDoctor(_doctor!.id, body);
+      final saved = await _api.updateDoctor(_doctor.id, body);
       if (_photoFile != null) await _api.uploadDoctorPhoto(saved.id, _photoFile!);
       if (_qrFile != null) await _api.uploadDoctorQr(saved.id, _qrFile!);
       if (mounted) {
-        showSuccessSnack(
-            context, _doctor == null ? 'Doctor created' : 'Doctor updated');
+        showSuccessSnack(context, 'Profile updated');
         Navigator.pop(context, true);
       }
     } on ApiException catch (e) {
@@ -319,7 +306,7 @@ class _DoctorFormScreenState extends State<DoctorFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_doctor == null ? 'Add doctor' : 'Edit doctor')),
+      appBar: AppBar(title: const Text('Edit doctor profile')),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -356,7 +343,7 @@ class _DoctorFormScreenState extends State<DoctorFormScreen> {
             _imageCard(
               title: 'Profile photo',
               subtitle: 'Shown to patients.',
-              current: _doctor?.profilePhotoUrl,
+              current: _doctor.profilePhotoUrl,
               file: _photoFile,
               onPick: () => _pick(true),
             ),
@@ -364,7 +351,7 @@ class _DoctorFormScreenState extends State<DoctorFormScreen> {
             _imageCard(
               title: 'Payment QR',
               subtitle: 'Shown on the booking screen.',
-              current: _doctor?.paymentQrUrl,
+              current: _doctor.paymentQrUrl,
               file: _qrFile,
               onPick: () => _pick(false),
             ),

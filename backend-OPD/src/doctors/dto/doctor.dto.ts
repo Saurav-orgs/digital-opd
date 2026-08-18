@@ -8,7 +8,11 @@ import {
   MinLength,
 } from 'class-validator';
 
-export class CreateDoctorDto {
+/**
+ * Editable fields of the clinic's doctor profile. The profile itself is seeded
+ * at bootstrap (the SuperAdmin is the doctor), so this is only ever a patch.
+ */
+export class DoctorProfileDto {
   @ApiProperty({ example: 'Dr. Asha Rao' })
   @IsString()
   @MinLength(2, { message: 'Name must be at least 2 characters.' })
@@ -37,7 +41,7 @@ export class CreateDoctorDto {
   consultation_fee?: number;
 }
 
-export class UpdateDoctorDto extends PartialType(CreateDoctorDto) {}
+export class UpdateDoctorDto extends PartialType(DoctorProfileDto) {}
 
 /** Doctor editing their own profile — same shape, self-scoped. */
-export class UpdateOwnDoctorDto extends PartialType(CreateDoctorDto) {}
+export class UpdateOwnDoctorDto extends PartialType(DoctorProfileDto) {}

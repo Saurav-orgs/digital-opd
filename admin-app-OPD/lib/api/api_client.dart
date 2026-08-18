@@ -187,9 +187,8 @@ class ApiClient {
   Future<Doctor> getDoctor(String id) async =>
       Doctor.fromJson(await _get('/doctors/$id') as Map<String, dynamic>);
 
-  Future<Doctor> createDoctor(Map<String, dynamic> body) async =>
-      Doctor.fromJson(await _post('/doctors', body) as Map<String, dynamic>);
-
+  // No createDoctor/deleteDoctor: the clinic's single profile is seeded by the
+  // server and owned by the SuperAdmin, who is the doctor.
   Future<Doctor> updateDoctor(String id, Map<String, dynamic> body) async =>
       Doctor.fromJson(await _patch('/doctors/$id', body) as Map<String, dynamic>);
 

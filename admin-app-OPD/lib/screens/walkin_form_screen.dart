@@ -55,10 +55,11 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
   Future<void> _resolveDoctor() async {
     if (!_loadingDoctor) return;
     final auth = AuthScope.of(context);
-    // A doctor account books for itself; an admin picks the doctor.
-    if (auth.user?.isDoctor ?? false) {
+    // Every clinic account — the doctor and the staff they add — is linked to
+    // the clinic's doctor profile and books against it.
+    if (auth.user?.doctorId != null) {
       setState(() {
-        _doctorId = auth.user?.doctorId;
+        _doctorId = auth.user!.doctorId;
         _loadingDoctor = false;
       });
       return;

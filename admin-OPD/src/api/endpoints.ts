@@ -44,14 +44,13 @@ export const rolesApi = {
 };
 
 // ── Doctors ──────────────────────────────────────────────────
+// One profile per clinic, seeded on the server and owned by the SuperAdmin —
+// hence no create/delete here.
 export const doctorsApi = {
   list: () => api.get<Doctor[]>('/doctors').then((r) => r.data),
   get: (id: string) => api.get<Doctor>(`/doctors/${id}`).then((r) => r.data),
-  create: (body: Record<string, unknown>) =>
-    api.post<Doctor>('/doctors', body).then((r) => r.data),
   update: (id: string, body: Record<string, unknown>) =>
     api.patch<Doctor>(`/doctors/${id}`, body).then((r) => r.data),
-  remove: (id: string) => api.delete(`/doctors/${id}`).then((r) => r.data),
   enable: (id: string) => api.patch<Doctor>(`/doctors/${id}/enable`).then((r) => r.data),
   disable: (id: string) =>
     api.patch<Doctor>(`/doctors/${id}/disable`).then((r) => r.data),

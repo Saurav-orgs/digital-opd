@@ -32,8 +32,12 @@ class AuthUser {
             ((j['permissions'] as List?) ?? []).map((e) => '$e').toList(),
       );
 
-  bool get isDoctor => type == 'doctor';
   bool get isSuperAdmin => type == 'super_admin';
+
+  /// The clinic's doctor: the SuperAdmin seeded from env *is* the doctor.
+  /// Staff accounts carry the same `doctorId` for data scope, so the link
+  /// alone doesn't make an account the doctor.
+  bool get isDoctor => doctorId != null && (isSuperAdmin || type == 'doctor');
 
   /// RBAC check mirroring the web `can(module, action)`.
   bool can(String module, String action) {

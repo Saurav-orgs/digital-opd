@@ -137,7 +137,8 @@ class _UsersScreenState extends State<UsersScreen> {
                         runSpacing: 4,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Text(prettyStatus(u.type),
+                          // The SuperAdmin is the clinic's doctor.
+                          Text(isSuper ? 'Doctor' : prettyStatus(u.type),
                               style: const TextStyle(
                                   color: AppColors.textSecondary, fontSize: 12)),
                           if (u.role != null)
@@ -198,14 +199,11 @@ class _UserFormScreenState extends State<UserFormScreen> {
   late final TextEditingController _email;
   final _password = TextEditingController();
 
-  String _type = 'admin';
   String? _roleId;
-  String? _doctorId;
   bool _active = true;
   bool _saving = false;
 
   List<Role> _roles = [];
-  List<Doctor> _doctors = [];
   bool _loadingRefs = true;
 
   ApiClient get _api => AuthScope.of(context).api;
@@ -216,9 +214,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
     super.initState();
     _name = TextEditingController(text: _user?.name ?? '');
     _email = TextEditingController(text: _user?.email ?? '');
-    _type = _user?.type == 'doctor' ? 'doctor' : 'admin';
     _roleId = _user?.roleId;
-    _doctorId = _user?.doctorId;
     _active = _user?.isActive ?? true;
   }
 
@@ -231,11 +227,9 @@ class _UserFormScreenState extends State<UserFormScreen> {
   Future<void> _loadRefs() async {
     try {
       final roles = await _api.listRoles();
-      final doctors = await _api.listDoctors();
       if (mounted) {
         setState(() {
           _roles = roles;
-          _doctors = doctors;
           _loadingRefs = false;
         });
       }
@@ -258,20 +252,16 @@ class _UserFormScreenState extends State<UserFormScreen> {
       showErrorSnack(context, 'Please select a role.');
       return;
     }
-    if (_type == 'doctor' && _doctorId == null) {
-      showErrorSnack(context, 'Please link a doctor profile.');
-      return;
-    }
     setState(() => _saving = true);
     try {
+      // Staff accounts only — the server sets the type and links them to the
+      // clinic's doctor, so the role is the only choice to make here.
       final body = <String, dynamic>{
         'name': _name.text.trim(),
         'email': _email.text.trim(),
-        'type': _type,
         'role_id': _roleId,
         'is_active': _active,
       };
-      if (_type == 'doctor') body['doctor_id'] = _doctorId;
       if (_password.text.isNotEmpty) body['password'] = _password.text;
 
       if (_user == null) {
@@ -342,19 +332,8 @@ class _UserFormScreenState extends State<UserFormScreen> {
                     ),
                   ),
                   LabeledField(
-                    label: 'Type',
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _type,
-                      items: const [
-                        DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                        DropdownMenuItem(
-                            value: 'doctor', child: Text('Doctor')),
-                      ],
-                      onChanged: (v) => setState(() => _type = v ?? 'admin'),
-                    ),
-                  ),
-                  LabeledField(
                     label: 'Role',
+                    hint: 'Decides what this staff member can see and do.',
                     child: DropdownButtonFormField<String>(
                       initialValue: _roleId,
                       isExpanded: true,
@@ -366,20 +345,6 @@ class _UserFormScreenState extends State<UserFormScreen> {
                       onChanged: (v) => setState(() => _roleId = v),
                     ),
                   ),
-                  if (_type == 'doctor')
-                    LabeledField(
-                      label: 'Linked doctor profile',
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _doctorId,
-                        isExpanded: true,
-                        hint: const Text('Select doctor…'),
-                        items: _doctors
-                            .map((d) => DropdownMenuItem(
-                                value: d.id, child: Text(d.name)))
-                            .toList(),
-                        onChanged: (v) => setState(() => _doctorId = v),
-                      ),
-                    ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Active (can sign in)'),

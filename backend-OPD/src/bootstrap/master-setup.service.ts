@@ -6,6 +6,7 @@ import { Sequelize as SequelizeStatic } from 'sequelize';
 import Umzug from 'umzug';
 import * as bcrypt from 'bcrypt';
 import * as path from 'path';
+import { Doctor } from '../database/models/doctor.model';
 import { Permission } from '../database/models/permission.model';
 import { Role } from '../database/models/role.model';
 import { RolePermission } from '../database/models/role-permission.model';
@@ -31,8 +32,11 @@ const PATHLAB_ROLE_NAME = 'Pathlab';
  *      valid).
  *   2. Ensures the full permission catalog (every module × action) exists.
  *   3. Ensures a protected `SuperAdmin` role exists, holding every permission.
- *   4. Ensures a SuperAdmin user exists (credentials from env — see
- *      `superAdmin` in configuration.ts).
+ *   4. Ensures the clinic's doctor profile exists (named after the SuperAdmin)
+ *      — the SuperAdmin *is* the doctor, so there is never a separate "add
+ *      doctor" step.
+ *   5. Ensures a SuperAdmin user exists (credentials from env — see
+ *      `superAdmin` in configuration.ts), linked to that doctor profile.
  *
  * This removes every manual first-run step ("run migrations", "run the
  * seeder"): on a truly empty database the app creates its own schema and a
@@ -51,6 +55,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
     @InjectModel(RolePermission)
     private readonly rolePermissionModel: typeof RolePermission,
     @InjectModel(User) private readonly userModel: typeof User,
+    @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -58,7 +63,8 @@ export class MasterSetupService implements OnApplicationBootstrap {
       await this.runPendingMigrations();
       const permissionIds = await this.ensurePermissionCatalog();
       const role = await this.ensureSuperAdminRole(permissionIds);
-      await this.ensureSuperAdminUser(role.id);
+      const doctor = await this.ensureDoctorProfile();
+      await this.ensureSuperAdminUser(role.id, doctor.id);
       await this.ensurePathlabRole();
     } catch (err) {
       // Never crash the app over setup — surface it loudly and move on so
@@ -162,8 +168,60 @@ export class MasterSetupService implements OnApplicationBootstrap {
     return role;
   }
 
-  /** Ensures a SuperAdmin login exists, using credentials from env config. */
-  private async ensureSuperAdminUser(roleId: string): Promise<void> {
+  /**
+   * Ensures the clinic's single doctor profile exists. The SuperAdmin *is* the
+   * doctor, so the profile is seeded here from `SUPERADMIN_NAME` and then
+   * edited in-app (photo, specialization, fee, payment QR…) — there is no
+   * "add doctor" flow anywhere in the admin surfaces.
+   */
+  private async ensureDoctorProfile(): Promise<Doctor> {
+    const existing = await this.doctorModel.findOne({
+      order: [['created_at', 'ASC']],
+    });
+    if (existing) return existing;
+
+    const { name } = this.config.get<{ name: string }>('superAdmin')!;
+    const doctor = await this.doctorModel.create({
+      name,
+      public_slug: await this.uniqueSlug(name),
+      // Live from the start — a single-doctor clinic has nothing to enable.
+      is_enabled: true,
+    } as any);
+    this.logger.log(`Master setup: created the clinic doctor profile (${name}).`);
+    return doctor;
+  }
+
+  /** Slug for the doctor's public booking link, unique across soft-deletes. */
+  private async uniqueSlug(name: string): Promise<string> {
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '')
+        .slice(0, 40) || 'doctor';
+    let slug = base;
+    let n = 1;
+    while (
+      await this.doctorModel.findOne({
+        where: { public_slug: slug },
+        paranoid: false,
+      })
+    ) {
+      slug = `${base}-${n++}`;
+    }
+    return slug;
+  }
+
+  /**
+   * Ensures a SuperAdmin login exists, using credentials from env config, and
+   * that it is linked to the clinic doctor profile — that link is what makes
+   * the SuperAdmin the doctor for every doctor-scoped route (`/doctors/me`,
+   * walk-ins, schedules).
+   */
+  private async ensureSuperAdminUser(
+    roleId: string,
+    doctorId: string,
+  ): Promise<void> {
     const { email, password, name } = this.config.get<{
       email: string;
       password: string;
@@ -175,7 +233,15 @@ export class MasterSetupService implements OnApplicationBootstrap {
       where: { email: normalizedEmail },
       paranoid: false, // still find a soft-deleted account so we don't duplicate
     });
-    if (existing) return;
+    if (existing) {
+      if (existing.doctor_id !== doctorId) {
+        await existing.update({ doctor_id: doctorId } as any);
+        this.logger.log(
+          'Master setup: linked the SuperAdmin login to the doctor profile.',
+        );
+      }
+      return;
+    }
 
     const password_hash = await bcrypt.hash(password, 10);
     await this.userModel.create({
@@ -184,7 +250,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
       password_hash,
       type: UserType.SUPER_ADMIN,
       role_id: roleId,
-      doctor_id: null,
+      doctor_id: doctorId,
       is_active: true,
     } as any);
 

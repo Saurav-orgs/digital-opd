@@ -7,7 +7,7 @@ import { Empty, Field, Loading } from '../components/ui';
 
 /** Doctor self-service — edits are permission-gated server-side (doctors:update). */
 export default function Profile() {
-  const { user, can } = useAuth();
+  const { isDoctor, can } = useAuth();
   const toast = useToast();
   const qc = useQueryClient();
   const qrRef = useRef<HTMLInputElement>(null);
@@ -17,7 +17,7 @@ export default function Profile() {
   const meQ = useQuery({
     queryKey: ['doctor-me'],
     queryFn: doctorsApi.me,
-    enabled: user?.type === 'doctor',
+    enabled: isDoctor,
   });
 
   const [form, setForm] = useState({
@@ -61,7 +61,7 @@ export default function Profile() {
     onError: (e) => toast.error(e),
   });
 
-  if (user?.type !== 'doctor') return <Empty>This page is for doctor accounts.</Empty>;
+  if (!isDoctor) return <Empty>This page is for the doctor’s account.</Empty>;
   if (meQ.isLoading) return <Loading />;
   if (meQ.error) return <Empty>Could not load your profile.</Empty>;
 

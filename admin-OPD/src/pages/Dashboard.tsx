@@ -27,14 +27,15 @@ export default function Dashboard() {
     queryFn: dashboardApi.summary,
   });
 
-  // Doctor to book walk-ins for: a doctor account books for itself; an admin
-  // resolves the clinic's single doctor (mirrors WalkInFormScreen).
+  // Doctor to book walk-ins for: every clinic account is linked to the single
+  // doctor profile, so the link answers it; the list is only a fallback for an
+  // unlinked account (mirrors WalkInFormScreen).
   const doctorsQ = useQuery({
     queryKey: ['doctors'],
     queryFn: doctorsApi.list,
-    enabled: user?.type !== 'doctor',
+    enabled: !user?.doctorId,
   });
-  const doctorId = user?.type === 'doctor' ? user.doctorId : doctorsQ.data?.[0]?.id;
+  const doctorId = user?.doctorId ?? doctorsQ.data?.[0]?.id;
 
   const canCreate = can('appointments', 'create');
   const hour = new Date().getHours();

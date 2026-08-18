@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { User } from '../database/models/user.model';
 import { Role } from '../database/models/role.model';
 import { Permission } from '../database/models/permission.model';
+import { Doctor } from '../database/models/doctor.model';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AppException } from '../common/errors/app.exception';
@@ -16,6 +17,7 @@ export class UsersService {
   constructor(
     @InjectModel(User) private readonly userModel: typeof User,
     @InjectModel(Role) private readonly roleModel: typeof Role,
+    @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
   ) {}
 
   private readonly roleWithPerms = {
@@ -23,16 +25,25 @@ export class UsersService {
     include: [{ model: Permission }],
   };
 
-  async create(dto: CreateUserDto): Promise<User> {
+  /**
+   * Creates a staff account for the clinic's doctor (nurse, receptionist…).
+   * Every account is auto-linked to the single doctor profile, so staff share
+   * the doctor's data scope without anyone picking a doctor. `overrides` is for
+   * internal callers that manage their own kind of login (see PathlabsService).
+   */
+  async create(
+    dto: CreateUserDto,
+    overrides: { type?: UserType } = {},
+  ): Promise<User> {
     await this.assertEmailFree(dto.email);
     const password_hash = await bcrypt.hash(dto.password, 10);
     const user = await this.userModel.create({
       name: dto.name,
       email: dto.email.toLowerCase(),
       password_hash,
-      type: dto.type,
+      type: overrides.type ?? UserType.ADMIN,
       role_id: dto.role_id,
-      doctor_id: dto.type === UserType.DOCTOR ? dto.doctor_id : null,
+      doctor_id: await this.clinicDoctorId(),
       is_active: dto.is_active ?? true,
     } as any);
     return this.findOne(user.id);
@@ -57,20 +68,15 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto): Promise<User> {
     const user = await this.findOne(id);
-    if (user.type === UserType.SUPER_ADMIN && dto.type && dto.type !== UserType.SUPER_ADMIN) {
-      throw new AppException(ErrorCode.FORBIDDEN, {
-        message: 'The SuperAdmin type cannot be changed.',
-      });
-    }
     if (dto.email && dto.email.toLowerCase() !== user.email) {
       await this.assertEmailFree(dto.email);
     }
+    // `type` and `doctor_id` are server-owned — an edit never moves an account
+    // between kinds or doctors.
     const patch: Partial<User> = {
       name: dto.name ?? user.name,
       email: dto.email ? dto.email.toLowerCase() : user.email,
-      type: dto.type ?? user.type,
       role_id: dto.role_id ?? user.role_id,
-      doctor_id: dto.doctor_id ?? user.doctor_id,
       is_active: dto.is_active ?? user.is_active,
     };
     if (dto.password) {
@@ -120,6 +126,15 @@ export class UsersService {
       doctorId: user.doctor_id,
       permissions,
     };
+  }
+
+  /** The clinic's single doctor profile, seeded by MasterSetupService. */
+  private async clinicDoctorId(): Promise<string | null> {
+    const doctor = await this.doctorModel.findOne({
+      order: [['created_at', 'ASC']],
+      attributes: ['id'],
+    });
+    return doctor?.id ?? null;
   }
 
   private async assertEmailFree(email: string): Promise<void> {

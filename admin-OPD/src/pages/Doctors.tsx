@@ -9,16 +9,16 @@ import { Empty, Field, Loading, Modal } from '../components/ui';
 
 /**
  * Single-doctor profile — the web equivalent of the Flutter app's
- * `DoctorProfileScreen`. Replaces the old multi-doctor list + enable/disable
- * table, which no longer applies now the clinic has one doctor.
+ * `DoctorProfileScreen`. The profile is seeded on the server (the SuperAdmin
+ * is the doctor), so this page only ever views and edits it — it is never
+ * created or deleted here.
  */
 export default function Doctors() {
   const { can } = useAuth();
   const navigate = useNavigate();
-  const [editing, setEditing] = useState<Doctor | 'new' | null>(null);
+  const [editing, setEditing] = useState<Doctor | null>(null);
 
   const { data, isLoading } = useQuery({ queryKey: ['doctors'], queryFn: doctorsApi.list });
-  const canCreate = can('doctors', 'create');
   const canUpdate = can('doctors', 'update');
   const canSchedule = can('opd_schedules', 'read');
 
@@ -33,14 +33,9 @@ export default function Doctors() {
       </div>
 
       {!doctor ? (
-        <>
-          <Empty>No doctor profile set up yet.</Empty>
-          {canCreate && (
-            <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setEditing('new')}>
-              + Add doctor
-            </button>
-          )}
-        </>
+        <Empty>
+          The doctor profile hasn’t been set up yet — restart the API to seed it.
+        </Empty>
       ) : (
         <div className="stack" style={{ maxWidth: 560 }}>
           <div className="card">
@@ -100,37 +95,34 @@ export default function Doctors() {
       )}
 
       {editing && (
-        <DoctorModal
-          doctor={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-        />
+        <DoctorModal doctor={editing} onClose={() => setEditing(null)} />
       )}
     </>
   );
 }
 
-function DoctorModal({ doctor, onClose }: { doctor: Doctor | null; onClose: () => void }) {
+function DoctorModal({ doctor, onClose }: { doctor: Doctor; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const qrRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
-    name: doctor?.name ?? '',
-    specialization: doctor?.specialization ?? '',
-    qualifications: doctor?.qualifications ?? '',
-    consultation_fee: doctor?.consultation_fee ?? '',
-    bio: doctor?.bio ?? '',
+    name: doctor.name ?? '',
+    specialization: doctor.specialization ?? '',
+    qualifications: doctor.qualifications ?? '',
+    consultation_fee: doctor.consultation_fee ?? '',
+    bio: doctor.bio ?? '',
   });
 
-  // Files are picked locally and uploaded on Save — so a brand-new doctor can
-  // get a photo + QR in one go (no need to save first, then re-open).
+  // Files are picked locally and uploaded on Save, so details and images land
+  // in one go rather than needing a save-then-reopen round trip.
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [qrFile, setQrFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(
-    doctor?.profile_photo_url ?? null,
+    doctor.profile_photo_url ?? null,
   );
   const [qrPreview, setQrPreview] = useState<string | null>(
-    doctor?.payment_qr_url ?? null,
+    doctor.payment_qr_url ?? null,
   );
 
   const pickPhoto = (f: File) => {
@@ -151,25 +143,22 @@ function DoctorModal({ doctor, onClose }: { doctor: Doctor | null; onClose: () =
         bio: form.bio || undefined,
         consultation_fee: form.consultation_fee === '' ? undefined : Number(form.consultation_fee),
       };
-      // Create/update first to obtain the id the upload endpoints need,
-      // then upload any newly-picked images to it.
-      const saved = doctor
-        ? await doctorsApi.update(doctor.id, body)
-        : await doctorsApi.create(body);
+      const saved = await doctorsApi.update(doctor.id, body);
       if (photoFile) await doctorsApi.uploadPhoto(saved.id, photoFile);
       if (qrFile) await doctorsApi.uploadQr(saved.id, qrFile);
       return saved;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['doctors'] });
-      toast.success(doctor ? 'Doctor updated' : 'Doctor created');
+      qc.invalidateQueries({ queryKey: ['doctor-me'] });
+      toast.success('Profile updated');
       onClose();
     },
     onError: (e) => toast.error(e),
   });
 
   return (
-    <Modal title={doctor ? 'Edit doctor' : 'Add doctor'} onClose={onClose} large>
+    <Modal title="Edit doctor profile" onClose={onClose} large>
       <div className="grid cols-2">
         <Field label="Name">
           <input

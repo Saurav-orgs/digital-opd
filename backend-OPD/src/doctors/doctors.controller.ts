@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -20,7 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
-import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
+import { UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -86,13 +85,10 @@ export class DoctorsController {
     return this.doctorsService.uploadPhoto(this.selfId(user), file);
   }
 
-  // ── Admin CRUD ─────────────────────────────────────────────
-  @Post()
-  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
-  create(@Body() dto: CreateDoctorDto) {
-    return this.doctorsService.create(dto);
-  }
-
+  // ── Admin reads/edits ──────────────────────────────────────
+  // The clinic's single doctor profile is seeded by MasterSetupService and
+  // owned by the SuperAdmin, so there is no create/delete here — only reads,
+  // edits and the enable/disable toggle for patient-app visibility.
   @Get()
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
   findAll() {
@@ -109,12 +105,6 @@ export class DoctorsController {
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDoctorDto) {
     return this.doctorsService.update(id, dto);
-  }
-
-  @Delete(':id')
-  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.DELETE })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.doctorsService.remove(id);
   }
 
   @Patch(':id/enable')

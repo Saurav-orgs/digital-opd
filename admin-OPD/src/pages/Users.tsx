@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { doctorsApi, rolesApi, usersApi } from '../api/endpoints';
+import { rolesApi, usersApi } from '../api/endpoints';
 import type { User } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
@@ -47,7 +47,10 @@ export default function Users() {
                 <tr key={u.id}>
                   <td>{u.name}</td>
                   <td className="muted">{u.email}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{u.type.replace('_', ' ')}</td>
+                  {/* The SuperAdmin is the clinic's doctor — label it that way. */}
+                  <td style={{ textTransform: 'capitalize' }}>
+                    {u.type === 'super_admin' ? 'Doctor' : u.type.replace('_', ' ')}
+                  </td>
                   <td className="muted">{u.role?.name ?? '—'}</td>
                   <td><Badge value={u.is_active ? 'available' : 'rejected'} label={u.is_active ? 'Active' : 'Inactive'} /></td>
                   <td style={{ textAlign: 'right' }}>
@@ -162,28 +165,25 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
   const qc = useQueryClient();
   const toast = useToast();
   const rolesQ = useQuery({ queryKey: ['roles'], queryFn: rolesApi.list });
-  const doctorsQ = useQuery({ queryKey: ['doctors'], queryFn: doctorsApi.list });
 
   const [form, setForm] = useState({
     name: user?.name ?? '',
     email: user?.email ?? '',
     password: '',
-    type: (user?.type ?? 'admin') as 'admin' | 'doctor',
     role_id: user?.role_id ?? '',
-    doctor_id: user?.doctor_id ?? '',
     is_active: user?.is_active ?? true,
   });
 
   const save = useMutation({
     mutationFn: () => {
+      // Staff accounts only — the server sets the type and links them to the
+      // clinic's doctor, so there is nothing to pick here beyond the role.
       const body: any = {
         name: form.name,
         email: form.email,
-        type: form.type,
         role_id: form.role_id,
         is_active: form.is_active,
       };
-      if (form.type === 'doctor') body.doctor_id = form.doctor_id;
       if (form.password) body.password = form.password;
       return user ? usersApi.update(user.id, body) : usersApi.create({ ...body, password: form.password });
     },
@@ -195,8 +195,7 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
     form.name.trim() &&
     form.email.trim() &&
     form.role_id &&
-    (user || form.password.length >= 8) &&
-    (form.type !== 'doctor' || form.doctor_id);
+    (user || form.password.length >= 8);
 
   return (
     <Modal title={user ? 'Edit user' : 'Add user'} onClose={onClose}>
@@ -222,28 +221,13 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
         />
         <span className="hint">Must be at least 8 characters.</span>
       </Field>
-      <div className="grid cols-2">
-        <Field label="Type">
-          <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as any })}>
-            <option value="admin">Admin</option>
-            <option value="doctor">Doctor</option>
-          </select>
-        </Field>
-        <Field label="Role">
-          <select className="select" value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })}>
-            <option value="">Select role…</option>
-            {rolesQ.data?.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-        </Field>
-      </div>
-      {form.type === 'doctor' && (
-        <Field label="Linked doctor profile">
-          <select className="select" value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
-            <option value="">Select doctor…</option>
-            {doctorsQ.data?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        </Field>
-      )}
+      <Field label="Role">
+        <select className="select" value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })}>
+          <option value="">Select role…</option>
+          {rolesQ.data?.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <span className="hint">Decides what this staff member can see and do.</span>
+      </Field>
       <label className="row" style={{ gap: 8 }}>
         <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
         Active (can sign in)

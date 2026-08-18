@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { NAV } from '../lib/nav';
 
 export default function Layout() {
-  const { user, logout, can } = useAuth();
+  const { user, logout, can, isDoctor } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -86,7 +86,7 @@ export default function Layout() {
             {n.label}
           </NavLink>
         ))}
-        {user?.type === 'doctor' && (
+        {isDoctor && (
           <NavLink
             to="/profile"
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Doctor } from '../database/models/doctor.model';
-import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
+import { UpdateDoctorDto } from './dto/doctor.dto';
 import { StorageService } from '../uploads/storage.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -12,16 +12,6 @@ export class DoctorsService {
     @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
     private readonly storage: StorageService,
   ) {}
-
-  async create(dto: CreateDoctorDto) {
-    const public_slug = await this.uniqueSlug(dto.name);
-    const doctor = await this.doctorModel.create({
-      ...dto,
-      public_slug,
-      is_enabled: false,
-    } as any);
-    return this.toView(doctor);
-  }
 
   async findAll() {
     const doctors = await this.doctorModel.findAll({
@@ -38,11 +28,6 @@ export class DoctorsService {
     const doctor = await this.getOrFail(id);
     await doctor.update(dto as any);
     return this.toView(doctor);
-  }
-
-  async remove(id: string): Promise<void> {
-    const doctor = await this.getOrFail(id);
-    await doctor.destroy(); // soft delete
   }
 
   async setEnabled(id: string, enabled: boolean) {
@@ -126,23 +111,5 @@ export class DoctorsService {
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       payment_qr_url: this.storage.publicUrl(d.payment_qr_url),
     };
-  }
-
-  private async uniqueSlug(name: string): Promise<string> {
-    const base =
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-        .slice(0, 40) || 'doctor';
-    let slug = base;
-    let n = 1;
-    // Collide-check against existing (including soft-deleted) slugs.
-    while (
-      await this.doctorModel.findOne({ where: { public_slug: slug }, paranoid: false })
-    ) {
-      slug = `${base}-${n++}`;
-    }
-    return slug;
   }
 }

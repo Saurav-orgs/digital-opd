@@ -115,16 +115,17 @@ export class AppointmentsService {
   }
 
   /**
-   * Doctor-created walk-in booking (cod, no screenshot). A doctor account is
-   * forced to its own doctor_id; an admin must name the doctor. Concurrency is
-   * enforced by the same partial unique index as guest bookings.
+   * In-clinic walk-in booking (cod, no screenshot). Every admin account — the
+   * doctor and the staff they add — is linked to the clinic's doctor profile,
+   * so the booking is forced to that doctor and `dto.doctor_id` is only a
+   * fallback for an unlinked account. Concurrency is enforced by the same
+   * partial unique index as guest bookings.
    */
   async bookWalkIn(
     dto: WalkInAppointmentDto,
     user: AuthUser,
   ): Promise<Appointment> {
-    const doctorId =
-      user.type === UserType.DOCTOR ? user.doctorId : dto.doctor_id;
+    const doctorId = user.doctorId ?? dto.doctor_id;
     if (!doctorId) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message: 'A doctor is required for a walk-in booking.',

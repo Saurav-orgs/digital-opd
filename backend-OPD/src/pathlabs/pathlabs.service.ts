@@ -32,14 +32,16 @@ export class PathlabsService {
 
   async create(dto: CreatePathlabDto): Promise<User> {
     const role = await this.pathlabRole();
-    return this.usersService.create({
-      name: dto.name,
-      email: dto.email,
-      password: dto.password,
-      type: UserType.PATHLAB,
-      role_id: role.id,
-      is_active: dto.is_active,
-    } as any);
+    return this.usersService.create(
+      {
+        name: dto.name,
+        email: dto.email,
+        password: dto.password,
+        role_id: role.id,
+        is_active: dto.is_active,
+      } as any,
+      { type: UserType.PATHLAB },
+    );
   }
 
   async update(id: string, dto: UpdatePathlabDto): Promise<User> {
