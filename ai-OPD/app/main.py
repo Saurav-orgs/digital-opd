@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from . import documents, llm, transcribe
+from . import documents, gemini_llm, llm, transcribe
 from .spellfix import speller
 from .config import settings
 from .prompts import consolidate as consolidate_prompt
@@ -185,20 +185,22 @@ async def extract_prescription(
     if not body.transcript.strip():
         raise HTTPException(422, "Transcript is empty — nothing to extract.")
 
+    system = prescription_prompt.SYSTEM
+    user = prescription_prompt.build_user(
+        transcript=body.transcript,
+        patient_name=body.patient.name,
+        age=body.patient.age,
+        gender=body.patient.gender,
+        complaint=body.patient.complaint,
+        medicine_catalog=body.medicine_catalog,
+    )
+
     try:
-        raw = await llm.generate_json(
-            system=prescription_prompt.SYSTEM,
-            user=prescription_prompt.build_user(
-                transcript=body.transcript,
-                patient_name=body.patient.name,
-                age=body.patient.age,
-                gender=body.patient.gender,
-                complaint=body.patient.complaint,
-                medicine_catalog=body.medicine_catalog,
-            ),
-            schema=PRESCRIPTION_JSON_SCHEMA,
-        )
-    except llm.LlmError as err:
+        if settings.gemini_enabled:
+            raw = await gemini_llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA)
+        else:
+            raw = await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA)
+    except (llm.LlmError, gemini_llm.GeminiError) as err:
         raise HTTPException(503, str(err)) from err
 
     draft = DraftPrescription.model_validate(raw)

@@ -16,3 +16,6 @@ requests==2.32.3
 
 # Fuzzy medicine-name spelling correction
 rapidfuzz==3.10.1
+
+# Gemini API (used for prescription extraction when GEMINI_ENABLED=true)
+google-genai>=1.5.0

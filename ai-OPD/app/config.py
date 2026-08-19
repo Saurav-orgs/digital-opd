@@ -39,6 +39,13 @@ class Settings:
     # served model is the fine-tuned one; unset falls back to the base model.
     lora_adapter_path: str = os.environ.get("LORA_ADAPTER_PATH", "")
 
+    # ── Gemini (prescription extraction only) ────────────────
+    # When true, /extract-prescription uses Gemini instead of the local Ollama.
+    # All other endpoints (report summaries, transcription) always use local models.
+    gemini_enabled: bool = os.environ.get("GEMINI_ENABLED", "").lower() in ("1", "true", "yes")
+    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
+    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+
     # ── OCR ──────────────────────────────────────────────────
     # Indian lab reports are usually phone photos, so Hindi + English together.
     ocr_languages: str = os.environ.get("OCR_LANGUAGES", "eng+hin")
@@ -50,7 +57,8 @@ class Settings:
     def model_version(self) -> str:
         """Stamped onto every AI output so stored results stay traceable."""
         adapter = "+lora" if self.lora_adapter_path else ""
-        return f"whisper:{self.whisper_model}|llm:{self.llm_model}{adapter}"
+        rx = self.gemini_model if self.gemini_enabled else f"{self.llm_model}{adapter}"
+        return f"whisper:{self.whisper_model}|rx:{rx}"
 
 
 settings = Settings()
