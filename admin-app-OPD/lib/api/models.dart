@@ -104,7 +104,6 @@ class Doctor {
   final String? bio;
   final String? consultationFee;
   final String? profilePhotoUrl;
-  final String? paymentQrUrl;
   final String publicSlug;
   final bool isEnabled;
 
@@ -116,7 +115,6 @@ class Doctor {
     this.bio,
     this.consultationFee,
     this.profilePhotoUrl,
-    this.paymentQrUrl,
     required this.publicSlug,
     required this.isEnabled,
   });
@@ -129,7 +127,6 @@ class Doctor {
         bio: j['bio'] as String?,
         consultationFee: _str(j['consultation_fee']),
         profilePhotoUrl: j['profile_photo_url'] as String?,
-        paymentQrUrl: j['payment_qr_url'] as String?,
         publicSlug: j['public_slug'] as String? ?? '',
         isEnabled: j['is_enabled'] as bool? ?? false,
       );
@@ -318,12 +315,14 @@ class Appointment {
   final String? nextVisitDate;
   final String status; // confirmed | rejected
   final String consultationStatus; // pending | done | on_hold | rejected
-  final String paymentStatus; // paid_unverified | verified | rejected
-  final String? paymentMethod; // online | cod
   final String? source; // app | web | walk_in
   final bool onLeave; // day was later marked as leave — reschedule needed
+  final bool acceptsReports; // patient may still upload reports to this visit
+  final ReportAiSummary? reportsSummary; // combined across all visit reports
+  final String? reportsSummaryStatus; // pending|processing|ready|failed|null
+  final String? reportsSummaryError;
+  final int reportsSummaryCount;
   final DoctorRef? doctor;
-  final String? screenshotUrl; // presigned, only on detail
   final List<PrescriptionImage> prescriptions;
   final List<PatientReport> reports;
 
@@ -344,12 +343,14 @@ class Appointment {
     this.nextVisitDate,
     required this.status,
     required this.consultationStatus,
-    required this.paymentStatus,
-    this.paymentMethod,
     this.source,
     this.onLeave = false,
+    this.acceptsReports = false,
+    this.reportsSummary,
+    this.reportsSummaryStatus,
+    this.reportsSummaryError,
+    this.reportsSummaryCount = 0,
     this.doctor,
-    this.screenshotUrl,
     this.prescriptions = const [],
     this.reports = const [],
   });
@@ -376,14 +377,19 @@ class Appointment {
         nextVisitDate: j['next_visit_date'] as String?,
         status: j['status'] as String? ?? 'confirmed',
         consultationStatus: j['consultation_status'] as String? ?? 'pending',
-        paymentStatus: j['payment_status'] as String? ?? 'paid_unverified',
-        paymentMethod: j['payment_method'] as String?,
         source: j['source'] as String?,
         onLeave: j['on_leave'] as bool? ?? false,
+        acceptsReports: j['accepts_reports'] as bool? ?? false,
+        reportsSummary: j['reports_summary'] == null
+            ? null
+            : ReportAiSummary.fromJson(
+                j['reports_summary'] as Map<String, dynamic>),
+        reportsSummaryStatus: j['reports_summary_status'] as String?,
+        reportsSummaryError: j['reports_summary_error'] as String?,
+        reportsSummaryCount: (j['reports_summary_count'] as num?)?.toInt() ?? 0,
         doctor: j['doctor'] == null
             ? null
             : DoctorRef.fromJson(j['doctor'] as Map<String, dynamic>),
-        screenshotUrl: j['screenshot_url'] as String?,
         prescriptions: ((j['prescriptions'] as List?) ?? [])
             .map((p) => PrescriptionImage.fromJson(p as Map<String, dynamic>))
             .toList(),
@@ -391,6 +397,165 @@ class Appointment {
             .map((r) => PatientReport.fromJson(r as Map<String, dynamic>))
             .toList(),
       );
+}
+
+/// Structured AI summary of an uploaded report.
+class ReportAiSummary {
+  final String reportType;
+  final String summary;
+  final List<String> keyFindings;
+  final List<AbnormalValue> abnormalValues;
+
+  ReportAiSummary({
+    this.reportType = '',
+    this.summary = '',
+    this.keyFindings = const [],
+    this.abnormalValues = const [],
+  });
+
+  factory ReportAiSummary.fromJson(Map<String, dynamic> j) => ReportAiSummary(
+        reportType: j['report_type'] as String? ?? '',
+        summary: j['summary'] as String? ?? '',
+        keyFindings:
+            ((j['key_findings'] as List?) ?? []).map((e) => '$e').toList(),
+        abnormalValues: ((j['abnormal_values'] as List?) ?? [])
+            .map((v) => AbnormalValue.fromJson(v as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class AbnormalValue {
+  final String label;
+  final String value;
+  final String reference;
+  final String direction; // high | low | abnormal
+
+  AbnormalValue({
+    required this.label,
+    required this.value,
+    this.reference = '',
+    this.direction = 'abnormal',
+  });
+
+  factory AbnormalValue.fromJson(Map<String, dynamic> j) => AbnormalValue(
+        label: j['label'] as String? ?? '',
+        value: j['value'] as String? ?? '',
+        reference: j['reference'] as String? ?? '',
+        direction: j['direction'] as String? ?? 'abnormal',
+      );
+}
+
+/// Recording → transcript → draft. Polled while it runs.
+class ConsultationSession {
+  final String id;
+  final String status; // transcribing | drafting | draft_ready | failed
+  final String? transcript;
+  final int? durationSeconds;
+  final String? error;
+
+  ConsultationSession({
+    required this.id,
+    required this.status,
+    this.transcript,
+    this.durationSeconds,
+    this.error,
+  });
+
+  factory ConsultationSession.fromJson(Map<String, dynamic> j) =>
+      ConsultationSession(
+        id: j['id'] as String,
+        status: j['status'] as String? ?? 'transcribing',
+        transcript: j['transcript'] as String?,
+        durationSeconds: (j['duration_seconds'] as num?)?.toInt(),
+        error: j['error'] as String?,
+      );
+
+  bool get inProgress => status == 'transcribing' || status == 'drafting';
+}
+
+class PrescriptionMedicine {
+  String? id;
+  String medicineName;
+  String? strength;
+  String? form;
+  String dosage;
+  String? timing;
+  int? durationDays;
+  String? instructions;
+  final String source; // ai | doctor
+
+  PrescriptionMedicine({
+    this.id,
+    this.medicineName = '',
+    this.strength,
+    this.form,
+    this.dosage = '',
+    this.timing,
+    this.durationDays,
+    this.instructions,
+    this.source = 'doctor',
+  });
+
+  factory PrescriptionMedicine.fromJson(Map<String, dynamic> j) =>
+      PrescriptionMedicine(
+        id: j['id'] as String?,
+        medicineName: j['medicine_name'] as String? ?? '',
+        strength: j['strength'] as String?,
+        form: j['form'] as String?,
+        dosage: j['dosage'] as String? ?? '',
+        timing: j['timing'] as String?,
+        durationDays: (j['duration_days'] as num?)?.toInt(),
+        instructions: j['instructions'] as String?,
+        source: j['source'] as String? ?? 'doctor',
+      );
+
+  Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
+        'medicine_name': medicineName.trim(),
+        if (strength != null && strength!.isNotEmpty) 'strength': strength,
+        if (form != null && form!.isNotEmpty) 'form': form,
+        if (dosage.isNotEmpty) 'dosage': dosage.trim(),
+        if (timing != null && timing!.isNotEmpty) 'timing': timing,
+        if (durationDays != null) 'duration_days': durationDays,
+        if (instructions != null && instructions!.isNotEmpty)
+          'instructions': instructions,
+      };
+
+  bool get fromAi => source == 'ai';
+}
+
+class EPrescription {
+  final String id;
+  final String status; // draft | issued
+  final String? diagnosis;
+  final String? advice;
+  final String? followUpDate;
+  final String? pdfUrl;
+  final List<PrescriptionMedicine> medicines;
+
+  EPrescription({
+    required this.id,
+    required this.status,
+    this.diagnosis,
+    this.advice,
+    this.followUpDate,
+    this.pdfUrl,
+    this.medicines = const [],
+  });
+
+  factory EPrescription.fromJson(Map<String, dynamic> j) => EPrescription(
+        id: j['id'] as String,
+        status: j['status'] as String? ?? 'draft',
+        diagnosis: j['diagnosis'] as String?,
+        advice: j['advice'] as String?,
+        followUpDate: j['follow_up_date'] as String?,
+        pdfUrl: j['pdf_url'] as String?,
+        medicines: ((j['medicines'] as List?) ?? [])
+            .map((m) => PrescriptionMedicine.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+
+  bool get isIssued => status == 'issued';
 }
 
 class DoctorCount {
@@ -461,11 +626,22 @@ class PatientReport {
   final String title;
   final String? url;
   final String createdAt;
+
+  /// AI summary, generated in the background after upload. `summaryStatus` is
+  /// pending | processing | ready | failed, so the UI can distinguish "queued",
+  /// "working on it" and "it didn't work" rather than showing a silent gap.
+  final ReportAiSummary? aiSummary;
+  final String summaryStatus;
+  final String? summaryError;
+
   PatientReport({
     required this.id,
     required this.title,
     this.url,
     required this.createdAt,
+    this.aiSummary,
+    this.summaryStatus = 'pending',
+    this.summaryError,
   });
 
   factory PatientReport.fromJson(Map<String, dynamic> j) => PatientReport(
@@ -473,5 +649,10 @@ class PatientReport {
         title: j['title'] as String? ?? '',
         url: j['url'] as String?,
         createdAt: j['createdAt'] as String? ?? '',
+        aiSummary: j['ai_summary'] == null
+            ? null
+            : ReportAiSummary.fromJson(j['ai_summary'] as Map<String, dynamic>),
+        summaryStatus: j['ai_summary_status'] as String? ?? 'pending',
+        summaryError: j['ai_summary_error'] as String?,
       );
 }

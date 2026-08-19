@@ -8,8 +8,6 @@ export interface Doctor {
   consultation_fee?: string | number | null;
   profilePhotoUrl?: string | null;
   profile_photo_url?: string | null;
-  paymentQrUrl?: string | null;
-  payment_qr_url?: string | null;
   publicSlug: string;
   public_slug?: string | null;
 }
@@ -58,7 +56,8 @@ export interface PatientVisit {
   end_time: string;
   status: 'confirmed' | 'rejected';
   consultation_status: 'pending' | 'done' | 'on_hold' | 'rejected';
-  payment_status: 'paid_unverified' | 'verified' | 'rejected';
+  /** Whether the patient may still upload reports to this visit. */
+  accepts_reports: boolean;
   description: string | null;
   doctor_notes: string | null;
   next_visit_note: string | null;
@@ -66,6 +65,7 @@ export interface PatientVisit {
   doctor?: { id: string; name: string; specialization?: string | null };
   prescriptions: PatientPrescription[];
   reports: PatientReport[];
+  e_prescription?: IssuedPrescription | null;
 }
 
 export interface PatientReport {
@@ -75,9 +75,31 @@ export interface PatientReport {
   createdAt: string;
 }
 
+export interface IssuedMedicine {
+  id: string;
+  medicine_name: string;
+  strength: string | null;
+  form: string | null;
+  dosage: string;
+  timing: string | null;
+  duration_days: number | null;
+  instructions: string | null;
+}
+
+/** Only present once the doctor has issued it — drafts are never sent here. */
+export interface IssuedPrescription {
+  id: string;
+  diagnosis: string | null;
+  advice: string | null;
+  follow_up_date: string | null;
+  issued_at: string | null;
+  pdf_url: string | null;
+  medicines: IssuedMedicine[];
+}
+
 export interface PatientNotification {
   id: string;
-  type: 'report_available' | 'appointment_reminder';
+  type: 'report_available' | 'appointment_reminder' | 'prescription_ready';
   title: string;
   body: string | null;
   data: Record<string, unknown> | null;

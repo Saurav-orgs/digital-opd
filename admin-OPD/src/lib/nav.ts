@@ -10,7 +10,6 @@ export interface NavItem {
 /** Sidebar config — rendered dynamically from the user's read permissions. */
 export const NAV: NavItem[] = [
   { path: '/dashboard', label: 'Dashboard', module: 'dashboard', icon: '▦' },
-  { path: '/doctors', label: 'Doctor Profile', module: 'doctors', icon: '🩺' },
   { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: '🧪' },
   { path: '/reports', label: 'Reports', module: 'reports', icon: '📄' },
   { path: '/users', label: 'Users', module: 'users', icon: '👤' },

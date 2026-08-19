@@ -115,6 +115,25 @@ export class StorageService {
     return { key, url: this.publicUrl(key) as string };
   }
 
+  /**
+   * Fetches an object's bytes. Used when a stored file has to be re-processed
+   * server-side (e.g. re-running an AI summary after the first attempt failed).
+   */
+  async download(key: string): Promise<Buffer> {
+    try {
+      const res = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      const bytes = await res.Body!.transformToByteArray();
+      return Buffer.from(bytes);
+    } catch (err) {
+      this.logger.error(`S3 download failed for ${key}`, err as Error);
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'The stored file could not be read.',
+      });
+    }
+  }
+
   async delete(key: string): Promise<void> {
     if (!key) return;
     try {

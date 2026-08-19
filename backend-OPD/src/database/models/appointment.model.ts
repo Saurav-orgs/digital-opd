@@ -8,12 +8,12 @@ import {
   Table,
 } from 'sequelize-typescript';
 import {
+  AiJobStatus,
   AppointmentStatus,
   BookingSource,
   ConsultationStatus,
-  PaymentMethod,
-  PaymentStatus,
 } from '../../common/enums';
+import { ReportAiSummary } from './patient-report.model';
 import { Doctor } from './doctor.model';
 import { AppointmentPrescription } from './prescription.model';
 
@@ -73,10 +73,6 @@ export class Appointment extends Model<Appointment> {
   @Column({ type: DataType.DATEONLY, allowNull: true })
   next_visit_date: string | null;
 
-  /** S3 object key for the uploaded payment screenshot (null for walk-ins). */
-  @Column({ type: DataType.STRING, allowNull: true })
-  payment_screenshot_url: string | null;
-
   /** Only `confirmed` occupies a slot (partial unique index). */
   @Column({
     type: DataType.STRING,
@@ -92,23 +88,27 @@ export class Appointment extends Model<Appointment> {
   })
   consultation_status: ConsultationStatus;
 
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
-    defaultValue: PaymentStatus.PAID_UNVERIFIED,
-  })
-  payment_status: PaymentStatus;
-
   @Column({ type: DataType.STRING, allowNull: false })
   source: BookingSource;
 
-  /** online (app/web) | cod (walk-in). */
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
-    defaultValue: PaymentMethod.ONLINE,
-  })
-  payment_method: PaymentMethod;
+  // ── Consolidated AI summary of the patient's uploaded reports ──
+
+  @Column({ type: DataType.JSONB, allowNull: true })
+  reports_summary: ReportAiSummary | null;
+
+  /** null = nothing to summarise; else pending|processing|ready|failed. */
+  @Column({ type: DataType.STRING, allowNull: true })
+  reports_summary_status: AiJobStatus | null;
+
+  @Column({ type: DataType.TEXT, allowNull: true })
+  reports_summary_error: string | null;
+
+  /** How many report summaries this consolidation covered. */
+  @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
+  reports_summary_count: number;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  reports_summarized_at: Date | null;
 
   @BelongsTo(() => Doctor)
   doctor: Doctor;

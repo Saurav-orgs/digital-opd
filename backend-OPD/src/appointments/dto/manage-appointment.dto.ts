@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
-import { ConsultationStatus, PaymentStatus } from '../../common/enums';
+import { ConsultationStatus } from '../../common/enums';
 
 /** Doctor's post-checkup marking (#3). `pending` is not settable here. */
 export class ConsultationDto {
@@ -15,13 +15,6 @@ export class ConsultationDto {
     message: 'Status must be done, on_hold, or rejected.',
   })
   status: ConsultationStatus;
-}
-
-/** Payment review (#2). `verified` keeps the slot; `rejected` frees a future slot. */
-export class PaymentReviewDto {
-  @ApiProperty({ enum: [PaymentStatus.VERIFIED, PaymentStatus.REJECTED] })
-  @IsEnum(PaymentStatus, { message: 'Status must be verified or rejected.' })
-  status: PaymentStatus;
 }
 
 /** Doctor's editable note on a visit (#, referred to on the next OPD). */

@@ -84,7 +84,7 @@ export const PrivacyPolicy: React.FC = () => {
                 <strong>OPD Appointment Details:</strong> Requested date and time slot, and symptoms or reason for visit provided during booking.
               </li>
               <li>
-                <strong>Payment & Receipt Verification:</strong> Payment status, transaction reference numbers, and uploaded payment proof images/screenshots for fee verification.
+                <strong>Medical Reports:</strong> Report files you choose to upload against a visit so the doctor can review them. Payment for consultations is collected in person at the clinic and is not processed or stored by this platform.
               </li>
               <li>
                 <strong>Technical & Usage Information:</strong> Browser type, IP address, device operating system, and session metrics required to ensure platform stability and security.

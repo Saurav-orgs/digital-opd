@@ -201,9 +201,6 @@ class ApiClient {
   Future<Doctor> uploadDoctorPhoto(String id, File file) =>
       _uploadImage('/doctors/$id/photo', file);
 
-  Future<Doctor> uploadDoctorQr(String id, File file) =>
-      _uploadImage('/doctors/$id/qr', file);
-
   // Doctor self-service
   Future<Doctor> getMe() async =>
       Doctor.fromJson(await _get('/doctors/me') as Map<String, dynamic>);
@@ -213,8 +210,6 @@ class ApiClient {
 
   Future<Doctor> uploadMyPhoto(File file) =>
       _uploadImage('/doctors/me/photo', file);
-
-  Future<Doctor> uploadMyQr(File file) => _uploadImage('/doctors/me/qr', file);
 
   // ── Schedules & leave ──────────────────────────────────────
   Future<List<ScheduleEntry>> listSchedules(String doctorId) async =>
@@ -313,9 +308,47 @@ class ApiClient {
       Appointment.fromJson(await _patch('/appointments/$id/consultation',
           {'status': status}) as Map<String, dynamic>);
 
-  Future<Appointment> setPayment(String id, String status) async =>
-      Appointment.fromJson(await _patch('/appointments/$id/payment',
-          {'status': status}) as Map<String, dynamic>);
+  // ── Consultation & e-prescription ──────────────────────────
+  Future<ConsultationSession> uploadConsultationAudio(
+          String appointmentId, File audio) =>
+      _guard(() async {
+        final req = http.MultipartRequest(
+            'POST', _uri('/appointments/$appointmentId/consultation/audio'));
+        if (tokens.token != null) {
+          req.headers['Authorization'] = 'Bearer ${tokens.token}';
+        }
+        req.files.add(await http.MultipartFile.fromPath('audio', audio.path));
+        final res = await http.Response.fromStream(await req.send());
+        return ConsultationSession.fromJson(
+            _decode(res) as Map<String, dynamic>);
+      });
+
+  Future<ConsultationSession?> getConsultation(String appointmentId) async {
+    final data = await _get('/appointments/$appointmentId/consultation');
+    if (data == null) return null;
+    return ConsultationSession.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<EPrescription> getPrescription(String appointmentId) async =>
+      EPrescription.fromJson(await _get('/appointments/$appointmentId/prescription')
+          as Map<String, dynamic>);
+
+  Future<EPrescription> savePrescription(
+          String appointmentId, Map<String, dynamic> body) async =>
+      EPrescription.fromJson(
+          await _patch('/appointments/$appointmentId/prescription', body)
+              as Map<String, dynamic>);
+
+  Future<EPrescription> issuePrescription(String appointmentId) async =>
+      EPrescription.fromJson(
+          await _post('/appointments/$appointmentId/prescription/issue')
+              as Map<String, dynamic>);
+
+  Future<void> retryReportSummary(String reportId) =>
+      _guard(() async => _post('/reports/$reportId/summary/retry'));
+
+  Future<void> retryVisitSummary(String appointmentId) => _guard(
+      () async => _post('/reports/appointment/$appointmentId/summary/retry'));
 
   Future<Appointment> setNotes(String id, String notes) async =>
       Appointment.fromJson(await _patch('/appointments/$id/notes',

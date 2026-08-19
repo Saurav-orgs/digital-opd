@@ -3,10 +3,12 @@ export interface AppConfig {
   port: number;
   apiPrefix: string;
   clinicTimezone: string;
+  clinic: { name: string; address: string; phone: string; email: string };
   bookingWindowDays: number;
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
   superAdmin: { email: string; password: string; name: string };
+  ai: { url: string; timeoutSeconds: number; enabled: boolean };
   database: {
     host: string;
     port: number;
@@ -33,6 +35,14 @@ export default (): AppConfig => ({
   port: parseInt(process.env.PORT || '3000', 10),
   apiPrefix: process.env.API_PREFIX || 'api',
   clinicTimezone: process.env.CLINIC_TIMEZONE || 'Asia/Kolkata',
+  // Branding for the prescription letterhead. All optional — the header
+  // falls back to the doctor's own name when the clinic name is unset.
+  clinic: {
+    name: process.env.CLINIC_NAME || '',
+    address: process.env.CLINIC_ADDRESS || '',
+    phone: process.env.CLINIC_PHONE || '',
+    email: process.env.CLINIC_EMAIL || '',
+  },
   bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
   jwt: {
@@ -43,6 +53,14 @@ export default (): AppConfig => ({
     email: process.env.SUPERADMIN_EMAIL || 'superadmin@opd.local',
     password: process.env.SUPERADMIN_PASSWORD || 'change-me',
     name: process.env.SUPERADMIN_NAME || 'Super Admin',
+  },
+  ai: {
+    // Local inference sidecar (see ai-OPD/). Never a public URL.
+    url: process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000',
+    // Transcribing a long consultation on CPU genuinely takes minutes.
+    timeoutSeconds: parseInt(process.env.AI_TIMEOUT_SECONDS || '900', 10),
+    // Lets a deployment run with no AI at all; features degrade, nothing breaks.
+    enabled: process.env.AI_ENABLED !== 'false',
   },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',

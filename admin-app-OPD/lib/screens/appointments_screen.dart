@@ -8,6 +8,7 @@ import '../api/models.dart';
 import '../auth/auth_scope.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/consultation_panel.dart';
 import '../widgets/slot_selector.dart';
 
 class AppointmentsScreen extends StatefulWidget {
@@ -304,7 +305,6 @@ class _AppointmentTile extends StatelessWidget {
               spacing: 8,
               runSpacing: 6,
               children: [
-                StatusBadge(a.paymentStatus),
                 StatusBadge(a.consultationStatus),
               ],
             ),
@@ -423,7 +423,6 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
                           if (a.isWalkIn)
                             const StatusBadge('walk_in', label: 'Walk-in'),
                           StatusBadge(a.status),
-                          StatusBadge(a.paymentStatus),
                           StatusBadge(a.consultationStatus),
                         ],
                       ),
@@ -447,31 +446,9 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
                 const SizedBox(height: 16),
                 _reportsCard(a),
                 const SizedBox(height: 16),
-                SectionCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const CardTitle('Payment screenshot'),
-                      if (a.screenshotUrl != null &&
-                          a.screenshotUrl!.isNotEmpty)
-                        ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.control),
-                          child: Image.network(
-                            a.screenshotUrl!,
-                            width: double.infinity,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) => const Text(
-                                'Could not load the screenshot.',
-                                style: TextStyle(
-                                    color: AppColors.textSecondary)),
-                          ),
-                        )
-                      else
-                        const Text('No screenshot.',
-                            style: TextStyle(color: AppColors.textSecondary)),
-                    ],
-                  ),
+                ConsultationPanel(
+                  appointmentId: widget.id,
+                  canEdit: canUpdate && a.status != 'rejected',
                 ),
                 if (canUpdate) ...[
                   const SizedBox(height: 16),
@@ -537,37 +514,6 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('Payment review'),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() => _api.setPayment(a.id, 'verified'),
-                          'Payment verified'),
-                  child: const Text('Verify'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() => _api.setPayment(a.id, 'rejected'),
-                          'Payment rejected — slot freed'),
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.error, width: 0.8)),
-                  child: const Text('Reject'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text('Rejecting frees the slot if it is still in the future.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-          const Divider(height: 28),
           const CardTitle('Consultation outcome'),
           Wrap(
             spacing: 10,
@@ -742,6 +688,112 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
   }
 
   // ── Reports (pathlab-uploaded or patient self-uploaded) ─────
+  /// AI summary under a report. `pending` means queued (usually the AI service
+  /// isn't up) — saying "summarising" there would promise work that isn't
+  /// happening, so the two states read differently.
+  Widget _reportSummary(PatientReport r) {
+    if (r.summaryStatus == 'processing') {
+      return const Padding(
+        padding: EdgeInsets.only(top: 4, left: 24),
+        child: Text('Summarising…',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+      );
+    }
+    if (r.summaryStatus == 'pending' || r.summaryStatus == 'failed') {
+      return Padding(
+        padding: const EdgeInsets.only(top: 4, left: 24),
+        child: Row(
+          children: [
+            Text(
+              r.summaryStatus == 'pending'
+                  ? 'Waiting to be summarised.'
+                  : 'Couldn’t summarise this report.',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12.5),
+            ),
+            TextButton(
+              onPressed: () async {
+                try {
+                  await _api.retryReportSummary(r.id);
+                  if (mounted) {
+                    showSuccessSnack(context, 'Summarising again…');
+                    setState(() {
+                      _future = _api.getAppointment(widget.id);
+                    });
+                  }
+                } on ApiException catch (e) {
+                  if (mounted) showErrorSnack(context, e.message);
+                }
+              },
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 30),
+              ),
+              child: const Text('Summarise now'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final summary = r.aiSummary;
+    if (summary == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6, left: 24),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.page,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (summary.reportType.isNotEmpty)
+            Text(summary.reportType,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 12.5)),
+          Text(summary.summary, style: const TextStyle(fontSize: 13)),
+          if (summary.abnormalValues.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: summary.abnormalValues
+                  .map((v) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: v.direction == 'high'
+                              ? AppColors.errorTint
+                              : AppColors.onHoldTint,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text('${v.label}: ${v.value}',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: v.direction == 'high'
+                                    ? AppColors.error
+                                    : AppColors.onHold)),
+                      ))
+                  .toList(),
+            ),
+          ],
+          if (summary.keyFindings.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            ...summary.keyFindings.map((f) => Text('• $f',
+                style: const TextStyle(fontSize: 12.5))),
+          ],
+          const SizedBox(height: 6),
+          const Text(
+            'AI-generated — check the report itself before acting.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _reportsCard(Appointment a) {
     return SectionCard(
       child: Column(
@@ -751,35 +803,156 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
           if (a.reports.isEmpty)
             const Text('No reports uploaded for this appointment.',
                 style: TextStyle(color: AppColors.textSecondary))
-          else
+          else ...[
+            _visitSummary(a),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: a.reports
                   .map((r) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: InkWell(
-                          onTap: r.url == null
-                              ? null
-                              : () => launchUrl(Uri.parse(r.url!),
-                                  mode: LaunchMode.externalApplication),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.description_outlined,
-                                  size: 16, color: AppColors.primary),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(r.title,
-                                    style: const TextStyle(
-                                        color: AppColors.primary)),
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            InkWell(
+                              onTap: r.url == null
+                                  ? null
+                                  : () => launchUrl(Uri.parse(r.url!),
+                                      mode: LaunchMode.externalApplication),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.description_outlined,
+                                      size: 16, color: AppColors.primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(r.title,
+                                        style: const TextStyle(
+                                            color: AppColors.primary)),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                            _reportSummary(r),
+                          ],
                         ),
                       ))
                   .toList(),
             ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// Combined summary across every report for this visit — the doctor reads
+  /// this first. Hidden when there's nothing combined to show (0-1 reports).
+  Widget _visitSummary(Appointment a) {
+    final status = a.reportsSummaryStatus;
+    if (a.reports.length < 2 && status != 'ready') return const SizedBox.shrink();
+
+    Widget body;
+    if (status == 'processing') {
+      body = const Text('Combining the report summaries…',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5));
+    } else if (status == 'failed') {
+      body = Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Couldn’t combine the summaries.'
+              '${a.reportsSummaryError != null ? ' ${a.reportsSummaryError}' : ''}',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12.5),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              try {
+                await _api.retryVisitSummary(widget.id);
+                if (mounted) {
+                  showSuccessSnack(context, 'Combining again…');
+                  setState(() => _future = _api.getAppointment(widget.id));
+                }
+              } on ApiException catch (e) {
+                if (mounted) showErrorSnack(context, e.message);
+              }
+            },
+            child: const Text('Retry'),
+          ),
+        ],
+      );
+    } else if (a.reportsSummary != null) {
+      body = _summaryBody(a.reportsSummary!);
+    } else {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryTint,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            a.reportsSummaryCount > 0
+                ? 'Combined summary · across ${a.reportsSummaryCount} reports'
+                : 'Combined summary',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+          ),
+          const SizedBox(height: 6),
+          body,
+        ],
+      ),
+    );
+  }
+
+  /// Shared renderer for a ReportAiSummary (combined or per-report).
+  Widget _summaryBody(ReportAiSummary summary) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (summary.reportType.isNotEmpty)
+          Text(summary.reportType,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+        Text(summary.summary, style: const TextStyle(fontSize: 13)),
+        if (summary.abnormalValues.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: summary.abnormalValues
+                .map((v) => Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: v.direction == 'high'
+                            ? AppColors.errorTint
+                            : AppColors.onHoldTint,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text('${v.label}: ${v.value}',
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: v.direction == 'high'
+                                  ? AppColors.error
+                                  : AppColors.onHold)),
+                    ))
+                .toList(),
+          ),
+        ],
+        if (summary.keyFindings.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          ...summary.keyFindings.map((f) =>
+              Text('• $f', style: const TextStyle(fontSize: 12.5))),
+        ],
+        const SizedBox(height: 6),
+        const Text('AI-generated — check the reports themselves before acting.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+      ],
     );
   }
 

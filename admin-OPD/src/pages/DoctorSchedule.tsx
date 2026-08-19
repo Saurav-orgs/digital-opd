@@ -1,27 +1,34 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { doctorsApi, schedulesApi } from '../api/endpoints';
+import { schedulesApi } from '../api/endpoints';
 import type { ScheduleEntry } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { Field, Loading } from '../components/ui';
+import { Empty, Field, Loading } from '../components/ui';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const hhmm = (t: string) => t.slice(0, 5);
 
 interface Session { start_time: string; end_time: string; slot_duration_min: number }
 
+/**
+ * The doctor's own OPD schedule, reached from My Profile. Self-scoped to the
+ * logged-in doctor's linked profile — the clinic has a single doctor.
+ */
 export default function DoctorSchedule() {
-  const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, user, isDoctor } = useAuth();
   const toast = useToast();
   const canEdit = can('opd_schedules', 'update');
+  const id = user?.doctorId ?? '';
 
-  const doctorQ = useQuery({ queryKey: ['doctor', id], queryFn: () => doctorsApi.get(id) });
-  const schedQ = useQuery({ queryKey: ['schedules', id], queryFn: () => schedulesApi.list(id) });
+  const schedQ = useQuery({
+    queryKey: ['schedules', id],
+    queryFn: () => schedulesApi.list(id),
+    enabled: !!id,
+  });
 
   // Local editable model: sessions grouped by weekday.
   const [byDay, setByDay] = useState<Record<number, Session[]>>({});
@@ -53,7 +60,8 @@ export default function DoctorSchedule() {
     onError: (e) => toast.error(e),
   });
 
-  if (doctorQ.isLoading || schedQ.isLoading) return <Loading />;
+  if (!isDoctor || !id) return <Empty>This page is for the doctor’s account.</Empty>;
+  if (schedQ.isLoading) return <Loading />;
 
   const addSession = (day: number) =>
     setByDay((prev) => ({
@@ -74,13 +82,13 @@ export default function DoctorSchedule() {
     <>
       <div className="page-head">
         <div>
-          <h1>{doctorQ.data?.name} · schedule</h1>
+          <h1>My schedule</h1>
           <span className="muted">
             Add multiple sessions to one day for split OPD (e.g. morning &amp; evening).
           </span>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => navigate('/doctors')}>Back</button>
+          <button className="btn" onClick={() => navigate('/profile')}>Back</button>
           {canEdit && (
             <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save schedule'}

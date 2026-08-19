@@ -7,7 +7,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/slot_selector.dart';
 
-/// Doctor books an in-clinic walk-in (cod, no payment screenshot).
+/// Doctor books an in-clinic walk-in. Payment is collected in person.
 /// Returns `true` on success so the caller can refresh.
 class WalkInFormScreen extends StatefulWidget {
   const WalkInFormScreen({super.key});
@@ -216,7 +216,7 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Center(
-                        child: Text('Walk-ins are cash (COD) — no payment needed.',
+                        child: Text('Payment is collected in person at the clinic.',
                             style: TextStyle(
                                 color: AppColors.textSecondary, fontSize: 12)),
                       ),

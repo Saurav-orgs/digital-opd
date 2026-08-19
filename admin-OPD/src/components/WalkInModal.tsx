@@ -7,8 +7,9 @@ import { Field, Modal } from './ui';
 import { InlineSlotPicker } from './InlineSlotPicker';
 
 /**
- * Doctor-created, in-clinic booking (cod, no screenshot) — the web equivalent
- * of the Flutter app's `WalkInFormScreen`.
+ * Doctor-created, in-clinic booking — the web equivalent of the Flutter app's
+ * `WalkInFormScreen`. Payment is handled in person, so there's nothing to
+ * collect here beyond patient details and a slot.
  */
 export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: () => void }) {
   const qc = useQueryClient();

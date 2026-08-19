@@ -132,6 +132,8 @@ class ApiClient {
         return DaySlots.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
+  /// Book an appointment. Payment is collected in person at the clinic, so this
+  /// is a plain JSON request with no screenshot.
   Future<BookingResult> book({
     required String doctorId,
     required String date,
@@ -142,33 +144,25 @@ class ApiClient {
     required int patientAge,
     String? patientAddress,
     String? description,
-    required File screenshot,
   }) =>
       _guard(() async {
-        final req = http.MultipartRequest(
-          'POST',
+        final res = await http.post(
           _uri('/public/appointments'),
+          headers: _authHeaders(),
+          body: jsonEncode({
+            'doctor_id': doctorId,
+            'appointment_date': date,
+            'start_time': startTime,
+            'patient_name': patientName,
+            'patient_mobile': patientMobile,
+            'patient_gender': patientGender,
+            'patient_age': patientAge,
+            if (patientAddress != null && patientAddress.isNotEmpty)
+              'patient_address': patientAddress,
+            if (description != null && description.isNotEmpty)
+              'description': description,
+          }),
         );
-        req.fields.addAll({
-          'doctor_id': doctorId,
-          'appointment_date': date,
-          'start_time': startTime,
-          'patient_name': patientName,
-          'patient_mobile': patientMobile,
-          'patient_gender': patientGender,
-          'patient_age': '$patientAge',
-          if (patientAddress != null && patientAddress.isNotEmpty)
-            'patient_address': patientAddress,
-          if (description != null && description.isNotEmpty)
-            'description': description,
-        });
-        req.files.add(await http.MultipartFile.fromPath(
-          'screenshot',
-          screenshot.path,
-          contentType: _imageMediaType(screenshot.path),
-        ));
-        final streamed = await req.send();
-        final res = await http.Response.fromStream(streamed);
         return BookingResult.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
@@ -207,9 +201,13 @@ class ApiClient {
             .toList();
       });
 
-  /// Patient self-upload — attaches to their most recently booked appointment.
-  Future<void> uploadMyReport(String title, File file) => _guard(() async {
-        final req = http.MultipartRequest('POST', _uri('/patient/reports'));
+  /// Patient uploads a report against a specific appointment. Allowed until the
+  /// doctor marks that visit done — the server enforces the cutoff.
+  Future<void> uploadVisitReport(
+          String appointmentId, String title, File file) =>
+      _guard(() async {
+        final req = http.MultipartRequest(
+            'POST', _uri('/patient/appointments/$appointmentId/reports'));
         if (tokens.token != null) {
           req.headers['Authorization'] = 'Bearer ${tokens.token}';
         }

@@ -171,7 +171,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
   /**
    * Ensures the clinic's single doctor profile exists. The SuperAdmin *is* the
    * doctor, so the profile is seeded here from `SUPERADMIN_NAME` and then
-   * edited in-app (photo, specialization, fee, payment QR…) — there is no
+   * edited in-app (photo, specialization, fee…) — there is no
    * "add doctor" flow anywhere in the admin surfaces.
    */
   private async ensureDoctorProfile(): Promise<Doctor> {

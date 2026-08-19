@@ -50,6 +50,10 @@ dependencies:
   shared_preferences: ^2.3.2
   # Opens report files (images/PDFs) in the device's viewer/browser
   url_launcher: ^6.3.1
+  # Microphone capture for voice prescriptions (consultation recording)
+  record: ^5.1.2
+  # Temp directory for the recording before it is uploaded and discarded
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

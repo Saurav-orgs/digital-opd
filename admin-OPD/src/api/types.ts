@@ -59,7 +59,6 @@ export interface Doctor {
   bio: string | null;
   consultation_fee: string | null;
   profile_photo_url: string | null;
-  payment_qr_url: string | null;
   public_slug: string;
   is_enabled: boolean;
 }
@@ -88,7 +87,6 @@ export interface DaySlots {
 
 export type AppointmentStatus = 'confirmed' | 'rejected';
 export type ConsultationStatus = 'pending' | 'done' | 'on_hold' | 'rejected';
-export type PaymentStatus = 'paid_unverified' | 'verified' | 'rejected';
 
 export interface PrescriptionImage {
   id: string;
@@ -110,18 +108,20 @@ export interface Appointment {
   doctor_notes: string | null;
   next_visit_note: string | null;
   next_visit_date: string | null;
-  payment_screenshot_url: string;
   status: AppointmentStatus;
   consultation_status: ConsultationStatus;
-  payment_status: PaymentStatus;
-  payment_method: 'online' | 'cod' | null;
   source: 'app' | 'web' | 'walk_in';
   on_leave: boolean;
   prescriptions: PrescriptionImage[];
   reports: PatientReport[];
+  // Combined AI summary across all of this visit's reports.
+  reports_summary?: ReportAiSummary | null;
+  reports_summary_status?: AiJobStatus | null;
+  reports_summary_error?: string | null;
+  reports_summary_count?: number;
+  e_prescription?: EPrescription | null;
   createdAt?: string;
   doctor?: Pick<Doctor, 'id' | 'name' | 'specialization' | 'consultation_fee'>;
-  screenshot_url?: string;
 }
 
 export interface DashboardSummary {
@@ -135,9 +135,76 @@ export interface DashboardSummary {
   appointments: Appointment[];
 }
 
+export type AiJobStatus = 'pending' | 'processing' | 'ready' | 'failed';
+
+export interface ReportAiSummary {
+  report_type: string;
+  summary: string;
+  key_findings: string[];
+  abnormal_values: {
+    label: string;
+    value: string;
+    reference?: string;
+    direction: 'high' | 'low' | 'abnormal';
+  }[];
+}
+
 export interface PatientReport {
   id: string;
   title: string;
   url: string;
   createdAt: string;
+  ai_summary?: ReportAiSummary | null;
+  ai_summary_status?: AiJobStatus;
+  ai_summary_error?: string | null;
+}
+
+export type ConsultationStatusAi =
+  | 'transcribing'
+  | 'drafting'
+  | 'draft_ready'
+  | 'failed';
+
+export interface ConsultationSession {
+  id: string;
+  appointment_id: string;
+  status: ConsultationStatusAi;
+  transcript: string | null;
+  language: string | null;
+  duration_seconds: number | null;
+  error: string | null;
+}
+
+export interface PrescriptionMedicine {
+  id?: string;
+  medicine_name: string;
+  strength?: string | null;
+  form?: string | null;
+  dosage?: string;
+  timing?: string | null;
+  duration_days?: number | null;
+  instructions?: string | null;
+  source?: 'ai' | 'doctor';
+  was_edited?: boolean;
+}
+
+export interface EPrescription {
+  id: string;
+  appointment_id: string;
+  consultation_session_id: string | null;
+  status: 'draft' | 'issued';
+  diagnosis: string | null;
+  advice: string | null;
+  follow_up_date: string | null;
+  issued_at: string | null;
+  pdf_url: string | null;
+  medicines: PrescriptionMedicine[];
+}
+
+export interface MedicineCatalogEntry {
+  id: string;
+  name: string;
+  strength: string | null;
+  form: string | null;
+  usage_count: number;
 }

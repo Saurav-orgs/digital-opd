@@ -10,6 +10,11 @@ import { AppointmentPrescription } from './prescription.model';
 import { Patient } from './patient.model';
 import { PatientReport } from './patient-report.model';
 import { Notification } from './notification.model';
+import { ConsultationSession } from './consultation-session.model';
+import { EPrescription } from './e-prescription.model';
+import { EPrescriptionMedicine } from './e-prescription-medicine.model';
+import { MedicineCatalog } from './medicine-catalog.model';
+import { AiTrainingSample } from './ai-training-sample.model';
 
 export const models = [
   Role,
@@ -24,6 +29,11 @@ export const models = [
   Patient,
   PatientReport,
   Notification,
+  ConsultationSession,
+  EPrescription,
+  EPrescriptionMedicine,
+  MedicineCatalog,
+  AiTrainingSample,
 ];
 
 export {
@@ -39,4 +49,9 @@ export {
   Patient,
   PatientReport,
   Notification,
+  ConsultationSession,
+  EPrescription,
+  EPrescriptionMedicine,
+  MedicineCatalog,
+  AiTrainingSample,
 };

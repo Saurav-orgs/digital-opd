@@ -1,6 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Sequelize } from 'sequelize-typescript';
 import { literal, Op, UniqueConstraintError } from 'sequelize';
 import { ConfigService } from '@nestjs/config';
 import { Appointment } from '../database/models/appointment.model';
@@ -10,6 +9,7 @@ import { Doctor } from '../database/models/doctor.model';
 import { SlotsService } from '../slots/slots.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { WalkInAppointmentDto } from './dto/walkin-appointment.dto';
 import { RescheduleDto } from './dto/reschedule.dto';
@@ -18,7 +18,6 @@ import {
   AppointmentNotesDto,
   ConsultationDto,
   ListAppointmentsQueryDto,
-  PaymentReviewDto,
 } from './dto/manage-appointment.dto';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -27,8 +26,6 @@ import {
   BookingSource,
   ConsultationStatus,
   NotificationType,
-  PaymentMethod,
-  PaymentStatus,
   UserType,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
@@ -36,8 +33,6 @@ import { nowInClinic } from '../common/utils/clinic-time';
 
 @Injectable()
 export class AppointmentsService {
-  private readonly logger = new Logger(AppointmentsService.name);
-
   constructor(
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
     @InjectModel(AppointmentPrescription)
@@ -47,14 +42,17 @@ export class AppointmentsService {
     private readonly slots: SlotsService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
-    private readonly sequelize: Sequelize,
+    private readonly prescriptions: PrescriptionsService,
     private readonly config: ConfigService,
   ) {}
 
-  /** Guest booking (plan §6). Concurrency-safe via partial unique index. */
+  /**
+   * Guest booking (plan §6). Concurrency-safe via partial unique index.
+   * Payment happens in person at the clinic, so booking carries no screenshot
+   * or payment state — a booked slot is simply `confirmed`.
+   */
   async book(
     dto: CreateAppointmentDto,
-    file: Express.Multer.File,
     source: BookingSource,
   ): Promise<Appointment> {
     const doctor = await this.doctorModel.findByPk(dto.doctor_id);
@@ -69,44 +67,27 @@ export class AppointmentsService {
       dto.start_time,
     );
 
-    // Fail fast on an obviously-taken slot before spending an S3 upload.
+    // Fail fast on an obviously-taken slot before attempting the insert.
     await this.assertSlotFree(dto.doctor_id, dto.appointment_date, dto.start_time);
 
-    // Validate + upload screenshot first; only persist the row on success.
-    this.storage.validateImage(file);
-    const { key } = await this.storage.uploadImage(
-      file,
-      `appointments/${dto.doctor_id}`,
-    );
-
     try {
-      const appointment = await this.sequelize.transaction(async (t) => {
-        return this.appointmentModel.create(
-          {
-            doctor_id: dto.doctor_id,
-            appointment_date: dto.appointment_date,
-            start_time: dto.start_time,
-            end_time: endTime,
-            patient_name: dto.patient_name,
-            patient_mobile: dto.patient_mobile,
-            patient_gender: dto.patient_gender,
-            patient_age: dto.patient_age,
-            patient_address: dto.patient_address ?? null,
-            description: dto.description ?? null,
-            payment_screenshot_url: key,
-            status: AppointmentStatus.CONFIRMED,
-            consultation_status: ConsultationStatus.PENDING,
-            payment_status: PaymentStatus.PAID_UNVERIFIED,
-            payment_method: PaymentMethod.ONLINE,
-            source,
-          } as any,
-          { transaction: t },
-        );
-      });
+      const appointment = await this.appointmentModel.create({
+        doctor_id: dto.doctor_id,
+        appointment_date: dto.appointment_date,
+        start_time: dto.start_time,
+        end_time: endTime,
+        patient_name: dto.patient_name,
+        patient_mobile: dto.patient_mobile,
+        patient_gender: dto.patient_gender,
+        patient_age: dto.patient_age,
+        patient_address: dto.patient_address ?? null,
+        description: dto.description ?? null,
+        status: AppointmentStatus.CONFIRMED,
+        consultation_status: ConsultationStatus.PENDING,
+        source,
+      } as any);
       return this.withDoctor(appointment.id);
     } catch (err) {
-      // Roll back the orphaned upload on any failure.
-      await this.storage.delete(key);
       if (err instanceof UniqueConstraintError) {
         throw new AppException(ErrorCode.SLOT_ALREADY_BOOKED);
       }
@@ -115,11 +96,11 @@ export class AppointmentsService {
   }
 
   /**
-   * In-clinic walk-in booking (cod, no screenshot). Every admin account — the
-   * doctor and the staff they add — is linked to the clinic's doctor profile,
-   * so the booking is forced to that doctor and `dto.doctor_id` is only a
-   * fallback for an unlinked account. Concurrency is enforced by the same
-   * partial unique index as guest bookings.
+   * In-clinic walk-in booking. Every admin account — the doctor and the staff
+   * they add — is linked to the clinic's doctor profile, so the booking is
+   * forced to that doctor and `dto.doctor_id` is only a fallback for an
+   * unlinked account. Concurrency is enforced by the same partial unique index
+   * as guest bookings.
    */
   async bookWalkIn(
     dto: WalkInAppointmentDto,
@@ -159,12 +140,8 @@ export class AppointmentsService {
           patient_age: dto.patient_age,
           patient_address: dto.patient_address ?? null,
           description: dto.description ?? null,
-          payment_screenshot_url: null,
           status: AppointmentStatus.CONFIRMED,
           consultation_status: ConsultationStatus.PENDING,
-          // cod is settled in person — no payment review needed.
-          payment_status: PaymentStatus.VERIFIED,
-          payment_method: PaymentMethod.COD,
           source: BookingSource.WALK_IN,
         } as any,
       );
@@ -251,16 +228,16 @@ export class AppointmentsService {
   async findOne(id: string, user: AuthUser) {
     const appointment = await this.withDoctor(id, true);
     this.assertOwnership(appointment, user);
-    const screenshotUrl = await this.storage.presignedGetUrl(
-      appointment.payment_screenshot_url,
-    );
     const prescriptions = await this.presignPrescriptions(appointment);
     const reports = await this.reportsForAppointment(id);
     return {
       ...appointment.toJSON(),
-      screenshot_url: screenshotUrl,
       prescriptions,
       reports,
+      // Combined AI summary across all of this visit's reports (fields already
+      // on the appointment row via toJSON: reports_summary / _status / _error /
+      // _count).
+      e_prescription: await this.prescriptions.findIssuedForAppointment(id),
     };
   }
 
@@ -372,7 +349,21 @@ export class AppointmentsService {
   async history(mobile: string, user: AuthUser, excludeId?: string) {
     const doctorId = user.type === UserType.DOCTOR ? user.doctorId : undefined;
     if (user.type === UserType.DOCTOR && !doctorId) return [];
-    return this.visitsForMobile(mobile, { doctorId: doctorId ?? undefined, excludeId });
+
+    // "Previous visits" means earlier than the visit being viewed — not merely
+    // "every other visit". Anchor on the reference appointment's date/time so a
+    // newer appointment never shows up under an older one's history.
+    let before: { date: string; startTime: string } | undefined;
+    if (excludeId) {
+      const ref = await this.appointmentModel.findByPk(excludeId);
+      if (ref) {
+        before = { date: ref.appointment_date, startTime: ref.start_time };
+      }
+    }
+    return this.visitsForMobile(mobile, {
+      doctorId: doctorId ?? undefined,
+      before,
+    });
   }
 
   /** All visits for a patient's mobile, unscoped — used by the patient portal. */
@@ -382,11 +373,25 @@ export class AppointmentsService {
 
   private async visitsForMobile(
     mobile: string,
-    opts: { doctorId?: string; excludeId?: string } = {},
+    opts: {
+      doctorId?: string;
+      before?: { date: string; startTime: string };
+    } = {},
   ) {
     const where: any = { patient_mobile: mobile };
     if (opts.doctorId) where.doctor_id = opts.doctorId;
-    if (opts.excludeId) where.id = { [Op.ne]: opts.excludeId };
+    // Strictly earlier than the reference visit: an earlier date, or the same
+    // date at an earlier start time. This also excludes the reference visit
+    // itself (same date + same time is not "before").
+    if (opts.before) {
+      where[Op.or] = [
+        { appointment_date: { [Op.lt]: opts.before.date } },
+        {
+          appointment_date: opts.before.date,
+          start_time: { [Op.lt]: opts.before.startTime },
+        },
+      ];
+    }
 
     const rows = await this.appointmentModel.findAll({
       where,
@@ -403,9 +408,24 @@ export class AppointmentsService {
     return Promise.all(
       rows.map(async (a) => ({
         ...a.toJSON(),
+        accepts_reports: AppointmentsService.acceptsReports(a),
         prescriptions: await this.presignPrescriptions(a),
         reports: await this.reportsForAppointment(a.id),
+        // Null until the doctor issues it — a draft is never patient-visible.
+        e_prescription: await this.prescriptions.findIssuedForAppointment(a.id),
       })),
+    );
+  }
+
+  /**
+   * Whether a patient may still upload reports to this visit. Allowed until the
+   * doctor closes it out — i.e. while pending or on_hold, but not once the OPD
+   * is marked done (or the booking was rejected).
+   */
+  static acceptsReports(appointment: Appointment): boolean {
+    return (
+      appointment.consultation_status === ConsultationStatus.PENDING ||
+      appointment.consultation_status === ConsultationStatus.ON_HOLD
     );
   }
 
@@ -417,28 +437,6 @@ export class AppointmentsService {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
     await appointment.update({ consultation_status: dto.status } as any);
-    return this.withDoctor(id);
-  }
-
-  /** Payment review (#2). Rejecting frees a future slot via the partial index. */
-  async setPayment(
-    id: string,
-    dto: PaymentReviewDto,
-    user: AuthUser,
-  ): Promise<Appointment> {
-    const appointment = await this.findRaw(id);
-    this.assertOwnership(appointment, user);
-
-    if (dto.status === PaymentStatus.VERIFIED) {
-      await appointment.update({ payment_status: PaymentStatus.VERIFIED } as any);
-    } else {
-      // Rejected screenshot → drop the booking; the slot returns to available
-      // if still in the future (partial unique index no longer covers it).
-      await appointment.update({
-        payment_status: PaymentStatus.REJECTED,
-        status: AppointmentStatus.REJECTED,
-      } as any);
-    }
     return this.withDoctor(id);
   }
 
@@ -516,6 +514,11 @@ export class AppointmentsService {
         title: r.title,
         url: await this.storage.presignedGetUrl(r.file_key),
         createdAt: r.get('createdAt'),
+        // AI summary rides along so the doctor can read the gist without
+        // opening each file; status lets the UI show progress or a failure.
+        ai_summary: r.ai_summary,
+        ai_summary_status: r.ai_summary_status,
+        ai_summary_error: r.ai_summary_error,
       })),
     );
   }

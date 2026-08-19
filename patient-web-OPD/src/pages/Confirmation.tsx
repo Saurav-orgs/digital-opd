@@ -91,7 +91,7 @@ export const Confirmation: React.FC = () => {
 
         <div className="icon-center-row" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '28px' }}>
           <ShieldCheck size={16} color="#10B981" />
-          <span>Payment screenshot uploaded. Clinic staff will verify upon arrival.</span>
+          <span>Your appointment is confirmed. Please pay at the clinic reception on your visit.</span>
         </div>
 
         <button className="btn-primary" onClick={() => navigate('/', { replace: true })}>

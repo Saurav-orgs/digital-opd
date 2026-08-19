@@ -6,7 +6,6 @@ class Doctor {
   final String? bio;
   final String? consultationFee;
   final String? profilePhotoUrl;
-  final String? paymentQrUrl;
   final String publicSlug;
 
   Doctor({
@@ -17,7 +16,6 @@ class Doctor {
     this.bio,
     this.consultationFee,
     this.profilePhotoUrl,
-    this.paymentQrUrl,
     required this.publicSlug,
   });
 
@@ -29,7 +27,6 @@ class Doctor {
         bio: j['bio'] as String?,
         consultationFee: j['consultation_fee']?.toString(),
         profilePhotoUrl: j['profile_photo_url'] as String?,
-        paymentQrUrl: j['payment_qr_url'] as String?,
         publicSlug: j['public_slug'] as String? ?? '',
       );
 
@@ -123,6 +120,80 @@ class RxImage {
       RxImage(id: j['id'] as String, url: j['url'] as String?);
 }
 
+class IssuedMedicine {
+  final String id;
+  final String medicineName;
+  final String? strength;
+  final String? form;
+  final String dosage;
+  final String? timing;
+  final int? durationDays;
+  final String? instructions;
+
+  IssuedMedicine({
+    required this.id,
+    required this.medicineName,
+    this.strength,
+    this.form,
+    required this.dosage,
+    this.timing,
+    this.durationDays,
+    this.instructions,
+  });
+
+  factory IssuedMedicine.fromJson(Map<String, dynamic> j) => IssuedMedicine(
+        id: j['id'] as String,
+        medicineName: j['medicine_name'] as String? ?? '',
+        strength: j['strength'] as String?,
+        form: j['form'] as String?,
+        dosage: j['dosage'] as String? ?? '',
+        timing: j['timing'] as String?,
+        durationDays: (j['duration_days'] as num?)?.toInt(),
+        instructions: j['instructions'] as String?,
+      );
+
+  /// "1-0-1 · after food · 5 days" — the line a patient actually reads.
+  String get scheduleLabel => [
+        dosage,
+        if (timing != null && timing!.isNotEmpty) timing,
+        if (durationDays != null) '$durationDays days',
+      ].where((p) => p != null && p.isNotEmpty).join(' · ');
+}
+
+/// Only present once the doctor issues it — drafts never reach the patient.
+class IssuedPrescription {
+  final String id;
+  final String? diagnosis;
+  final String? advice;
+  final String? followUpDate;
+  final String? issuedAt;
+  final String? pdfUrl;
+  final List<IssuedMedicine> medicines;
+
+  IssuedPrescription({
+    required this.id,
+    this.diagnosis,
+    this.advice,
+    this.followUpDate,
+    this.issuedAt,
+    this.pdfUrl,
+    this.medicines = const [],
+  });
+
+  factory IssuedPrescription.fromJson(Map<String, dynamic> j) =>
+      IssuedPrescription(
+        id: j['id'] as String,
+        diagnosis: j['diagnosis'] as String?,
+        advice: j['advice'] as String?,
+        followUpDate: j['follow_up_date'] as String?,
+        issuedAt: j['issued_at'] as String?,
+        pdfUrl: j['pdf_url'] as String?,
+        medicines: ((j['medicines'] as List?) ?? [])
+            .map((m) => IssuedMedicine.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 /// One consultation visit — the patient's booking history.
 class PatientVisit {
   final String id;
@@ -130,6 +201,7 @@ class PatientVisit {
   final String startTime;
   final String status;
   final String consultationStatus;
+  final bool acceptsReports;
   final String? description;
   final String? doctorNotes;
   final String? nextVisitNote;
@@ -138,6 +210,7 @@ class PatientVisit {
   final String? doctorSpecialization;
   final List<RxImage> prescriptions;
   final List<PatientReport> reports;
+  final IssuedPrescription? ePrescription;
 
   PatientVisit({
     required this.id,
@@ -145,6 +218,7 @@ class PatientVisit {
     required this.startTime,
     required this.status,
     required this.consultationStatus,
+    this.acceptsReports = false,
     this.description,
     this.doctorNotes,
     this.nextVisitNote,
@@ -153,6 +227,7 @@ class PatientVisit {
     this.doctorSpecialization,
     required this.prescriptions,
     this.reports = const [],
+    this.ePrescription,
   });
 
   factory PatientVisit.fromJson(Map<String, dynamic> j) {
@@ -163,6 +238,7 @@ class PatientVisit {
       startTime: (j['start_time'] as String).substring(0, 5),
       status: j['status'] as String,
       consultationStatus: j['consultation_status'] as String,
+      acceptsReports: j['accepts_reports'] as bool? ?? false,
       description: j['description'] as String?,
       doctorNotes: j['doctor_notes'] as String?,
       nextVisitNote: j['next_visit_note'] as String?,
@@ -175,6 +251,10 @@ class PatientVisit {
       reports: ((j['reports'] as List?) ?? [])
           .map((r) => PatientReport.fromJson(r as Map<String, dynamic>))
           .toList(),
+      ePrescription: j['e_prescription'] == null
+          ? null
+          : IssuedPrescription.fromJson(
+              j['e_prescription'] as Map<String, dynamic>),
     );
   }
 }

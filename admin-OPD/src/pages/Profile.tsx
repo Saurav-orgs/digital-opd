@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
 
-/** Doctor self-service — edits are permission-gated server-side (doctors:update). */
+/**
+ * The doctor's own home in the admin — profile details, photo and a link to
+ * their OPD schedule. The SuperAdmin is the clinic's single doctor, so there is
+ * no separate "Doctor Profile" page; everything lives here.
+ */
 export default function Profile() {
   const { isDoctor, can } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const qc = useQueryClient();
-  const qrRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const canEdit = can('doctors', 'update');
+  const canSchedule = can('opd_schedules', 'read');
 
   const meQ = useQuery({
     queryKey: ['doctor-me'],
@@ -49,12 +55,6 @@ export default function Profile() {
     onError: (e) => toast.error(e),
   });
 
-  const uploadQr = useMutation({
-    mutationFn: (file: File) => doctorsApi.uploadMyQr(file),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Payment QR updated'); },
-    onError: (e) => toast.error(e),
-  });
-
   const uploadPhoto = useMutation({
     mutationFn: (file: File) => doctorsApi.uploadMyPhoto(file),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Profile photo updated'); },
@@ -72,11 +72,18 @@ export default function Profile() {
           <h1>My profile</h1>
           {!canEdit && <span className="muted">Read-only — your role doesn’t grant profile editing.</span>}
         </div>
-        {canEdit && (
-          <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim()}>
-            {save.isPending ? 'Saving…' : 'Save'}
-          </button>
-        )}
+        <div className="row">
+          {canSchedule && (
+            <button className="btn" onClick={() => navigate('/profile/schedule')}>
+              Schedule
+            </button>
+          )}
+          {canEdit && (
+            <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim()}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid cols-2-1">
@@ -125,25 +132,6 @@ export default function Profile() {
             )}
           </div>
 
-          <div className="card">
-            <div className="card-title">Payment QR</div>
-            {meQ.data?.payment_qr_url ? (
-              <img src={meQ.data.payment_qr_url} alt="QR" style={{ width: '100%', borderRadius: 8, border: 'var(--hairline)', marginBottom: 12 }} />
-            ) : (
-              <p className="muted">No QR uploaded yet.</p>
-            )}
-            {canEdit && (
-              <>
-                <input
-                  ref={qrRef} type="file" accept="image/png,image/jpeg,image/webp" hidden
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadQr.mutate(f); }}
-                />
-                <button className="btn btn-sm" onClick={() => qrRef.current?.click()} disabled={uploadQr.isPending}>
-                  {uploadQr.isPending ? 'Uploading…' : 'Upload new QR'}
-                </button>
-              </>
-            )}
-          </div>
         </div>
       </div>
     </>

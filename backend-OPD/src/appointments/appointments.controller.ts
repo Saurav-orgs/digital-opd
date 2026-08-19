@@ -25,7 +25,6 @@ import {
   AppointmentNotesDto,
   ConsultationDto,
   ListAppointmentsQueryDto,
-  PaymentReviewDto,
 } from './dto/manage-appointment.dto';
 import { WalkInAppointmentDto } from './dto/walkin-appointment.dto';
 import { RescheduleDto } from './dto/reschedule.dto';
@@ -69,7 +68,7 @@ export class AppointmentsController {
   }
 
   @Post('walk-in')
-  @ApiOperation({ summary: 'Doctor books an in-clinic walk-in (cod, no screenshot)' })
+  @ApiOperation({ summary: 'Doctor books an in-clinic walk-in' })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.CREATE })
   bookWalkIn(
     @Body() dto: WalkInAppointmentDto,
@@ -96,17 +95,6 @@ export class AppointmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.setConsultation(id, dto, user);
-  }
-
-  @Patch(':id/payment')
-  @ApiOperation({ summary: 'Verify / reject payment (reject frees a future slot)' })
-  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
-  setPayment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: PaymentReviewDto,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.setPayment(id, dto, user);
   }
 
   @Patch(':id/reschedule')

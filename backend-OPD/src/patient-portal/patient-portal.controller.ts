@@ -56,10 +56,10 @@ export class PatientPortalController {
     return this.reports.listForMobile(patient.mobile);
   }
 
-  @Post('reports')
+  @Post('appointments/:id/reports')
   @ApiOperation({
     summary:
-      "Patient uploads their own report — attaches to their most recently booked appointment",
+      'Patient uploads a report against one of their appointments (allowed until the visit is marked done)',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -79,11 +79,12 @@ export class PatientPortalController {
     }),
   )
   uploadOwnReport(
+    @Param('id', ParseUUIDPipe) appointmentId: string,
     @Body() dto: CreateOwnReportDto,
     @UploadedFile() file: Express.Multer.File,
     @CurrentPatient() patient: AuthPatient,
   ) {
-    return this.reports.createByPatient(patient, dto.title, file);
+    return this.reports.createByPatient(patient, appointmentId, dto.title, file);
   }
 
   @Get('notifications')

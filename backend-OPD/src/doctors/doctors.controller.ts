@@ -59,19 +59,6 @@ export class DoctorsController {
     return this.doctorsService.update(this.selfId(user), dto);
   }
 
-  @Post('me/qr')
-  @ApiOperation({ summary: 'Doctor uploads own payment QR' })
-  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody(fileBody)
-  @UseInterceptors(FileInterceptor('file', imageUpload))
-  uploadOwnQr(
-    @CurrentUser() user: AuthUser,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    return this.doctorsService.uploadQr(this.selfId(user), file);
-  }
-
   @Post('me/photo')
   @ApiOperation({ summary: 'Doctor uploads own profile photo' })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
@@ -117,18 +104,6 @@ export class DoctorsController {
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
   disable(@Param('id', ParseUUIDPipe) id: string) {
     return this.doctorsService.setEnabled(id, false);
-  }
-
-  @Post(':id/qr')
-  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody(fileBody)
-  @UseInterceptors(FileInterceptor('file', imageUpload))
-  uploadQr(
-    @Param('id', ParseUUIDPipe) id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    return this.doctorsService.uploadQr(id, file);
   }
 
   @Post(':id/photo')

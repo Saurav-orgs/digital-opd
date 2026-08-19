@@ -7,14 +7,10 @@ import {
   Phone,
   MapPin,
   FileText,
-  Upload,
-  Image as ImageIcon,
-  ShieldCheck,
-  QrCode,
+  Info,
   CheckCircle2,
 } from 'lucide-react';
 import { api } from '../api';
-import { AppConfig } from '../config';
 import type { Doctor, Slot } from '../types';
 import { ApiException } from '../types';
 import { NetworkAvatar } from '../components/NetworkAvatar';
@@ -43,16 +39,12 @@ export const BookingForm: React.FC = () => {
   const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
 
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [mobileError, setMobileError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [genderError, setGenderError] = useState<string | null>(null);
   const [ageError, setAgeError] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
 
   if (!doctor || !date || !slot) {
     return (
@@ -70,23 +62,6 @@ export const BookingForm: React.FC = () => {
       </div>
     );
   }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const sizeMb = file.size / (1024 * 1024);
-    if (sizeMb > AppConfig.maxUploadMb) {
-      setScreenshot(null);
-      setPreviewUrl(null);
-      setFileError('Image is too large. Choose a screenshot up to ' + AppConfig.maxUploadMb + ' MB.');
-      return;
-    }
-
-    setScreenshot(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setFileError(null);
-  };
 
   const validate = () => {
     let valid = true;
@@ -125,13 +100,6 @@ export const BookingForm: React.FC = () => {
       setAgeError(null);
     }
 
-    if (!screenshot) {
-      setFileError('Please upload your payment screenshot to confirm.');
-      valid = false;
-    } else {
-      setFileError(null);
-    }
-
     return valid;
   };
 
@@ -153,7 +121,6 @@ export const BookingForm: React.FC = () => {
         patientAge: Number(age),
         patientAddress: address.trim(),
         description: description.trim(),
-        screenshot: screenshot!,
       });
 
       navigate('/confirmation', {
@@ -334,64 +301,18 @@ export const BookingForm: React.FC = () => {
               </div>
             </div>
 
-            {doctor.paymentQrUrl && (
-              <div className="section-card" style={{ textAlign: 'center' }}>
-                <div className="qr-header-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '15px' }}>
-                    <QrCode size={18} color="var(--primary)" />
-                    <span>Scan & Pay via UPI</span>
-                  </div>
-                  {doctor.consultationFee && (
-                    <span className="fee-badge">₹{doctor.consultationFee} Fee</span>
-                  )}
-                </div>
-
-                <div className="qr-img-box">
-                  <img
-                    src={doctor.paymentQrUrl}
-                    alt="UPI Payment QR Code"
-                    style={{ maxHeight: '200px', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px' }}
-                  />
-                </div>
-
-                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '10px', margin: '10px 0 0 0' }}>
-                  Scan using Google Pay, PhonePe, Paytm, or BHIM UPI app.
-                </p>
-              </div>
-            )}
-
             <div className="section-card">
-              <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Upload size={18} color="var(--primary)" />
-                <span>Upload Payment Screenshot *</span>
+              <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Info size={18} color="var(--primary)" />
+                <span>Payment</span>
+                {doctor.consultationFee && (
+                  <span className="fee-badge" style={{ marginLeft: 'auto' }}>₹{doctor.consultationFee} Fee</span>
+                )}
               </div>
-
-              {previewUrl && (
-                <div style={{ marginBottom: '14px', borderRadius: 'var(--radius-control)', overflow: 'hidden', border: '1px solid var(--border)' }}>
-                  <img
-                    src={previewUrl}
-                    alt="Payment screenshot preview"
-                    style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
-                  />
-                </div>
-              )}
-
-              <label className="btn-outlined" style={{ width: '100%', justifyContent: 'center', cursor: 'pointer' }}>
-                {previewUrl ? <ImageIcon size={18} /> : <Upload size={18} />}
-                <span>{previewUrl ? 'Change Screenshot File' : 'Browse & Upload Screenshot'}</span>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  style={{ display: 'none' }}
-                  onChange={handleFileChange}
-                />
-              </label>
-
-              {fileError && <div className="error-text" style={{ marginTop: '8px' }}>{fileError}</div>}
-
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
-                Supported: JPG, PNG, WebP · Max size {AppConfig.maxUploadMb} MB.
-              </div>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
+                Payment is collected in person at the clinic — nothing to pay now.
+                Just confirm your appointment below.
+              </p>
             </div>
 
             {formError && (
@@ -413,8 +334,8 @@ export const BookingForm: React.FC = () => {
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '12px' }}>
-                <ShieldCheck size={15} color="#10B981" />
-                <span>Your booking will be verified by clinic staff immediately.</span>
+                <Info size={15} color="var(--primary)" />
+                <span>Please pay at the clinic reception on the day of your visit.</span>
               </div>
             </div>
           </div>

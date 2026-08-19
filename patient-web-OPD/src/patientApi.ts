@@ -74,12 +74,14 @@ export const patientApi = {
 
   myVisits: () => unwrap<PatientVisit[]>(client.get('/patient/appointments')),
   myReports: () => unwrap<PatientReport[]>(client.get('/patient/reports')),
-  uploadMyReport: (title: string, file: File) => {
+  // Upload a report against a specific appointment (allowed until the doctor
+  // marks that visit done — the server enforces the cutoff).
+  uploadVisitReport: (appointmentId: string, title: string, file: File) => {
     const fd = new FormData();
     fd.append('title', title);
     fd.append('file', file);
     return unwrap<PatientReport>(
-      client.post('/patient/reports', fd, {
+      client.post(`/patient/appointments/${appointmentId}/reports`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       }),
     );

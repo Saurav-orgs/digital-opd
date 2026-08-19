@@ -1,15 +1,13 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/patient_scope.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// Lab reports from the clinic, plus anything the patient uploads themself —
-/// self-uploads attach to their most recently booked appointment.
+/// Lab reports from the clinic, plus anything the patient uploads against a
+/// visit. Uploads happen per-visit under My Visits (allowed until the doctor
+/// marks that visit done), so this screen only lists reports.
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
@@ -19,7 +17,6 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   Future<List<PatientReport>>? _future;
-  bool _uploading = false;
 
   @override
   void didChangeDependencies() {
@@ -30,30 +27,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<void> _refresh() async {
     setState(() => _future = PatientAuthScope.of(context).api.myReports());
     await _future;
-  }
-
-  Future<void> _uploadReport() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (picked == null || !mounted) return;
-
-    final title = await showDialog<String>(
-      context: context,
-      builder: (c) => _TitleDialog(),
-    );
-    if (title == null || title.trim().isEmpty || !mounted) return;
-
-    setState(() => _uploading = true);
-    try {
-      await PatientAuthScope.of(context).api.uploadMyReport(title.trim(), File(picked.path));
-      if (mounted) {
-        showSuccessSnack(context, 'Report uploaded');
-        _refresh();
-      }
-    } on ApiException catch (e) {
-      if (mounted) showErrorSnack(context, e.message);
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
   }
 
   @override
@@ -68,16 +41,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             onPressed: () => confirmSignOut(context, () => PatientAuthScope.of(context).logout()),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _uploading ? null : _uploadReport,
-        icon: _uploading
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
-            : const Icon(Icons.add),
-        label: Text(_uploading ? 'Uploading…' : 'Upload report'),
       ),
       body: FutureBuilder<List<PatientReport>>(
         future: _future,
@@ -94,14 +57,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
               onRefresh: _refresh,
               child: ListView(children: const [
                 SizedBox(height: 140),
-                StateView(empty: 'No reports available yet.'),
+                StateView(
+                    empty:
+                        'No reports yet. Upload one from a visit under My Visits.'),
               ]),
             );
           }
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               itemCount: reports.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
@@ -136,40 +101,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
           );
         },
       ),
-    );
-  }
-}
-
-class _TitleDialog extends StatefulWidget {
-  @override
-  State<_TitleDialog> createState() => _TitleDialogState();
-}
-
-class _TitleDialogState extends State<_TitleDialog> {
-  final _title = TextEditingController();
-
-  @override
-  void dispose() {
-    _title.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Report title'),
-      content: TextField(
-        controller: _title,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'e.g. Blood Test — CBC'),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _title.text),
-          child: const Text('Upload'),
-        ),
-      ],
     );
   }
 }

@@ -6,9 +6,13 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from './Toast';
 import { Badge, Loading, Modal } from './ui';
 import { InlineSlotPicker } from './InlineSlotPicker';
+import { ConsultationRecorder } from './ConsultationRecorder';
+import { PrescriptionEditor } from './PrescriptionEditor';
+import { reportsApi } from '../api/endpoints';
+import type { PatientReport } from '../api/types';
 
 /**
- * Full appointment detail — notes, payment/consultation review, reschedule,
+ * Full appointment detail — notes, consultation outcome, reschedule,
  * prescriptions and prior-visit history. The web equivalent of the Flutter
  * app's `AppointmentDetailScreen`, shared by the Dashboard's three tabs.
  */
@@ -44,11 +48,6 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
   const consult = useMutation({
     mutationFn: (status: string) => appointmentsApi.setConsultation(id, status),
     onSuccess: () => { invalidate(); toast.success('Consultation updated'); },
-    onError: (e) => toast.error(e),
-  });
-  const payment = useMutation({
-    mutationFn: (status: string) => appointmentsApi.setPayment(id, status),
-    onSuccess: () => { invalidate(); toast.success('Payment updated'); },
     onError: (e) => toast.error(e),
   });
 
@@ -119,46 +118,26 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
       {isLoading || !a ? (
         <Loading />
       ) : (
-        <div className="grid cols-1-1-2">
-          <div className="stack">
-            <Detail label="Patient" value={a.patient_name} />
-            <Detail label="Mobile" value={a.patient_mobile} />
-            {(a.patient_gender || a.patient_age != null) && (
-              <Detail label="Gender & age" value={genderAge()} />
-            )}
-            <Detail label="Date & time" value={`${a.appointment_date} · ${a.start_time?.slice(0, 5)}–${a.end_time?.slice(0, 5)}`} />
-            <Detail label="Doctor" value={a.doctor?.name ?? '—'} />
-            {a.patient_address && <Detail label="Address" value={a.patient_address} />}
-            {a.description && <Detail label="Reason" value={a.description} />}
-            {a.source && (
-              <Detail
-                label="Booking source"
-                value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web'}
-              />
-            )}
-            <div className="row">
-              {a.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
-              <Badge value={a.status} />
-              <Badge value={a.payment_status} />
-              <Badge value={a.consultation_status} />
-            </div>
-          </div>
-
-          <div className="stack">
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Payment screenshot</div>
-              {a.screenshot_url ? (
-                <a href={a.screenshot_url} target="_blank" rel="noreferrer">
-                  <img
-                    src={a.screenshot_url}
-                    alt="Payment screenshot"
-                    style={{ width: '100%', borderRadius: 8, border: 'var(--hairline)' }}
-                  />
-                </a>
-              ) : (
-                <span className="muted">No screenshot.</span>
-              )}
-            </div>
+        <div className="stack">
+          <Detail label="Patient" value={a.patient_name} />
+          <Detail label="Mobile" value={a.patient_mobile} />
+          {(a.patient_gender || a.patient_age != null) && (
+            <Detail label="Gender & age" value={genderAge()} />
+          )}
+          <Detail label="Date & time" value={`${a.appointment_date} · ${a.start_time?.slice(0, 5)}–${a.end_time?.slice(0, 5)}`} />
+          <Detail label="Doctor" value={a.doctor?.name ?? '—'} />
+          {a.patient_address && <Detail label="Address" value={a.patient_address} />}
+          {a.description && <Detail label="Reason" value={a.description} />}
+          {a.source && (
+            <Detail
+              label="Booking source"
+              value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web'}
+            />
+          )}
+          <div className="row">
+            {a.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
+            <Badge value={a.status} />
+            <Badge value={a.consultation_status} />
           </div>
         </div>
       )}
@@ -399,37 +378,59 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
           {a.reports.length === 0 ? (
             <span className="muted">No reports uploaded for this appointment.</span>
           ) : (
-            <div className="stack" style={{ gap: 6 }}>
-              {a.reports.map((r) => (
-                <a key={r.id} href={r.url} target="_blank" rel="noreferrer">📄 {r.title}</a>
-              ))}
+            <div className="stack" style={{ gap: 12 }}>
+              <VisitReportSummary
+                appointmentId={id}
+                summary={a.reports_summary}
+                status={a.reports_summary_status}
+                error={a.reports_summary_error}
+                count={a.reports_summary_count}
+                reportCount={a.reports.length}
+                onRetried={invalidate}
+              />
+              <details>
+                <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
+                  Individual reports ({a.reports.length})
+                </summary>
+                <div className="stack" style={{ gap: 12, marginTop: 10 }}>
+                  {a.reports.map((r) => (
+                    <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
+                  ))}
+                </div>
+              </details>
             </div>
           )}
         </div>
       )}
 
+      {a && (
+        <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>
+            Voice prescription
+          </div>
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 10 }}>
+            Record the consultation and the system will draft a prescription. Nothing
+            is sent to the patient until you issue it.
+          </p>
+          {canUpdate && (
+            <ConsultationRecorder
+              appointmentId={id}
+              disabled={a.status === 'rejected'}
+            />
+          )}
+          <div style={{ marginTop: 16 }}>
+            <PrescriptionEditor appointmentId={id} canEdit={canUpdate} />
+          </div>
+        </div>
+      )}
+
       {a && canUpdate && (
         <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
-          <div className="grid cols-2" style={{ gap: 20 }}>
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Payment review</div>
-              <div className="row">
-                <button className="btn btn-sm" disabled={payment.isPending} onClick={() => payment.mutate('verified')}>
-                  Verify
-                </button>
-                <button className="btn btn-sm btn-danger" disabled={payment.isPending} onClick={() => payment.mutate('rejected')}>
-                  Reject (frees slot)
-                </button>
-              </div>
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Consultation outcome</div>
-              <div className="row">
-                <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>Done</button>
-                <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>On hold</button>
-                <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
-              </div>
-            </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Consultation outcome</div>
+          <div className="row">
+            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>Done</button>
+            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>On hold</button>
+            <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
           </div>
         </div>
       )}
@@ -438,6 +439,242 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
         <button className="btn" onClick={onClose}>Close</button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The combined AI summary across every report the patient uploaded for this
+ * visit — what the doctor reads first, so they get one clinical picture instead
+ * of opening each file. Falls back to per-report cards below it.
+ */
+function VisitReportSummary({
+  appointmentId,
+  summary,
+  status,
+  error,
+  count,
+  reportCount,
+  onRetried,
+}: {
+  appointmentId: string;
+  summary?: import('../api/types').ReportAiSummary | null;
+  status?: import('../api/types').AiJobStatus | null;
+  error?: string | null;
+  count?: number;
+  reportCount: number;
+  onRetried: () => void;
+}) {
+  const toast = useToast();
+  const retry = useMutation({
+    mutationFn: () => reportsApi.retryVisitSummary(appointmentId),
+    onSuccess: () => { onRetried(); toast.success('Combining report summaries…'); },
+    onError: (e) => toast.error(e),
+  });
+
+  // Only one report → the per-report card already says it all.
+  if (reportCount < 2 && status !== 'ready') return null;
+
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        borderRadius: 10,
+        background: 'var(--primary-tint, #eef4ff)',
+        border: '1px solid var(--primary, #cddffb)',
+      }}
+    >
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+        <strong style={{ fontSize: 13 }}>
+          Combined summary{count ? ` · across ${count} report${count > 1 ? 's' : ''}` : ''}
+        </strong>
+        {status === 'ready' && (
+          <button
+            className="btn btn-sm btn-ghost"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate()}
+          >
+            {retry.isPending ? 'Refreshing…' : 'Refresh'}
+          </button>
+        )}
+      </div>
+
+      {status === 'processing' ? (
+        <span className="muted" style={{ fontSize: 12.5 }}>Combining the report summaries…</span>
+      ) : status === 'failed' ? (
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            Couldn’t combine the summaries{error ? `: ${error}` : '.'}
+          </span>
+          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      ) : summary ? (
+        <SummaryBody summary={summary} />
+      ) : (
+        <span className="muted" style={{ fontSize: 12.5 }}>Waiting for report summaries…</span>
+      )}
+    </div>
+  );
+}
+
+/** A wrapping tag for one out-of-range value — stays inside the card even when
+ * the model returns a long, sentence-like value. */
+function AbnormalTag({
+  v,
+}: {
+  v: { label: string; value: string; reference?: string; direction: 'high' | 'low' | 'abnormal' };
+}) {
+  const high = v.direction === 'high';
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        maxWidth: '100%',
+        padding: '3px 8px',
+        borderRadius: 6,
+        fontSize: 12,
+        lineHeight: 1.35,
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
+        background: high ? '#fdecec' : '#fbf1e0',
+        color: high ? 'var(--state-error)' : 'var(--state-on-hold)',
+      }}
+    >
+      {v.label}: {v.value}
+      {v.reference ? ` (ref ${v.reference})` : ''}
+    </span>
+  );
+}
+
+/** Renders a ReportAiSummary body (shared by combined + per-report). */
+function SummaryBody({ summary }: { summary: import('../api/types').ReportAiSummary }) {
+  return (
+    <>
+      {summary.report_type && (
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{summary.report_type}</div>
+      )}
+      <div style={{ fontSize: 13 }}>{summary.summary}</div>
+      {summary.abnormal_values.length > 0 && (
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          {summary.abnormal_values.map((v, i) => (
+            <AbnormalTag key={i} v={v} />
+          ))}
+        </div>
+      )}
+      {summary.key_findings.length > 0 && (
+        <ul style={{ margin: '8px 0 0 18px', fontSize: 12.5 }}>
+          {summary.key_findings.map((f, i) => <li key={i}>{f}</li>)}
+        </ul>
+      )}
+      <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+        AI-generated — check the reports themselves before acting.
+      </div>
+    </>
+  );
+}
+
+/**
+ * A report link with its AI summary. The summary is generated in the background
+ * after upload, so this also carries the "still working" and "couldn't do it"
+ * states — a doctor should never be left wondering whether one is coming.
+ */
+function ReportWithSummary({
+  report,
+  onRetried,
+}: {
+  report: PatientReport;
+  onRetried: () => void;
+}) {
+  const toast = useToast();
+  const retry = useMutation({
+    mutationFn: () => reportsApi.retrySummary(report.id),
+    onSuccess: () => {
+      onRetried();
+      toast.success('Summarising again…');
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  const status = report.ai_summary_status;
+  const summary = report.ai_summary;
+
+  return (
+    <div style={{ borderBottom: 'var(--hairline)', paddingBottom: 10 }}>
+      <a href={report.url} target="_blank" rel="noreferrer">
+        📄 {report.title}
+      </a>
+
+      {status === 'processing' ? (
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+          Summarising…
+        </div>
+      ) : status === 'pending' ? (
+        // Queued, not running — usually because the AI service is not up yet.
+        // Saying "summarising" here would promise work that isn't happening.
+        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            Waiting to be summarised.
+          </span>
+          <button
+            className="btn btn-sm btn-ghost"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate()}
+          >
+            {retry.isPending ? 'Trying…' : 'Summarise now'}
+          </button>
+        </div>
+      ) : status === 'failed' ? (
+        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            Couldn’t summarise this report.
+          </span>
+          <button
+            className="btn btn-sm btn-ghost"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate()}
+          >
+            {retry.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      ) : summary ? (
+        <div
+          style={{
+            marginTop: 8,
+            padding: '10px 12px',
+            borderRadius: 8,
+            background: 'var(--page)',
+          }}
+        >
+          {summary.report_type && (
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+              {summary.report_type}
+            </div>
+          )}
+          <div style={{ fontSize: 13 }}>{summary.summary}</div>
+
+          {summary.abnormal_values.length > 0 && (
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {summary.abnormal_values.map((v, i) => (
+                <AbnormalTag key={i} v={v} />
+              ))}
+            </div>
+          )}
+
+          {summary.key_findings.length > 0 && (
+            <ul style={{ margin: '8px 0 0 18px', fontSize: 12.5 }}>
+              {summary.key_findings.map((f, i) => (
+                <li key={i}>{f}</li>
+              ))}
+            </ul>
+          )}
+
+          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            AI-generated from the uploaded file — check the report itself before acting.
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

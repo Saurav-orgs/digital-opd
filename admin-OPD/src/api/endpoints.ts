@@ -2,6 +2,9 @@ import api from './client';
 import type {
   Appointment,
   AuthUser,
+  ConsultationSession,
+  EPrescription,
+  MedicineCatalogEntry,
   DashboardSummary,
   DaySlots,
   Doctor,
@@ -54,13 +57,11 @@ export const doctorsApi = {
   enable: (id: string) => api.patch<Doctor>(`/doctors/${id}/enable`).then((r) => r.data),
   disable: (id: string) =>
     api.patch<Doctor>(`/doctors/${id}/disable`).then((r) => r.data),
-  uploadQr: (id: string, file: File) => upload(`/doctors/${id}/qr`, file),
   uploadPhoto: (id: string, file: File) => upload(`/doctors/${id}/photo`, file),
   // Doctor self-service
   me: () => api.get<Doctor>('/doctors/me').then((r) => r.data),
   updateMe: (body: Partial<Doctor>) =>
     api.patch<Doctor>('/doctors/me', body).then((r) => r.data),
-  uploadMyQr: (file: File) => upload('/doctors/me/qr', file),
   uploadMyPhoto: (file: File) => upload('/doctors/me/photo', file),
 };
 
@@ -137,8 +138,6 @@ export const appointmentsApi = {
     api
       .patch<Appointment>(`/appointments/${id}/consultation`, { status })
       .then((r) => r.data),
-  setPayment: (id: string, status: string) =>
-    api.patch<Appointment>(`/appointments/${id}/payment`, { status }).then((r) => r.data),
   setNotes: (id: string, notes: string) =>
     api.patch<Appointment>(`/appointments/${id}/notes`, { notes }).then((r) => r.data),
   addReminder: (id: string, message: string, suggestedDate?: string) =>
@@ -148,6 +147,39 @@ export const appointmentsApi = {
         suggested_date: suggestedDate || undefined,
       })
       .then((r) => r.data),
+};
+
+// ── Consultation & e-prescription ────────────────────────────
+export const consultationApi = {
+  // Transcription runs in the background; poll `session` for progress.
+  uploadAudio: (appointmentId: string, audio: Blob) => {
+    const fd = new FormData();
+    fd.append('audio', audio, 'consultation.webm');
+    return api
+      .post<ConsultationSession>(`/appointments/${appointmentId}/consultation/audio`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+  session: (appointmentId: string) =>
+    api
+      .get<ConsultationSession | null>(`/appointments/${appointmentId}/consultation`)
+      .then((r) => r.data),
+  prescription: (appointmentId: string) =>
+    api.get<EPrescription>(`/appointments/${appointmentId}/prescription`).then((r) => r.data),
+  savePrescription: (appointmentId: string, body: Record<string, unknown>) =>
+    api
+      .patch<EPrescription>(`/appointments/${appointmentId}/prescription`, body)
+      .then((r) => r.data),
+  issuePrescription: (appointmentId: string) =>
+    api
+      .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`)
+      .then((r) => r.data),
+};
+
+export const medicinesApi = {
+  search: (q: string) =>
+    api.get<MedicineCatalogEntry[]>('/medicines', { params: { q } }).then((r) => r.data),
 };
 
 // ── Dashboard ────────────────────────────────────────────────
@@ -179,4 +211,8 @@ export const reportsApi = {
       .then((r) => r.data);
   },
   remove: (id: string) => api.delete(`/reports/${id}`).then((r) => r.data),
+  retrySummary: (id: string) =>
+    api.post(`/reports/${id}/summary/retry`).then((r) => r.data),
+  retryVisitSummary: (appointmentId: string) =>
+    api.post(`/reports/appointment/${appointmentId}/summary/retry`).then((r) => r.data),
 };

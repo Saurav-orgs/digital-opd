@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/patient_scope.dart';
 import '../theme.dart';
@@ -68,7 +71,8 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
               padding: const EdgeInsets.all(16),
               itemCount: visits.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _VisitTile(visits[i]),
+              itemBuilder: (context, i) =>
+                  _VisitTile(visits[i], onChanged: _refresh),
             ),
           );
         },
@@ -79,7 +83,8 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
 
 class _VisitTile extends StatefulWidget {
   final PatientVisit v;
-  const _VisitTile(this.v);
+  final Future<void> Function() onChanged;
+  const _VisitTile(this.v, {required this.onChanged});
 
   @override
   State<_VisitTile> createState() => _VisitTileState();
@@ -87,21 +92,51 @@ class _VisitTile extends StatefulWidget {
 
 class _VisitTileState extends State<_VisitTile> {
   bool _open = false;
+  bool _uploading = false;
+
+  Future<void> _uploadReport() async {
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null || !mounted) return;
+
+    final title = await showDialog<String>(
+      context: context,
+      builder: (_) => _TitleDialog(),
+    );
+    if (title == null || title.trim().isEmpty || !mounted) return;
+
+    setState(() => _uploading = true);
+    try {
+      await PatientAuthScope.of(context)
+          .api
+          .uploadVisitReport(widget.v.id, title.trim(), File(picked.path));
+      if (mounted) {
+        showSuccessSnack(context, 'Report uploaded');
+        await widget.onChanged();
+      }
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final v = widget.v;
-    final hasDetails = (v.doctorNotes?.isNotEmpty ?? false) ||
+    final expandable = (v.doctorNotes?.isNotEmpty ?? false) ||
         (v.nextVisitNote?.isNotEmpty ?? false) ||
+        v.ePrescription != null ||
         v.prescriptions.isNotEmpty ||
-        v.reports.isNotEmpty;
+        v.reports.isNotEmpty ||
+        v.acceptsReports;
 
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            onTap: hasDetails ? () => setState(() => _open = !_open) : null,
+            onTap: expandable ? () => setState(() => _open = !_open) : null,
             child: Row(
               children: [
                 Expanded(
@@ -126,8 +161,12 @@ class _VisitTileState extends State<_VisitTile> {
               ],
             ),
           ),
-          if (hasDetails && _open) ...[
+          if (expandable && _open) ...[
             const Divider(height: 24),
+            if (v.ePrescription != null) ...[
+              _PrescriptionCard(v.ePrescription!),
+              const SizedBox(height: 12),
+            ],
             if (v.description != null && v.description!.isNotEmpty)
               _line('Reason', v.description!),
             if (v.doctorNotes != null && v.doctorNotes!.isNotEmpty)
@@ -194,6 +233,26 @@ class _VisitTileState extends State<_VisitTile> {
                     ),
                   )),
             ],
+            if (v.acceptsReports) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _uploading ? null : _uploadReport,
+                  icon: _uploading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2.2))
+                      : const Icon(Icons.upload_file, size: 16),
+                  label: Text(_uploading ? 'Uploading…' : 'Upload a report'),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                  'You can add reports until the doctor marks this visit done.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+            ],
           ],
         ],
       ),
@@ -212,4 +271,132 @@ class _VisitTileState extends State<_VisitTile> {
           ),
         ),
       );
+}
+
+/// The doctor's issued e-prescription, with a link to the printable PDF.
+class _PrescriptionCard extends StatelessWidget {
+  final IssuedPrescription p;
+  const _PrescriptionCard(this.p);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.primaryTint,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.medication_outlined,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: 6),
+              const Text('Prescription',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const Spacer(),
+              if (p.pdfUrl != null && p.pdfUrl!.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => launchUrl(Uri.parse(p.pdfUrl!),
+                      mode: LaunchMode.externalApplication),
+                  icon: const Icon(Icons.download_outlined, size: 16),
+                  label: const Text('PDF'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                  ),
+                ),
+            ],
+          ),
+          if (p.diagnosis != null && p.diagnosis!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Diagnosis: ${p.diagnosis}',
+                style: const TextStyle(fontSize: 13)),
+          ],
+          if (p.medicines.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...p.medicines.asMap().entries.map((e) {
+              final m = e.value;
+              final title = [m.medicineName, m.strength]
+                  .where((x) => x != null && x.isNotEmpty)
+                  .join(' ');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${e.key + 1}. $title',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13.5)),
+                    if (m.scheduleLabel.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 14, top: 2),
+                        child: Text(m.scheduleLabel,
+                            style: const TextStyle(
+                                color: AppColors.textSecondary, fontSize: 12.5)),
+                      ),
+                    if (m.instructions != null && m.instructions!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 14, top: 2),
+                        child: Text(m.instructions!,
+                            style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic)),
+                      ),
+                  ],
+                ),
+              );
+            }),
+          ],
+          if (p.advice != null && p.advice!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('Advice: ${p.advice}', style: const TextStyle(fontSize: 13)),
+          ],
+          if (p.followUpDate != null && p.followUpDate!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Follow-up on ${p.followUpDate}',
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 12.5)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TitleDialog extends StatefulWidget {
+  @override
+  State<_TitleDialog> createState() => _TitleDialogState();
+}
+
+class _TitleDialogState extends State<_TitleDialog> {
+  final _title = TextEditingController();
+
+  @override
+  void dispose() {
+    _title.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Report title'),
+      content: TextField(
+        controller: _title,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'e.g. Blood Test — CBC'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _title.text),
+          child: const Text('Upload'),
+        ),
+      ],
+    );
+  }
 }

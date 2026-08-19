@@ -1,10 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
-import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'confirmation_screen.dart';
@@ -34,9 +31,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
   final _description = TextEditingController();
 
   String? _gender; // male | female | other
-  File? _screenshot;
   bool _submitting = false;
-  String? _fileError;
 
   @override
   void dispose() {
@@ -48,34 +43,8 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    final file = File(picked.path);
-    final sizeMb = (await file.length()) / (1024 * 1024);
-    if (sizeMb > AppConfig.maxUploadMb) {
-      setState(() {
-        _screenshot = null;
-        _fileError = 'Image is too large. Please choose one up to ${AppConfig.maxUploadMb} MB.';
-      });
-      return;
-    }
-    setState(() {
-      _screenshot = file;
-      _fileError = null;
-    });
-  }
-
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_screenshot == null) {
-      setState(() => _fileError = 'Please upload your payment screenshot.');
-      return;
-    }
     setState(() => _submitting = true);
     try {
       final result = await _api.book(
@@ -88,7 +57,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
         patientAge: int.parse(_age.text.trim()),
         patientAddress: _address.text.trim(),
         description: _description.text.trim(),
-        screenshot: _screenshot!,
       );
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -160,9 +128,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
             _field(_address, 'Address (optional)', maxLines: 2),
             _field(_description, 'Reason for visit (optional)', maxLines: 2),
             const SizedBox(height: 8),
-            if (d.paymentQrUrl != null && d.paymentQrUrl!.isNotEmpty) _qrCard(d),
-            const SizedBox(height: 16),
-            _uploadCard(),
+            _paymentCard(d),
             const SizedBox(height: 24),
             SizedBox(
               height: 50,
@@ -179,7 +145,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
             ),
             const SizedBox(height: 8),
             const Center(
-              child: Text('Your booking is confirmed once the screenshot is uploaded.',
+              child: Text('Please pay at the clinic reception on the day of your visit.',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
             ),
             const SizedBox(height: 24),
@@ -219,14 +185,15 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
     );
   }
 
-  Widget _qrCard(Doctor d) {
+  Widget _paymentCard(Doctor d) {
     return SectionCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Scan & pay',
+              const Text('Payment',
                   style: TextStyle(fontWeight: FontWeight.w500)),
               if (d.consultationFee != null)
                 Text(d.feeLabel,
@@ -235,68 +202,10 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                         color: AppColors.secondary)),
             ],
           ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.control),
-            child: Image.network(
-              d.paymentQrUrl!,
-              height: 200,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('Could not load the QR code.',
-                    style: TextStyle(color: AppColors.textSecondary)),
-              ),
-            ),
-          ),
           const SizedBox(height: 8),
-          const Text('Pay via any UPI app, then upload the screenshot below.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
-
-  Widget _uploadCard() {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Payment screenshot *',
-              style: TextStyle(fontWeight: FontWeight.w500)),
-          const SizedBox(height: 10),
-          if (_screenshot != null)
-            Column(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.control),
-                  child: Image.file(_screenshot!,
-                      height: 160, width: double.infinity, fit: BoxFit.cover),
-                ),
-                const SizedBox(height: 10),
-              ],
-            ),
-          OutlinedButton.icon(
-            onPressed: _pickImage,
-            icon: const Icon(Icons.upload_file, size: 18),
-            label: Text(_screenshot == null ? 'Upload screenshot' : 'Change screenshot'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.border, width: 0.5),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.control)),
-            ),
-          ),
-          if (_fileError != null) ...[
-            const SizedBox(height: 6),
-            Text(_fileError!,
-                style: const TextStyle(color: AppColors.error, fontSize: 12)),
-          ],
-          const SizedBox(height: 4),
-          const Text('JPG, PNG or WebP · up to 5 MB.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          const Text(
+              'Payment is collected in person at the clinic — nothing to pay now.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
         ],
       ),
     );

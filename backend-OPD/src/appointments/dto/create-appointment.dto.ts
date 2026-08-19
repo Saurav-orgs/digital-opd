@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 
 /**
- * Public booking payload (multipart — the screenshot file is separate).
+ * Public booking payload. Payment happens in person, so no screenshot.
  * `end_time` is derived server-side from the slot, never trusted from input.
  */
 export class CreateAppointmentDto {

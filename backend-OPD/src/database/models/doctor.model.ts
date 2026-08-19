@@ -41,10 +41,6 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.DECIMAL(10, 2), allowNull: true })
   consultation_fee: number | null;
 
-  /** Doctor's UPI/QR image key, uploaded by admin. */
-  @Column({ type: DataType.STRING, allowNull: true })
-  payment_qr_url: string | null;
-
   /** For QR/deep-link to this doctor's booking screen. */
   @Column({ type: DataType.STRING, allowNull: false, unique: true })
   public_slug: string;

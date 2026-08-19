@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../auth/auth_scope.dart';
 import '../theme.dart';
 import 'dashboard_screen.dart';
-import 'doctors_screen.dart';
 import 'pathlabs_screen.dart';
 import 'profile_screen.dart';
 import 'reports_screen.dart';
@@ -33,10 +32,9 @@ class _HomeShellState extends State<HomeShell> {
           'Dashboard', Icons.dashboard_outlined, 'dashboard', DashboardScreen()),
       // Appointments are now managed from the Dashboard tabs (single-doctor
       // setup), so the standalone Appointments section is intentionally hidden.
-      // Single-doctor setup: the doctors list is replaced by a direct
-      // profile view (Schedule + Edit) for the one doctor.
-      const _Destination('Doctor Profile', Icons.medical_services_outlined,
-          'doctors', DoctorProfileScreen()),
+      // There is no separate "Doctor Profile" section: the SuperAdmin is the
+      // clinic's one doctor and edits everything (profile + schedule) from the
+      // "My profile" entry added below.
       const _Destination(
           'Pathlabs', Icons.biotech_outlined, 'pathlabs', PathlabsScreen()),
       const _Destination(

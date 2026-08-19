@@ -3,6 +3,7 @@ import { SequelizeModule } from '@nestjs/sequelize';
 import { PatientReport } from '../database/models/patient-report.model';
 import { Appointment } from '../database/models/appointment.model';
 import { ReportsService } from './reports.service';
+import { ReportSummaryService } from './report-summary.service';
 import { ReportsController } from './reports.controller';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -12,7 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [ReportsController],
-  providers: [ReportsService],
-  exports: [ReportsService],
+  providers: [ReportsService, ReportSummaryService],
+  exports: [ReportsService, ReportSummaryService],
 })
 export class ReportsModule {}

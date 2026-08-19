@@ -1,0 +1,18 @@
+# Serving
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+httpx==0.28.1
+
+# Speech-to-text (CTranslate2 backend — runs on CPU/Metal, no GPU required)
+faster-whisper==1.1.1
+
+# Report text extraction
+pdfplumber==0.11.4
+pytesseract==0.3.13
+Pillow==11.1.0
+requests==2.32.3
+
+# Fuzzy medicine-name spelling correction
+rapidfuzz==3.10.1

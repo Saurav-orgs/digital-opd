@@ -193,7 +193,6 @@ function AppointmentCard({ a, onClick }: { a: Appointment; onClick: () => void }
       )}
       <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: 'wrap' }}>
         {a.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
-        <Badge value={a.payment_status} />
         <Badge value={a.consultation_status} />
       </div>
     </div>

@@ -6,18 +6,9 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
-  UploadedFile,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
 import { Throttle } from '@nestjs/throttler';
-import {
-  ApiBody,
-  ApiConsumes,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { DoctorsService } from '../doctors/doctors.service';
@@ -66,46 +57,9 @@ export class PublicController {
   }
 
   @Post('appointments')
-  @ApiOperation({ summary: 'Book an appointment (multipart: fields + screenshot)' })
+  @ApiOperation({ summary: 'Book an appointment (payment happens in person)' })
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: [
-        'doctor_id',
-        'appointment_date',
-        'start_time',
-        'patient_name',
-        'patient_mobile',
-        'patient_gender',
-        'patient_age',
-        'screenshot',
-      ],
-      properties: {
-        doctor_id: { type: 'string', format: 'uuid' },
-        appointment_date: { type: 'string', example: '2026-07-28' },
-        start_time: { type: 'string', example: '11:30' },
-        patient_name: { type: 'string' },
-        patient_mobile: { type: 'string', example: '9876543210' },
-        patient_gender: { type: 'string', enum: ['male', 'female', 'other'] },
-        patient_age: { type: 'integer', example: 34 },
-        patient_address: { type: 'string' },
-        description: { type: 'string' },
-        screenshot: { type: 'string', format: 'binary' },
-      },
-    },
-  })
-  @UseInterceptors(
-    FileInterceptor('screenshot', {
-      storage: memoryStorage(),
-      limits: { fileSize: 6 * 1024 * 1024 },
-    }),
-  )
-  book(
-    @Body() dto: CreateAppointmentDto,
-    @UploadedFile() screenshot: Express.Multer.File,
-  ) {
-    return this.appointments.book(dto, screenshot, BookingSource.APP);
+  book(@Body() dto: CreateAppointmentDto) {
+    return this.appointments.book(dto, BookingSource.APP);
   }
 }

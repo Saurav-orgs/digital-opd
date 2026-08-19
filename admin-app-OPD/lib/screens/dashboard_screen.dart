@@ -438,7 +438,6 @@ class _ApptCard extends StatelessWidget {
               runSpacing: 6,
               children: [
                 if (a.isWalkIn) const StatusBadge('walk_in', label: 'Walk-in'),
-                StatusBadge(a.paymentStatus),
                 StatusBadge(a.consultationStatus),
               ],
             ),

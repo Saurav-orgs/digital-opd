@@ -8,6 +8,20 @@ import {
 } from 'sequelize-typescript';
 import { User } from './user.model';
 import { Appointment } from './appointment.model';
+import { AiJobStatus } from '../../common/enums';
+
+/** Structured summary produced by the local AI service. */
+export interface ReportAiSummary {
+  report_type: string;
+  summary: string;
+  key_findings: string[];
+  abnormal_values: {
+    label: string;
+    value: string;
+    reference?: string;
+    direction: 'high' | 'low' | 'abnormal';
+  }[];
+}
 
 /** A pathlab-uploaded report file (S3 object key), keyed by patient mobile. */
 @Table({
@@ -40,6 +54,28 @@ export class PatientReport extends Model<PatientReport> {
   @ForeignKey(() => Appointment)
   @Column({ type: DataType.UUID, allowNull: true })
   appointment_id: string | null;
+
+  // ── AI summary (generated asynchronously after upload) ─────
+
+  @Column({ type: DataType.JSONB, allowNull: true })
+  ai_summary: ReportAiSummary | null;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: false,
+    defaultValue: AiJobStatus.PENDING,
+  })
+  ai_summary_status: AiJobStatus;
+
+  /** Why summarisation failed, shown to the doctor so it isn't a silent gap. */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  ai_summary_error: string | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  ai_model_version: string | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  ai_summarized_at: Date | null;
 
   @BelongsTo(() => User)
   uploadedBy: User;

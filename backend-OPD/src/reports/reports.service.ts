@@ -9,7 +9,8 @@ import { AuthUser } from '../common/decorators/current-user.decorator';
 import { AuthPatient } from '../patient-auth/current-patient.decorator';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
-import { NotificationType } from '../common/enums';
+import { ConsultationStatus, NotificationType } from '../common/enums';
+import { ReportSummaryService } from './report-summary.service';
 
 @Injectable()
 export class ReportsService {
@@ -18,6 +19,7 @@ export class ReportsService {
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly summaries: ReportSummaryService,
   ) {}
 
   async create(
@@ -43,26 +45,35 @@ export class ReportsService {
       { reportId: report.id },
     );
 
+    // Summarising takes tens of seconds — let the upload return now and fill the
+    // summary in behind it.
+    void this.summaries.summarizeInBackground(report.id, file);
+
     return report;
   }
 
   /**
-   * Patient self-upload — attaches to their most recently booked appointment
-   * (the "last registered" / likely-ongoing visit). No notification: the
-   * patient just uploaded it themselves.
+   * Patient self-upload against one of their own appointments, so the doctor
+   * can review it for that visit. Allowed only while the visit still accepts
+   * uploads — i.e. before the doctor marks the OPD done (see
+   * `ConsultationStatus`). No notification: the patient uploaded it themselves.
    */
   async createByPatient(
     patient: AuthPatient,
+    appointmentId: string,
     title: string,
     file: Express.Multer.File,
   ): Promise<PatientReport> {
-    const lastAppointment = await this.appointmentModel.findOne({
-      where: { patient_mobile: patient.mobile },
-      order: [['created_at', 'DESC']],
-    });
-    if (!lastAppointment) {
+    const appointment = await this.appointmentModel.findByPk(appointmentId);
+    if (!appointment || appointment.patient_mobile !== patient.mobile) {
       throw new AppException(ErrorCode.NOT_FOUND, {
-        message: 'No appointment found. Please book an appointment first.',
+        message: 'Appointment not found.',
+      });
+    }
+    if (!this.acceptsReports(appointment.consultation_status)) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'This appointment is closed — reports can no longer be added to it.',
       });
     }
 
@@ -72,13 +83,27 @@ export class ReportsService {
       `reports/${patient.mobile}`,
     );
 
-    return this.reportModel.create({
+    const report = await this.reportModel.create({
       patient_mobile: patient.mobile,
       title,
       file_key: key,
       uploaded_by_user_id: null,
-      appointment_id: lastAppointment.id,
+      appointment_id: appointment.id,
     } as any);
+
+    // The doctor sees this report during the visit, so the summary matters most
+    // here — but it still must not block the patient's upload.
+    void this.summaries.summarizeInBackground(report.id, file);
+
+    return report;
+  }
+
+  /** Reports may be added while a visit is pending or on_hold, not once done. */
+  private acceptsReports(status: ConsultationStatus): boolean {
+    return (
+      status === ConsultationStatus.PENDING ||
+      status === ConsultationStatus.ON_HOLD
+    );
   }
 
   async listForMobile(mobile: string) {
@@ -101,7 +126,12 @@ export class ReportsService {
     if (!row) {
       throw new AppException(ErrorCode.NOT_FOUND, { message: 'Report not found.' });
     }
+    const appointmentId = row.appointment_id;
     await this.storage.delete(row.file_key);
     await row.destroy();
+    // The visit's combined summary must no longer cover a report that's gone.
+    if (appointmentId) {
+      void this.summaries.consolidateForAppointment(appointmentId);
+    }
   }
 }

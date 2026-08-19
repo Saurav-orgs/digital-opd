@@ -45,7 +45,6 @@ export const api = {
         bio: d.bio,
         consultationFee: d.consultation_fee != null ? String(d.consultation_fee) : null,
         profilePhotoUrl: d.profile_photo_url,
-        paymentQrUrl: d.payment_qr_url,
         publicSlug: d.public_slug || '',
       }));
     } catch (err) {
@@ -65,7 +64,6 @@ export const api = {
         bio: d.bio,
         consultationFee: d.consultation_fee != null ? String(d.consultation_fee) : null,
         profilePhotoUrl: d.profile_photo_url,
-        paymentQrUrl: d.payment_qr_url,
         publicSlug: d.public_slug || '',
       };
     } catch (err) {
@@ -105,29 +103,24 @@ export const api = {
     patientAge: number;
     patientAddress?: string;
     description?: string;
-    screenshot: File;
   }): Promise<BookingResult> {
     try {
-      const formData = new FormData();
-      formData.append('doctor_id', params.doctorId);
-      formData.append('appointment_date', params.date);
-      formData.append('start_time', params.startTime);
-      formData.append('patient_name', params.patientName);
-      formData.append('patient_mobile', params.patientMobile);
-      formData.append('patient_gender', params.patientGender);
-      formData.append('patient_age', String(params.patientAge));
-      if (params.patientAddress?.trim()) {
-        formData.append('patient_address', params.patientAddress.trim());
-      }
-      if (params.description?.trim()) {
-        formData.append('description', params.description.trim());
-      }
-      formData.append('screenshot', params.screenshot);
-
-      const res = await client.post('/public/appointments', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      // Payment is handled in person at the clinic, so the booking is a plain
+      // JSON request with no screenshot.
+      const res = await client.post('/public/appointments', {
+        doctor_id: params.doctorId,
+        appointment_date: params.date,
+        start_time: params.startTime,
+        patient_name: params.patientName,
+        patient_mobile: params.patientMobile,
+        patient_gender: params.patientGender,
+        patient_age: params.patientAge,
+        ...(params.patientAddress?.trim()
+          ? { patient_address: params.patientAddress.trim() }
+          : {}),
+        ...(params.description?.trim()
+          ? { description: params.description.trim() }
+          : {}),
       });
 
       const data = res.data.data ?? res.data;

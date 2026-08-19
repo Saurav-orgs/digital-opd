@@ -10,6 +10,7 @@ import { Doctor } from '../database/models/doctor.model';
 import { SlotsModule } from '../slots/slots.module';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ConsultationsModule } from '../consultations/consultations.module';
 
 @Module({
   imports: [
@@ -22,6 +23,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SlotsModule,
     DoctorsModule,
     NotificationsModule,
+    // Provides PrescriptionsService so a visit can carry its issued
+    // prescription without duplicating the projection logic.
+    ConsultationsModule,
   ],
   controllers: [AppointmentsController, PublicController],
   providers: [AppointmentsService],

@@ -6,8 +6,12 @@ import '../api/models.dart';
 import '../auth/auth_scope.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'doctor_schedule_screen.dart';
 
-/// Doctor self-service. Edits are permission-gated server-side (doctors:update).
+/// The doctor's own home — profile details, photo and a shortcut to their OPD
+/// schedule. The SuperAdmin is the clinic's single doctor, so there is no
+/// separate "Doctor Profile" screen; everything lives here. Edits are
+/// permission-gated server-side (doctors:update).
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -26,10 +30,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _hydrated = false;
   bool _saving = false;
   bool _uploadingPhoto = false;
-  bool _uploadingQr = false;
 
   AuthController get _auth => AuthScope.of(context);
   bool get _canEdit => _auth.can('doctors', 'update');
+  bool get _canSchedule => _auth.can('opd_schedules', 'read');
 
   @override
   void didChangeDependencies() {
@@ -83,28 +87,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _upload(bool photo) async {
+  Future<void> _uploadPhoto() async {
     final picked = await ImagePicker()
         .pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
     final file = File(picked.path);
-    setState(() => photo ? _uploadingPhoto = true : _uploadingQr = true);
+    setState(() => _uploadingPhoto = true);
     try {
-      photo
-          ? await _auth.api.uploadMyPhoto(file)
-          : await _auth.api.uploadMyQr(file);
+      await _auth.api.uploadMyPhoto(file);
       _reload();
-      if (mounted) {
-        showSuccessSnack(
-            context, photo ? 'Profile photo updated' : 'Payment QR updated');
-      }
+      if (mounted) showSuccessSnack(context, 'Profile photo updated');
     } on ApiException catch (e) {
       if (mounted) showErrorSnack(context, e.message);
     } finally {
-      if (mounted) {
-        setState(() => photo ? _uploadingPhoto = false : _uploadingQr = false);
-      }
+      if (mounted) setState(() => _uploadingPhoto = false);
     }
+  }
+
+  void _openSchedule(Doctor me) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            DoctorScheduleScreen(doctorId: me.id, doctorName: me.name),
+      ),
+    );
   }
 
   @override
@@ -178,15 +185,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: 'Profile photo',
               url: me.profilePhotoUrl,
               busy: _uploadingPhoto,
-              onUpload: () => _upload(true),
+              onUpload: _uploadPhoto,
             ),
-            const SizedBox(height: 12),
-            _imageCard(
-              title: 'Payment QR',
-              url: me.paymentQrUrl,
-              busy: _uploadingQr,
-              onUpload: () => _upload(false),
-            ),
+            if (_canSchedule) ...[
+              const SizedBox(height: 12),
+              SectionCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const CardTitle('OPD schedule'),
+                    const Text(
+                      'Set your weekly hours and leave days.',
+                      style: TextStyle(
+                          color: AppColors.textSecondary, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => _openSchedule(me),
+                      icon: const Icon(Icons.schedule, size: 16),
+                      label: const Text('Manage schedule'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         );
       },

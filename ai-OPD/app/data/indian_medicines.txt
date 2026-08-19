@@ -1,0 +1,318 @@
+# Common Indian OPD medicines — canonical base spellings (no strengths).
+# Used to correct the spelling of spoken/transcribed medicine names.
+# This is a starting dictionary; the clinic's own catalogue (grown from what the
+# doctor actually prescribes) is merged on top of it at match time.
+# One name per line. Lines starting with # are ignored.
+
+# ── Analgesics / antipyretics / NSAIDs ──
+Paracetamol
+Dolo
+Calpol
+Crocin
+Crocin Advance
+Combiflam
+Brufen
+Ibuprofen
+Aceclofenac
+Zerodol
+Zerodol SP
+Zerodol P
+Nimesulide
+Nimulid
+Diclofenac
+Voveran
+Ketorol
+Naproxen
+Aspirin
+Ecosprin
+Meftal
+Meftal Spas
+Flexon
+Sumo
+Hifenac
+Dolonex
+
+# ── Antibiotics ──
+Amoxicillin
+Amoxyclav
+Augmentin
+Clavam
+Moxikind CV
+Azithromycin
+Azithral
+Azee
+Zithromax
+Cefixime
+Taxim O
+Cefpodoxime
+Cefuroxime
+Ceftum
+Cephalexin
+Ciprofloxacin
+Ciplox
+Ofloxacin
+Levofloxacin
+Levoflox
+Doxycycline
+Doxt
+Metronidazole
+Flagyl
+Metrogyl
+Ornidazole
+Norfloxacin
+Norflox
+Norflox TZ
+Nitrofurantoin
+Clarithromycin
+Faropenem
+Linezolid
+Rifaximin
+
+# ── Acidity / GI ──
+Pantoprazole
+Pantop
+Pan
+Pan D
+Omeprazole
+Omez
+Rabeprazole
+Rabekind
+Razo
+Esomeprazole
+Nexpro
+Ranitidine
+Rantac
+Aciloc
+Famotidine
+Domperidone
+Domstal
+Ondansetron
+Ondem
+Emeset
+Digene
+Gelusil
+Cremaffin
+Duphalac
+Lactihep
+Sucralfate
+Sucral
+Drotaverine
+Drotin
+Dicyclomine
+Cyclopam
+Meganeuron
+Eldoper
+Loperamide
+Racecadotril
+Sporlac
+Vizylac
+Econorm
+Bifilac
+
+# ── Antiallergics / respiratory ──
+Cetirizine
+Cetzine
+Alerid
+Okacet
+Levocetirizine
+Levocet
+Xyzal
+Montek
+Montek LC
+Montair
+Montair LC
+Fexofenadine
+Allegra
+Chlorpheniramine
+Avil
+Hydroxyzine
+Atarax
+Ascoril
+Ascoril LS
+Grilinctus
+Benadryl
+Corex
+Chericof
+Mucolite
+Mucinac
+Ambroxol
+Ambrodil
+Bro Zedex
+Zedex
+Salbutamol
+Asthalin
+Levolin
+Deriphyllin
+Budecort
+Foracort
+Seroflo
+Duolin
+Theophylline
+Doxofylline
+
+# ── Vitamins / supplements ──
+Zincovit
+Becosules
+Becozym
+Neurobion
+Neurobion Forte
+Shelcal
+Calcimax
+Gemcal
+Ostocalcium
+Limcee
+Celin
+Vitcofol
+Dexorange
+Autrin
+Livogen
+Orofer
+Fefol
+Feronia
+Cobadex
+Methylcobalamin
+Nurokind
+Folvite
+Folic Acid
+Evion
+Rejunuron
+Supradyn
+A to Z
+Maxirich
+Polybion
+Cypon
+Practin
+Aptivate
+
+# ── Diabetes ──
+Metformin
+Glycomet
+Gluconorm
+Glimepiride
+Amaryl
+Glimestar
+Zoryl
+Gliclazide
+Reclide
+Teneligliptin
+Zita
+Tenepride
+Sitagliptin
+Januvia
+Vildagliptin
+Galvus
+Voglibose
+Pioglitazone
+Dapagliflozin
+Insulin
+Human Mixtard
+Lantus
+Novomix
+
+# ── Cardiovascular / lipids ──
+Amlodipine
+Amlong
+Amlokind
+Stamlo
+Telmisartan
+Telma
+Telma H
+Losartan
+Losar
+Olmesartan
+Olmesar
+Ramipril
+Cardace
+Enalapril
+Metoprolol
+Metolar
+Atenolol
+Aten
+Tenolol
+Bisoprolol
+Concor
+Nebivolol
+Nebicard
+Atorvastatin
+Atorva
+Storvas
+Lipikind
+Rosuvastatin
+Rosuvas
+Crestor
+Clopidogrel
+Clopilet
+Deplatt
+Nitroglycerin
+Nikoran
+Furosemide
+Lasix
+Torsemide
+Dytor
+Chlorthalidone
+Hydrochlorothiazide
+Spironolactone
+Aldactone
+
+# ── Thyroid / steroids / hormones ──
+Thyronorm
+Eltroxin
+Thyrox
+Prednisolone
+Omnacortil
+Wysolone
+Deflazacort
+Defcort
+Dexamethasone
+Dexona
+Betamethasone
+Methylprednisolone
+Medrol
+Hydrocortisone
+
+# ── Others ──
+Ivermectin
+Albendazole
+Zentel
+Bandy
+Mebendazole
+Ranferon
+Fluconazole
+Forcan
+Itraconazole
+Ketoconazole
+Terbinafine
+Aciclovir
+Acivir
+Valacyclovir
+Pregabalin
+Gabapentin
+Gabapentin NT
+Amitriptyline
+Nortriptyline
+Sertraline
+Escitalopram
+Nexito
+Clonazepam
+Alprazolam
+Etizolam
+Etilaam
+Alprax
+Chlordiazepoxide
+Tramadol
+Ultracet
+Tapentadol
+Diclofenac Gel
+Volini
+Moov
+Silverex
+Betadine
+Soframycin
+Neosporin
+Candid
+Clotrimazole
+Luliconazole
+Lulican
+ORS
+Electral
+Enerzal

@@ -36,15 +36,6 @@ export class DoctorsService {
     return this.toView(doctor);
   }
 
-  async uploadQr(id: string, file: Express.Multer.File) {
-    const doctor = await this.getOrFail(id);
-    const { key } = await this.storage.uploadImage(file, `doctors/${id}/qr`);
-    // Replace previous QR object if any.
-    if (doctor.payment_qr_url) await this.storage.delete(doctor.payment_qr_url);
-    await doctor.update({ payment_qr_url: key } as any);
-    return this.toView(doctor);
-  }
-
   async uploadPhoto(id: string, file: Express.Multer.File) {
     const doctor = await this.getOrFail(id);
     const { key } = await this.storage.uploadImage(file, `doctors/${id}/photo`);
@@ -68,7 +59,6 @@ export class DoctorsService {
     return {
       ...json,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
-      payment_qr_url: this.storage.publicUrl(d.payment_qr_url),
     };
   }
 
@@ -109,7 +99,6 @@ export class DoctorsService {
       consultation_fee: d.consultation_fee,
       public_slug: d.public_slug,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
-      payment_qr_url: this.storage.publicUrl(d.payment_qr_url),
     };
   }
 }

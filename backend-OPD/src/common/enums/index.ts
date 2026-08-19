@@ -22,6 +22,18 @@ export enum PermissionModule {
 export enum NotificationType {
   REPORT_AVAILABLE = 'report_available',
   APPOINTMENT_REMINDER = 'appointment_reminder',
+  PRESCRIPTION_READY = 'prescription_ready',
+}
+
+/**
+ * Lifecycle of an asynchronous AI job (report summary, transcription).
+ * Stored per-row so the UI can show progress and the reason for a failure.
+ */
+export enum AiJobStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  READY = 'ready',
+  FAILED = 'failed',
 }
 
 /** CRUD actions a role may be granted per module. */
@@ -46,13 +58,6 @@ export enum ConsultationStatus {
   REJECTED = 'rejected',
 }
 
-/** Payment lifecycle (pre-gateway). */
-export enum PaymentStatus {
-  PAID_UNVERIFIED = 'paid_unverified',
-  VERIFIED = 'verified',
-  REJECTED = 'rejected',
-}
-
 /** Where a booking originated. `walk_in` is a doctor-created, in-clinic booking. */
 export enum BookingSource {
   APP = 'app',
@@ -60,14 +65,34 @@ export enum BookingSource {
   WALK_IN = 'walk_in',
 }
 
-/** How the consultation is paid. Walk-ins are cash (cod); app/web are online. */
-export enum PaymentMethod {
-  ONLINE = 'online',
-  COD = 'cod',
-}
-
 /** schedule_exceptions.type */
 export enum ScheduleExceptionType {
   LEAVE = 'leave',
   CUSTOM = 'custom',
+}
+
+/** Lifecycle of a recorded consultation, from upload to a usable draft. */
+export enum ConsultationSessionStatus {
+  TRANSCRIBING = 'transcribing',
+  DRAFTING = 'drafting',
+  DRAFT_READY = 'draft_ready',
+  FAILED = 'failed',
+}
+
+/** A prescription is only visible to the patient once `issued`. */
+export enum PrescriptionStatus {
+  DRAFT = 'draft',
+  ISSUED = 'issued',
+}
+
+/** Whether a medicine row was suggested by the AI or typed by the doctor. */
+export enum MedicineSource {
+  AI = 'ai',
+  DOCTOR = 'doctor',
+}
+
+/** What a captured training pair is for. */
+export enum TrainingSampleKind {
+  PRESCRIPTION = 'prescription',
+  REPORT_SUMMARY = 'report_summary',
 }

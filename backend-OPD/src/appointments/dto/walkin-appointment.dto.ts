@@ -13,9 +13,9 @@ import {
 } from 'class-validator';
 
 /**
- * Doctor-created, in-clinic booking. No payment screenshot — walk-ins are cod.
- * `doctor_id` is optional: for a doctor account it is forced to their own id;
- * an admin must supply it. `end_time` is derived server-side from the slot.
+ * Doctor-created, in-clinic booking. `doctor_id` is optional: for a doctor
+ * account it is forced to their own id; an admin must supply it. `end_time` is
+ * derived server-side from the slot.
  */
 export class WalkInAppointmentDto {
   @ApiPropertyOptional({ format: 'uuid' })
