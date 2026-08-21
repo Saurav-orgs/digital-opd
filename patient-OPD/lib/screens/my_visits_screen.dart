@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/patient_scope.dart';
+import '../doctor_context.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -23,11 +24,14 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= PatientAuthScope.of(context).api.myVisits();
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    _future ??= PatientAuthScope.of(context).api.myVisits(doctorId: doctorId);
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = PatientAuthScope.of(context).api.myVisits());
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    setState(() => _future =
+        PatientAuthScope.of(context).api.myVisits(doctorId: doctorId));
     await _future;
   }
 

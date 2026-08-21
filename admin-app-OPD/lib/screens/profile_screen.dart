@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/auth_scope.dart';
+import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'doctor_schedule_screen.dart';
@@ -26,10 +28,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _qualifications = TextEditingController();
   final _fee = TextEditingController();
   final _bio = TextEditingController();
+  final _clinicName = TextEditingController();
+  final _clinicAddress = TextEditingController();
+  final _clinicPhone = TextEditingController();
 
   bool _hydrated = false;
   bool _saving = false;
+  bool _savingLetterhead = false;
   bool _uploadingPhoto = false;
+  bool _uploadingLogo = false;
 
   AuthController get _auth => AuthScope.of(context);
   bool get _canEdit => _auth.can('doctors', 'update');
@@ -49,6 +56,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _qualifications.text = me.qualifications ?? '';
       _fee.text = me.consultationFee ?? '';
       _bio.text = me.bio ?? '';
+      _clinicName.text = me.clinicName ?? '';
+      _clinicAddress.text = me.clinicAddress ?? '';
+      _clinicPhone.text = me.clinicPhone ?? '';
       _hydrated = true;
     }
     return me;
@@ -63,6 +73,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _qualifications.dispose();
     _fee.dispose();
     _bio.dispose();
+    _clinicName.dispose();
+    _clinicAddress.dispose();
+    _clinicPhone.dispose();
     super.dispose();
   }
 
@@ -104,12 +117,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _saveLetterhead() async {
+    setState(() => _savingLetterhead = true);
+    try {
+      await _auth.api.updateMe({
+        'clinic_name':
+            _clinicName.text.trim().isEmpty ? null : _clinicName.text.trim(),
+        'clinic_address':
+            _clinicAddress.text.trim().isEmpty ? null : _clinicAddress.text.trim(),
+        'clinic_phone':
+            _clinicPhone.text.trim().isEmpty ? null : _clinicPhone.text.trim(),
+      });
+      if (mounted) showSuccessSnack(context, 'Letterhead updated');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _savingLetterhead = false);
+    }
+  }
+
+  Future<void> _uploadLogo() async {
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null) return;
+    final file = File(picked.path);
+    setState(() => _uploadingLogo = true);
+    try {
+      await _auth.api.uploadMyLetterheadLogo(file);
+      _reload();
+      if (mounted) showSuccessSnack(context, 'Letterhead logo updated');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _uploadingLogo = false);
+    }
+  }
+
   void _openSchedule(Doctor me) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) =>
             DoctorScheduleScreen(doctorId: me.id, doctorName: me.name),
+      ),
+    );
+  }
+
+  Widget _qrCard(String slug) {
+    final url = '${AppConfig.patientWebBase}/d/$slug';
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const CardTitle('My booking link'),
+          const Text(
+            'Share this link (or its QR code) with patients to book appointments.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.page,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(url,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: AppColors.textSecondary)),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: url));
+              showSuccessSnack(context, 'Link copied');
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy link'),
+          ),
+        ],
       ),
     );
   }
@@ -187,6 +275,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               busy: _uploadingPhoto,
               onUpload: _uploadPhoto,
             ),
+            const SizedBox(height: 12),
+            _letterheadCard(me),
+            if (me.publicSlug.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _qrCard(me.publicSlug),
+            ],
             if (_canSchedule) ...[
               const SizedBox(height: 12),
               SectionCard(
@@ -212,6 +306,203 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _letterheadCard(Doctor me) {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const CardTitle('Prescription letterhead'),
+          const Text(
+            'This appears at the top of every prescription you issue.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          LabeledField(
+            label: 'Clinic / practice name',
+            child: TextField(
+              controller: _clinicName,
+              enabled: _canEdit,
+              decoration: const InputDecoration(hintText: 'Rao Heart Clinic'),
+            ),
+          ),
+          LabeledField(
+            label: 'Address',
+            child: TextField(
+              controller: _clinicAddress,
+              enabled: _canEdit,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                  hintText: '2nd Floor, MG Road, Bengaluru 560001'),
+            ),
+          ),
+          LabeledField(
+            label: 'Phone',
+            child: TextField(
+              controller: _clinicPhone,
+              enabled: _canEdit,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(hintText: '+91 98765 43210'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Logo row
+          Row(
+            children: [
+              if (me.clinicLogoUrl != null && me.clinicLogoUrl!.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(me.clinicLogoUrl!,
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const SizedBox(
+                          width: 52, height: 52)),
+                )
+              else
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: AppColors.page,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border, width: 0.5),
+                  ),
+                  child: const Icon(Icons.image_outlined,
+                      color: AppColors.textSecondary, size: 20),
+                ),
+              const SizedBox(width: 12),
+              if (_canEdit)
+                OutlinedButton.icon(
+                  onPressed: _uploadingLogo ? null : _uploadLogo,
+                  icon: const Icon(Icons.upload_file, size: 16),
+                  label: Text(_uploadingLogo ? 'Uploading…' : 'Upload logo'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _letterheadPreview(me),
+          if (_canEdit) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: _savingLetterhead ? null : _saveLetterhead,
+                child: Text(_savingLetterhead ? 'Saving…' : 'Save letterhead'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// A faithful mini of the PDF letterhead band, so the doctor sees their pad.
+  Widget _letterheadPreview(Doctor me) {
+    const brand = Color(0xFF0F766E);
+    final clinicName = _clinicName.text.trim().isNotEmpty
+        ? _clinicName.text.trim()
+        : (_name.text.trim().isNotEmpty ? _name.text.trim() : 'Your clinic');
+    final creds = [_qualifications.text.trim(), _specialization.text.trim()]
+        .where((s) => s.isNotEmpty)
+        .join('  •  ');
+    final contact = [_clinicAddress.text.trim(), _clinicPhone.text.trim()]
+        .where((s) => s.isNotEmpty)
+        .join('\n');
+    final showDoctorLine = clinicName != _name.text.trim();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            color: brand,
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (me.clinicLogoUrl != null && me.clinicLogoUrl!.isNotEmpty) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.all(2),
+                      child: Image.network(me.clinicLogoUrl!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) =>
+                              const SizedBox(width: 40, height: 40)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(clinicName,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17)),
+                      if (creds.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(creds,
+                              style: const TextStyle(
+                                  color: Color(0xFFDCEDEA), fontSize: 10.5)),
+                        ),
+                      if (showDoctorLine && _name.text.trim().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(_name.text.trim(),
+                              style: const TextStyle(
+                                  color: Color(0xFFCFE6E2),
+                                  fontSize: 10.5,
+                                  fontStyle: FontStyle.italic)),
+                        ),
+                    ],
+                  ),
+                ),
+                if (contact.isNotEmpty)
+                  SizedBox(
+                    width: 120,
+                    child: Text(contact,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                            color: Color(0xFFEAF3F1), fontSize: 9.5, height: 1.4)),
+                  ),
+              ],
+            ),
+          ),
+          Container(height: 3, color: const Color(0xFF0B5750)),
+          Container(
+            width: double.infinity,
+            color: Colors.white,
+            padding: const EdgeInsets.all(14),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Rx',
+                    style: TextStyle(
+                        color: brand,
+                        fontWeight: FontWeight.bold,
+                        fontStyle: FontStyle.italic,
+                        fontSize: 22)),
+                SizedBox(height: 6),
+                Text('Patient details, medicines and advice appear here.',
+                    style:
+                        TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

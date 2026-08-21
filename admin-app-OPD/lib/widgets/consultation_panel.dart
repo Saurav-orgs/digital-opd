@@ -11,6 +11,7 @@ import '../api/models.dart';
 import '../auth/auth_scope.dart';
 import '../theme.dart';
 import 'common.dart';
+import 'handwriting_pad.dart';
 
 /// Records the OPD conversation, then shows the AI-drafted prescription for the
 /// doctor to correct and issue.
@@ -45,6 +46,10 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
   bool _loading = true;
   bool _saving = false;
 
+  // Which input method is showing: handwrite | voice | type.
+  String _mode = 'voice';
+  final HandwritingController _handwriting = HandwritingController();
+
   // Local edit buffer — replaced from the server only when not mid-edit.
   final _diagnosis = TextEditingController();
   final _advice = TextEditingController();
@@ -66,6 +71,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     _recorder.dispose();
     _diagnosis.dispose();
     _advice.dispose();
+    _handwriting.dispose();
     super.dispose();
   }
 
@@ -230,23 +236,122 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('Voice prescription'),
-          const Text(
-            'Record the consultation and the system drafts a prescription. '
-            'Nothing is sent to the patient until you issue it.',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          if (widget.canEdit && !issued) _recordControls(),
-          if (_session != null) ...[
-            const SizedBox(height: 10),
-            _sessionStatus(),
+          const CardTitle('Prescription'),
+          const SizedBox(height: 10),
+          if (!issued) ...[
+            _modeTabs(),
+            const SizedBox(height: 16),
           ],
-          const Divider(height: 28),
-          if (issued) _issuedView() else _editor(),
+          if (issued) _issuedView() else _modeBody(),
         ],
       ),
     );
+  }
+
+  Widget _modeTabs() {
+    Widget tab(String id, String label) {
+      final active = _mode == id;
+      final onTap = () => setState(() => _mode = id);
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: active
+            ? ElevatedButton(onPressed: onTap, child: Text(label))
+            : OutlinedButton(onPressed: onTap, child: Text(label)),
+      );
+    }
+
+    return Wrap(
+      runSpacing: 8,
+      children: [
+        tab('handwrite', '✍️ Handwrite'),
+        tab('voice', '🎙 Voice'),
+        tab('type', '⌨️ Type'),
+      ],
+    );
+  }
+
+  Widget _modeBody() {
+    switch (_mode) {
+      case 'handwrite':
+        return _handwriteBody();
+      case 'type':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Fill in the diagnosis, medicines and advice, then issue when ready.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            _editor(),
+          ],
+        );
+      case 'voice':
+      default:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Record the consultation and the system drafts a prescription. '
+              'Nothing is sent to the patient until you issue it.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            if (widget.canEdit) _recordControls(),
+            if (_session != null) ...[
+              const SizedBox(height: 10),
+              _sessionStatus(),
+            ],
+            const Divider(height: 28),
+            _editor(),
+          ],
+        );
+    }
+  }
+
+  Widget _handwriteBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        HandwritingPad(controller: _handwriting, enabled: widget.canEdit),
+        if (widget.canEdit) ...[
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              ElevatedButton(
+                onPressed: _saving ? null : _issueHandwriting,
+                child: Text(_saving ? 'Issuing…' : 'Issue prescription'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _issueHandwriting() async {
+    if (!_handwriting.hasContent) {
+      showErrorSnack(context, 'Write the prescription before issuing.');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final png = await _handwriting.export();
+      if (png == null) {
+        throw ApiException('EXPORT', 'Could not read the drawing.', 0);
+      }
+      await _api.saveHandwriting(widget.appointmentId, png);
+      final issued = await _api.issuePrescription(widget.appointmentId);
+      if (!mounted) return;
+      setState(() => _adopt(issued));
+      showSuccessSnack(
+          context, 'Prescription issued — the patient has been notified.');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Widget _recordControls() {
@@ -370,6 +475,19 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
               ),
           ],
         ),
+        if (p.isHandwritten && p.handwritingImageUrl != null) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.control),
+            child: Container(
+              color: Colors.white,
+              child: Image.network(p.handwritingImageUrl!,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink()),
+            ),
+          ),
+        ],
         if (p.diagnosis != null && p.diagnosis!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),

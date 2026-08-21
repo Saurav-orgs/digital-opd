@@ -17,6 +17,7 @@ export default function Profile() {
   const toast = useToast();
   const qc = useQueryClient();
   const photoRef = useRef<HTMLInputElement>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
   const canEdit = can('doctors', 'update');
   const canSchedule = can('opd_schedules', 'read');
 
@@ -28,6 +29,7 @@ export default function Profile() {
 
   const [form, setForm] = useState({
     name: '', specialization: '', qualifications: '', consultation_fee: '', bio: '',
+    clinic_name: '', clinic_address: '', clinic_phone: '',
   });
 
   useEffect(() => {
@@ -38,6 +40,9 @@ export default function Profile() {
         qualifications: meQ.data.qualifications ?? '',
         consultation_fee: meQ.data.consultation_fee ?? '',
         bio: meQ.data.bio ?? '',
+        clinic_name: meQ.data.clinic_name ?? '',
+        clinic_address: meQ.data.clinic_address ?? '',
+        clinic_phone: meQ.data.clinic_phone ?? '',
       });
     }
   }, [meQ.data]);
@@ -50,6 +55,9 @@ export default function Profile() {
         qualifications: form.qualifications || undefined,
         bio: form.bio || undefined,
         consultation_fee: form.consultation_fee === '' ? undefined : (Number(form.consultation_fee) as any),
+        clinic_name: form.clinic_name || undefined,
+        clinic_address: form.clinic_address || undefined,
+        clinic_phone: form.clinic_phone || undefined,
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Profile updated'); },
     onError: (e) => toast.error(e),
@@ -58,6 +66,12 @@ export default function Profile() {
   const uploadPhoto = useMutation({
     mutationFn: (file: File) => doctorsApi.uploadMyPhoto(file),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Profile photo updated'); },
+    onError: (e) => toast.error(e),
+  });
+
+  const uploadLogo = useMutation({
+    mutationFn: (file: File) => doctorsApi.uploadMyLetterheadLogo(file),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Letterhead logo updated'); },
     onError: (e) => toast.error(e),
   });
 
@@ -132,8 +146,165 @@ export default function Profile() {
             )}
           </div>
 
+          {meQ.data?.public_slug && (
+            <div className="card">
+              <div className="card-title">My booking link</div>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+                Share this link (or its QR code) with patients so they can book appointments.
+              </p>
+              <div style={{
+                fontSize: 12,
+                fontFamily: 'monospace',
+                wordBreak: 'break-all',
+                background: 'var(--surface-2, #f4f4f5)',
+                padding: '8px 12px',
+                borderRadius: 8,
+                marginBottom: 10,
+              }}>
+                {`${window.location.origin.replace(':5173', ':5174')}/d/${meQ.data.public_slug}`}
+              </div>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  const url = `${window.location.origin.replace(':5173', ':5174')}/d/${meQ.data!.public_slug}`;
+                  navigator.clipboard.writeText(url);
+                  toast.success('Link copied!');
+                }}
+              >
+                Copy link
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Prescription letterhead ── */}
+      <div className="page-head" style={{ marginTop: 28 }}>
+        <div>
+          <h1 style={{ fontSize: 18 }}>Prescription letterhead</h1>
+          <span className="muted">This is what appears at the top of every prescription you issue.</span>
+        </div>
+      </div>
+
+      <div className="grid cols-2-1">
+        <div className="card">
+          <Field label="Clinic / practice name">
+            <input
+              className="input"
+              disabled={!canEdit}
+              placeholder="e.g. Rao Heart Clinic"
+              value={form.clinic_name}
+              onChange={(e) => setForm({ ...form, clinic_name: e.target.value })}
+            />
+          </Field>
+          <Field label="Address">
+            <textarea
+              className="input"
+              rows={2}
+              disabled={!canEdit}
+              placeholder="2nd Floor, MG Road, Bengaluru 560001"
+              value={form.clinic_address}
+              onChange={(e) => setForm({ ...form, clinic_address: e.target.value })}
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              className="input"
+              disabled={!canEdit}
+              placeholder="+91 98765 43210"
+              value={form.clinic_phone}
+              onChange={(e) => setForm({ ...form, clinic_phone: e.target.value })}
+            />
+          </Field>
+
+          <div className="card-title" style={{ marginTop: 8 }}>Clinic logo</div>
+          <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+            {meQ.data?.clinic_logo_url ? (
+              <img
+                src={meQ.data.clinic_logo_url}
+                alt="Logo"
+                style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 8, border: 'var(--hairline)', background: '#fff' }}
+              />
+            ) : (
+              <div style={{ width: 56, height: 56, borderRadius: 8, border: 'var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
+                No logo
+              </div>
+            )}
+            {canEdit && (
+              <>
+                <input
+                  ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo.mutate(f); e.target.value = ''; }}
+                />
+                <button className="btn btn-sm" onClick={() => logoRef.current?.click()} disabled={uploadLogo.isPending}>
+                  {uploadLogo.isPending ? 'Uploading…' : 'Upload logo'}
+                </button>
+              </>
+            )}
+          </div>
+
+          {canEdit && (
+            <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+              <button className="btn btn-primary btn-sm" onClick={() => save.mutate()} disabled={save.isPending}>
+                {save.isPending ? 'Saving…' : 'Save letterhead'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="stack">
+          <div className="card">
+            <div className="card-title">Live preview</div>
+            <LetterheadPreview
+              logoUrl={meQ.data?.clinic_logo_url ?? null}
+              clinicName={form.clinic_name || form.name || 'Your clinic'}
+              doctorName={form.name}
+              creds={[form.qualifications, form.specialization].filter(Boolean).join('  •  ')}
+              address={form.clinic_address}
+              phone={form.clinic_phone}
+            />
+          </div>
         </div>
       </div>
     </>
+  );
+}
+
+/** A faithful mini of the PDF letterhead band, so the doctor sees their pad. */
+function LetterheadPreview({
+  logoUrl, clinicName, doctorName, creds, address, phone,
+}: {
+  logoUrl: string | null;
+  clinicName: string;
+  doctorName: string;
+  creds: string;
+  address: string;
+  phone: string;
+}) {
+  const brand = '#0F766E';
+  const showDoctorLine = clinicName !== doctorName;
+  return (
+    <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+      <div style={{ background: brand, color: '#fff', padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        {logoUrl && (
+          <img src={logoUrl} alt="" style={{ width: 44, height: 44, objectFit: 'contain', background: '#fff', borderRadius: 6, flexShrink: 0 }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{clinicName}</div>
+          {creds && <div style={{ fontSize: 11, color: '#DCEDEA', marginTop: 3 }}>{creds}</div>}
+          {showDoctorLine && doctorName && (
+            <div style={{ fontSize: 11, fontStyle: 'italic', color: '#CFE6E2', marginTop: 2 }}>{doctorName}</div>
+          )}
+        </div>
+        <div style={{ fontSize: 10, color: '#EAF3F1', textAlign: 'right', whiteSpace: 'pre-line', maxWidth: 150 }}>
+          {[address, phone].filter(Boolean).join('\n')}
+        </div>
+      </div>
+      <div style={{ height: 3, background: '#0B5750' }} />
+      <div style={{ padding: '18px 16px', color: 'var(--text-muted)', fontSize: 12 }}>
+        <div style={{ fontFamily: 'Times, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 22, color: brand }}>Rx</div>
+        <div style={{ marginTop: 8 }}>Patient details, medicines and advice appear here.</div>
+      </div>
+    </div>
   );
 }

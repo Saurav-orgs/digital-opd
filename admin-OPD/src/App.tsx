@@ -10,6 +10,8 @@ import Roles from './pages/Roles';
 import Profile from './pages/Profile';
 import Pathlabs from './pages/Pathlabs';
 import Reports from './pages/Reports';
+import AppointmentPage from './pages/AppointmentPage';
+import DoctorsPage from './pages/Doctors';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -21,7 +23,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 /** Landing route: first module the user can see. */
 function Home() {
-  const { can, isDoctor } = useAuth();
+  const { can, isDoctor, isSuperAdmin } = useAuth();
+  if (isSuperAdmin) return <Navigate to="/doctors" replace />;
   if (can('dashboard', 'read')) return <Navigate to="/dashboard" replace />;
   if (can('appointments', 'read')) return <Navigate to="/dashboard" replace />;
   if (isDoctor) return <Navigate to="/profile" replace />;
@@ -51,6 +54,8 @@ export default function App() {
         <Route path="/roles" element={<Roles />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/schedule" element={<DoctorSchedule />} />
+        <Route path="/appointments/:id" element={<AppointmentPage />} />
+        <Route path="/doctors" element={<DoctorsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

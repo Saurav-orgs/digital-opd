@@ -1,0 +1,560 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { appointmentsApi, reportsApi } from '../api/endpoints';
+import type { PatientReport, Slot } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
+import { useToast } from '../components/Toast';
+import { Badge, Loading } from '../components/ui';
+import { InlineSlotPicker } from '../components/InlineSlotPicker';
+import { ConsultationRecorder } from '../components/ConsultationRecorder';
+import { PrescriptionEditor } from '../components/PrescriptionEditor';
+
+export default function AppointmentPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const canUpdate = can('appointments', 'update');
+
+  const { data: a, isLoading } = useQuery({
+    queryKey: ['appointment', id],
+    queryFn: () => appointmentsApi.get(id!),
+    enabled: !!id,
+  });
+
+  const [notes, setNotes] = useState('');
+  useEffect(() => { setNotes(a?.doctor_notes ?? ''); }, [a?.doctor_notes]);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['appointment', id] });
+    qc.invalidateQueries({ queryKey: ['appointments'] });
+    qc.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+
+  const saveNotes = useMutation({
+    mutationFn: (v: string) => appointmentsApi.setNotes(id!, v),
+    onSuccess: () => { invalidate(); toast.success('Note saved'); },
+    onError: (e) => toast.error(e),
+  });
+
+  const consult = useMutation({
+    mutationFn: (status: string) => appointmentsApi.setConsultation(id!, status),
+    onSuccess: () => { invalidate(); toast.success('Consultation updated'); },
+    onError: (e) => toast.error(e),
+  });
+
+  // ── Reschedule ────────────────────────────────────────────
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rDate, setRDate] = useState<string | null>(null);
+  const [rSlot, setRSlot] = useState<Slot | null>(null);
+  const reschedule = useMutation({
+    mutationFn: () => appointmentsApi.reschedule(id!, rDate!, rSlot!.start_time),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Appointment rescheduled');
+      setRescheduling(false); setRDate(null); setRSlot(null);
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  // ── Prescriptions (uploaded images) ──────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const addRx = useMutation({
+    mutationFn: (files: File[]) => appointmentsApi.addPrescriptions(id!, files),
+    onSuccess: (_data, files) => { invalidate(); toast.success(`Prescription${files.length > 1 ? 's' : ''} uploaded`); },
+    onError: (e) => toast.error(e),
+  });
+  const deleteRx = useMutation({
+    mutationFn: (rxId: string) => appointmentsApi.deletePrescription(id!, rxId),
+    onSuccess: () => { invalidate(); toast.success('Prescription deleted'); },
+    onError: (e) => toast.error(e),
+  });
+
+  // ── History ───────────────────────────────────────────────
+  const historyQ = useQuery({
+    queryKey: ['appointment-history', a?.patient_mobile, id],
+    queryFn: () => appointmentsApi.history(a!.patient_mobile, id!),
+    enabled: !!a?.patient_mobile,
+  });
+
+  // ── Reminder ──────────────────────────────────────────────
+  const [addingReminder, setAddingReminder] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState('');
+  const [reminderDate, setReminderDate] = useState('');
+  const reminder = useMutation({
+    mutationFn: () => appointmentsApi.addReminder(id!, reminderMsg.trim(), reminderDate || undefined),
+    onSuccess: () => {
+      invalidate(); toast.success('Reminder sent');
+      setAddingReminder(false); setReminderMsg(''); setReminderDate('');
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  if (isLoading || !id) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <Loading />
+      </div>
+    );
+  }
+
+  const genderAge = [
+    a?.patient_gender ? a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1) : null,
+    a?.patient_age != null ? `${a.patient_age} yrs` : null,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div style={{ maxWidth: 860, margin: '0 auto' }}>
+      {/* ── Page header ─────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <button
+          className="btn btn-sm"
+          onClick={() => navigate('/dashboard')}
+          style={{ marginTop: 2, flexShrink: 0 }}
+        >
+          ← Back
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{ fontSize: 20, margin: 0, lineHeight: 1.3 }}>
+            {a?.patient_name ?? 'Appointment'}
+          </h1>
+          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+            {a?.appointment_date} · {a?.start_time?.slice(0, 5)}–{a?.end_time?.slice(0, 5)}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {a?.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
+          {a && <Badge value={a.status} />}
+          {a && <Badge value={a.consultation_status} />}
+        </div>
+      </div>
+
+      {/* ── 1. Patient details card ─────────────────────────── */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title" style={{ marginBottom: 14 }}>Patient details</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
+          <Field label="Name" value={a?.patient_name} />
+          <Field label="Mobile" value={a?.patient_mobile} />
+          {genderAge && <Field label="Gender & age" value={genderAge} />}
+          {a?.patient_address && <Field label="Address" value={a.patient_address} />}
+          {a?.description && <Field label="Reason for visit" value={a.description} />}
+          {a?.source && (
+            <Field
+              label="Booking"
+              value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web'}
+            />
+          )}
+        </div>
+
+        {/* Consultation outcome row inside patient card */}
+        {a && canUpdate && a.status !== 'rejected' && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: 'var(--hairline)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>Mark outcome:</span>
+            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>✓ Done</button>
+            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>⏸ On hold</button>
+            <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
+          </div>
+        )}
+      </div>
+
+      {/* ── 2. Report summary ────────────────────────────────── */}
+      {a && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>Reports &amp; summary</div>
+          {a.reports.length === 0 ? (
+            <span className="muted">No reports uploaded for this appointment.</span>
+          ) : (
+            <div className="stack" style={{ gap: 12 }}>
+              <VisitReportSummary
+                appointmentId={id}
+                summary={a.reports_summary}
+                status={a.reports_summary_status}
+                error={a.reports_summary_error}
+                count={a.reports_summary_count}
+                reportCount={a.reports.length}
+                onRetried={invalidate}
+              />
+              <details>
+                <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
+                  Individual reports ({a.reports.length})
+                </summary>
+                <div className="stack" style={{ gap: 12, marginTop: 10 }}>
+                  {a.reports.map((r) => (
+                    <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
+                  ))}
+                </div>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 3. Prescription ──────────────────────────────────── */}
+      {a && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 4 }}>Prescription</div>
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 12 }}>
+            Record the consultation to auto-draft a prescription. Nothing is sent until you issue it.
+          </p>
+          {canUpdate && (
+            <ConsultationRecorder appointmentId={id} disabled={a.status === 'rejected'} />
+          )}
+          <div style={{ marginTop: 16 }}>
+            <PrescriptionEditor appointmentId={id} canEdit={canUpdate} />
+          </div>
+        </div>
+      )}
+
+      {/* ── 4. Doctor's note ─────────────────────────────────── */}
+      {a && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Doctor's note</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            Shown when this patient books their next OPD.
+          </div>
+          {canUpdate ? (
+            <>
+              <textarea
+                className="input"
+                rows={3}
+                placeholder="Add a note for this patient's next visit…"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={saveNotes.isPending || notes === (a.doctor_notes ?? '')}
+                  onClick={() => saveNotes.mutate(notes)}
+                >
+                  {saveNotes.isPending ? 'Saving…' : 'Save note'}
+                </button>
+              </div>
+            </>
+          ) : a.doctor_notes ? (
+            <div style={{ whiteSpace: 'pre-wrap' }}>{a.doctor_notes}</div>
+          ) : (
+            <span className="muted">No note yet.</span>
+          )}
+        </div>
+      )}
+
+      {/* ── 5. Reschedule ────────────────────────────────────── */}
+      {a && canUpdate && a.status !== 'rejected' && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Reschedule</div>
+          {!rescheduling ? (
+            <button className="btn btn-sm" onClick={() => setRescheduling(true)}>Reschedule slot</button>
+          ) : (
+            <>
+              <InlineSlotPicker
+                doctorId={a.doctor_id}
+                onChange={(date, slot) => { setRDate(date); setRSlot(slot); }}
+              />
+              <div className="row" style={{ marginTop: 12 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!rDate || !rSlot || reschedule.isPending}
+                  onClick={() => reschedule.mutate()}
+                >
+                  {reschedule.isPending ? 'Saving…' : 'Confirm new slot'}
+                </button>
+                <button className="btn btn-sm" onClick={() => { setRescheduling(false); setRDate(null); setRSlot(null); }}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── 6. Uploaded prescription images ──────────────────── */}
+      {a && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Uploaded prescription images</div>
+          {a.prescriptions.length === 0 ? (
+            <span className="muted">No images uploaded yet.</span>
+          ) : (
+            <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+              {a.prescriptions.map((p) => (
+                <div key={p.id} style={{ position: 'relative' }}>
+                  <a href={p.url} target="_blank" rel="noreferrer">
+                    <img
+                      src={p.url}
+                      alt="Prescription"
+                      style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 8, border: 'var(--hairline)' }}
+                    />
+                  </a>
+                  {canUpdate && (
+                    <button
+                      type="button"
+                      title="Delete"
+                      disabled={deleteRx.isPending}
+                      onClick={() => deleteRx.mutate(p.id)}
+                      style={{
+                        position: 'absolute', top: -8, right: -8, width: 22, height: 22,
+                        borderRadius: '50%', background: 'var(--state-error)', color: '#fff',
+                        border: 'none', cursor: 'pointer', lineHeight: 1, fontSize: 13,
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {canUpdate && (
+            <div style={{ marginTop: 10 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) addRx.mutate(files);
+                  e.target.value = '';
+                }}
+              />
+              <button className="btn btn-sm" disabled={addRx.isPending} onClick={() => fileInputRef.current?.click()}>
+                {addRx.isPending ? 'Uploading…' : '+ Upload images'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 7. Previous visits ───────────────────────────────── */}
+      {a && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Previous visits</div>
+          {historyQ.isLoading ? (
+            <span className="muted">Loading history…</span>
+          ) : !historyQ.data?.length ? (
+            <span className="muted">No earlier visits for this patient.</span>
+          ) : (
+            <div className="stack" style={{ gap: 10 }}>
+              {historyQ.data.map((h) => (
+                <div key={h.id} style={{ borderBottom: 'var(--hairline)', paddingBottom: 10 }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <strong style={{ fontWeight: 500, fontSize: 14 }}>
+                      {h.appointment_date} · {h.start_time?.slice(0, 5)}
+                    </strong>
+                    <Badge value={h.consultation_status} />
+                  </div>
+                  {h.description && (
+                    <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Reason: {h.description}</div>
+                  )}
+                  {h.doctor_notes && (
+                    <div style={{ fontSize: 13, marginTop: 4 }}>Note: {h.doctor_notes}</div>
+                  )}
+                  {h.prescriptions.length > 0 && (
+                    <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      {h.prescriptions.map((p) => (
+                        <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
+                          <img src={p.url} alt="Prescription" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: 'var(--hairline)' }} />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {h.reports.length > 0 && (
+                    <div className="stack" style={{ gap: 4, marginTop: 8 }}>
+                      {h.reports.map((r) => (
+                        <a key={r.id} href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                          📄 {r.title}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 8. Next-visit reminder ───────────────────────────── */}
+      {a && canUpdate && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Next-visit reminder</div>
+          {a.next_visit_note && !addingReminder && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{a.next_visit_note}</div>
+              {a.next_visit_date && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Suggested date: {a.next_visit_date}</div>
+              )}
+            </div>
+          )}
+          {!addingReminder ? (
+            <button className="btn btn-sm" onClick={() => setAddingReminder(true)}>
+              {a.next_visit_note ? 'Update reminder' : 'Add reminder'}
+            </button>
+          ) : (
+            <>
+              <textarea
+                className="input"
+                rows={3}
+                placeholder="e.g. Come back for a follow-up in 2 weeks."
+                value={reminderMsg}
+                onChange={(e) => setReminderMsg(e.target.value)}
+              />
+              <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
+                <input className="input" type="date" style={{ width: 170 }} value={reminderDate} onChange={(e) => setReminderDate(e.target.value)} />
+                <span className="muted" style={{ fontSize: 12 }}>Suggested date (optional)</span>
+              </div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!reminderMsg.trim() || reminder.isPending}
+                  onClick={() => reminder.mutate()}
+                >
+                  {reminder.isPending ? 'Sending…' : 'Send reminder'}
+                </button>
+                <button className="btn btn-sm" onClick={() => setAddingReminder(false)}>Cancel</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Shared sub-components ────────────────────────────────────
+
+function Field({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 500 }}>{value}</div>
+    </div>
+  );
+}
+
+function VisitReportSummary({
+  appointmentId, summary, status, error, count, reportCount, onRetried,
+}: {
+  appointmentId: string;
+  summary?: import('../api/types').ReportAiSummary | null;
+  status?: import('../api/types').AiJobStatus | null;
+  error?: string | null;
+  count?: number;
+  reportCount: number;
+  onRetried: () => void;
+}) {
+  const toast = useToast();
+  const retry = useMutation({
+    mutationFn: () => reportsApi.retryVisitSummary(appointmentId),
+    onSuccess: () => { onRetried(); toast.success('Combining report summaries…'); },
+    onError: (e) => toast.error(e),
+  });
+
+  if (reportCount < 2 && status !== 'ready') return null;
+
+  return (
+    <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--primary-tint, #eef4ff)', border: '1px solid var(--primary, #cddffb)' }}>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+        <strong style={{ fontSize: 13 }}>
+          Combined summary{count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
+        </strong>
+        {status === 'ready' && (
+          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? 'Refreshing…' : 'Refresh'}
+          </button>
+        )}
+      </div>
+      {status === 'processing' ? (
+        <span className="muted" style={{ fontSize: 12.5 }}>Combining the report summaries…</span>
+      ) : status === 'failed' ? (
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Couldn't combine{error ? `: ${error}` : '.'}</span>
+          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      ) : summary ? (
+        <SummaryBody summary={summary} />
+      ) : (
+        <span className="muted" style={{ fontSize: 12.5 }}>Waiting for report summaries…</span>
+      )}
+    </div>
+  );
+}
+
+function ReportWithSummary({ report, onRetried }: { report: PatientReport; onRetried: () => void }) {
+  const toast = useToast();
+  const retry = useMutation({
+    mutationFn: () => reportsApi.retrySummary(report.id),
+    onSuccess: () => { onRetried(); toast.success('Summarising again…'); },
+    onError: (e) => toast.error(e),
+  });
+
+  const { ai_summary_status: status, ai_summary: summary } = report;
+  return (
+    <div style={{ borderBottom: 'var(--hairline)', paddingBottom: 10 }}>
+      <a href={report.url} target="_blank" rel="noreferrer">📄 {report.title}</a>
+      {status === 'processing' ? (
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Summarising…</div>
+      ) : status === 'pending' ? (
+        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Waiting to be summarised.</span>
+          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? 'Trying…' : 'Summarise now'}
+          </button>
+        </div>
+      ) : status === 'failed' ? (
+        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Couldn't summarise this report.</span>
+          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            {retry.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      ) : summary ? (
+        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'var(--page)' }}>
+          <SummaryBody summary={summary} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryBody({ summary }: { summary: import('../api/types').ReportAiSummary }) {
+  return (
+    <>
+      {summary.report_type && <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{summary.report_type}</div>}
+      <div style={{ fontSize: 13 }}>{summary.summary}</div>
+      {summary.abnormal_values.length > 0 && (
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          {summary.abnormal_values.map((v, i) => <AbnormalTag key={i} v={v} />)}
+        </div>
+      )}
+      {summary.key_findings.length > 0 && (
+        <ul style={{ margin: '8px 0 0 18px', fontSize: 12.5 }}>
+          {summary.key_findings.map((f, i) => <li key={i}>{f}</li>)}
+        </ul>
+      )}
+      <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+        AI-generated — check the reports themselves before acting.
+      </div>
+    </>
+  );
+}
+
+function AbnormalTag({ v }: { v: { label: string; value: string; reference?: string; direction: 'high' | 'low' | 'abnormal' } }) {
+  const high = v.direction === 'high';
+  return (
+    <span style={{
+      display: 'inline-block', maxWidth: '100%', padding: '3px 8px', borderRadius: 6,
+      fontSize: 12, lineHeight: 1.35, whiteSpace: 'normal', overflowWrap: 'anywhere',
+      background: high ? '#fdecec' : '#fbf1e0',
+      color: high ? 'var(--state-error)' : 'var(--state-on-hold)',
+    }}>
+      {v.label}: {v.value}{v.reference ? ` (ref ${v.reference})` : ''}
+    </span>
+  );
+}

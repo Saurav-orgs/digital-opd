@@ -187,10 +187,20 @@ class ApiClient {
   Future<Doctor> getDoctor(String id) async =>
       Doctor.fromJson(await _get('/doctors/$id') as Map<String, dynamic>);
 
-  // No createDoctor/deleteDoctor: the clinic's single profile is seeded by the
-  // server and owned by the SuperAdmin, who is the doctor.
+  Future<CreateDoctorResult> createDoctor(Map<String, dynamic> body) async =>
+      CreateDoctorResult.fromJson(
+          await _post('/doctors', body) as Map<String, dynamic>);
+
+  Future<Doctor> regenerateSlug(String id) async =>
+      Doctor.fromJson(await _post('/doctors/$id/regenerate-slug') as Map<String, dynamic>);
+
   Future<Doctor> updateDoctor(String id, Map<String, dynamic> body) async =>
       Doctor.fromJson(await _patch('/doctors/$id', body) as Map<String, dynamic>);
+
+  Future<void> deleteDoctor(String id) => _guard(() async {
+        final res = await http.delete(_uri('/doctors/$id'), headers: _headers());
+        _decode(res);
+      });
 
   Future<Doctor> enableDoctor(String id) async =>
       Doctor.fromJson(await _patch('/doctors/$id/enable') as Map<String, dynamic>);
@@ -210,6 +220,9 @@ class ApiClient {
 
   Future<Doctor> uploadMyPhoto(File file) =>
       _uploadImage('/doctors/me/photo', file);
+
+  Future<Doctor> uploadMyLetterheadLogo(File file) =>
+      _uploadImage('/doctors/me/letterhead-logo', file);
 
   // ── Schedules & leave ──────────────────────────────────────
   Future<List<ScheduleEntry>> listSchedules(String doctorId) async =>
@@ -343,6 +356,23 @@ class ApiClient {
       EPrescription.fromJson(
           await _post('/appointments/$appointmentId/prescription/issue')
               as Map<String, dynamic>);
+
+  /// Upload the handwritten prescription image (a transparent PNG drawn on the
+  /// tablet). Returns the updated draft, now in handwritten mode.
+  Future<EPrescription> saveHandwriting(
+          String appointmentId, List<int> pngBytes) =>
+      _guard(() async {
+        final req = http.MultipartRequest('POST',
+            _uri('/appointments/$appointmentId/prescription/handwriting'));
+        if (tokens.token != null) {
+          req.headers['Authorization'] = 'Bearer ${tokens.token}';
+        }
+        req.files.add(http.MultipartFile.fromBytes('file', pngBytes,
+            filename: 'handwriting.png',
+            contentType: MediaType('image', 'png')));
+        final res = await http.Response.fromStream(await req.send());
+        return EPrescription.fromJson(_decode(res) as Map<String, dynamic>);
+      });
 
   Future<void> retryReportSummary(String reportId) =>
       _guard(() async => _post('/reports/$reportId/summary/retry'));

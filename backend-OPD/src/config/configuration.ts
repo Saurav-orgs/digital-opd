@@ -4,6 +4,8 @@ export interface AppConfig {
   apiPrefix: string;
   clinicTimezone: string;
   clinic: { name: string; address: string; phone: string; email: string };
+  /** Base URL of the patient web app (no trailing slash), used to build QR URLs. */
+  patientWebBase: string;
   bookingWindowDays: number;
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
@@ -43,6 +45,7 @@ export default (): AppConfig => ({
     phone: process.env.CLINIC_PHONE || '',
     email: process.env.CLINIC_EMAIL || '',
   },
+  patientWebBase: process.env.PATIENT_WEB_BASE || 'http://localhost:5174',
   bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
   jwt: {

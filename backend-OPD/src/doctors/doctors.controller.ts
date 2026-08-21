@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -18,10 +19,11 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { DoctorsService } from './doctors.service';
-import { UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
+import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
-import { PermissionAction, PermissionModule } from '../common/enums';
+import { PermissionAction, PermissionModule, UserType } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -43,7 +45,10 @@ const fileBody = {
 @ApiBearerAuth()
 @Controller('doctors')
 export class DoctorsController {
-  constructor(private readonly doctorsService: DoctorsService) {}
+  constructor(
+    private readonly doctorsService: DoctorsService,
+    private readonly config: ConfigService,
+  ) {}
 
   // ── Doctor self-service (declared before :id) ──────────────
   @Get('me')
@@ -72,10 +77,47 @@ export class DoctorsController {
     return this.doctorsService.uploadPhoto(this.selfId(user), file);
   }
 
+  @Post('me/letterhead-logo')
+  @ApiOperation({ summary: 'Doctor uploads own prescription letterhead logo' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(fileBody)
+  @UseInterceptors(FileInterceptor('file', imageUpload))
+  uploadOwnLetterheadLogo(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.doctorsService.uploadLetterheadLogo(this.selfId(user), file);
+  }
+
+  // ── Super-admin: tenant management ────────────────────────
+  /**
+   * Creates a new doctor tenant (doctor profile + roles + login).
+   * Super-admin only: the caller must be type=super_admin; the permission
+   * check (doctors:create) is a secondary guard.
+   */
+  @Post()
+  @ApiOperation({ summary: 'Super-admin: create a new doctor tenant' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
+  createDoctor(@CurrentUser() user: AuthUser, @Body() dto: CreateDoctorDto) {
+    this.assertSuperAdmin(user);
+    const base = this.config.get<string>('patientWebBase') ?? '';
+    return this.doctorsService.createTenant(dto, base);
+  }
+
+  @Post(':id/regenerate-slug')
+  @ApiOperation({ summary: 'Super-admin: rotate the doctor QR slug' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  regenerateSlug(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    this.assertSuperAdmin(user);
+    const base = this.config.get<string>('patientWebBase') ?? '';
+    return this.doctorsService.regenerateSlug(id, base);
+  }
+
   // ── Admin reads/edits ──────────────────────────────────────
-  // The clinic's single doctor profile is seeded by MasterSetupService and
-  // owned by the SuperAdmin, so there is no create/delete here — only reads,
-  // edits and the enable/disable toggle for patient-app visibility.
   @Get()
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
   findAll() {
@@ -92,6 +134,17 @@ export class DoctorsController {
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDoctorDto) {
     return this.doctorsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Super-admin: permanently remove a doctor tenant' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.DELETE })
+  remove(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.remove(id);
   }
 
   @Patch(':id/enable')
@@ -125,5 +178,13 @@ export class DoctorsController {
       });
     }
     return user.doctorId;
+  }
+
+  private assertSuperAdmin(user: AuthUser): void {
+    if (user.type !== UserType.SUPER_ADMIN) {
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'Only the platform super-admin can perform this action.',
+      });
+    }
   }
 }

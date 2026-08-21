@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api/models.dart';
 import '../auth/patient_scope.dart';
+import '../doctor_context.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -20,11 +21,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= PatientAuthScope.of(context).api.notifications();
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    _future ??=
+        PatientAuthScope.of(context).api.notifications(doctorId: doctorId);
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = PatientAuthScope.of(context).api.notifications());
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    setState(() => _future =
+        PatientAuthScope.of(context).api.notifications(doctorId: doctorId));
     await _future;
     widget.onChanged?.call();
   }

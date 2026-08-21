@@ -7,6 +7,7 @@ import {
   Table,
 } from 'sequelize-typescript';
 import { Appointment } from './appointment.model';
+import { Doctor } from './doctor.model';
 import { TrainingSampleKind } from '../../common/enums';
 
 /**
@@ -54,6 +55,13 @@ export class AiTrainingSample extends Model<AiTrainingSample> {
   @Column({ type: DataType.STRING, allowNull: true })
   model_version: string | null;
 
+  @ForeignKey(() => Doctor)
+  @Column({ type: DataType.UUID, allowNull: true })
+  doctor_id: string | null;
+
   @BelongsTo(() => Appointment)
   appointment: Appointment;
+
+  @BelongsTo(() => Doctor)
+  doctor: Doctor;
 }

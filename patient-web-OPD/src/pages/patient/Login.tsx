@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Phone, User, LogIn, UserPlus } from 'lucide-react';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException } from '../../types';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, register } = usePatientAuth();
+  const { doctor } = useDoctorCtx();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [mobile, setMobile] = useState('');
@@ -33,9 +35,9 @@ export const Login: React.FC = () => {
     setSubmitting(true);
     try {
       if (mode === 'login') {
-        await login(mobile.trim());
+        await login(mobile.trim(), doctor?.id);
       } else {
-        await register(mobile.trim(), name.trim());
+        await register(mobile.trim(), name.trim(), doctor?.id);
       }
       navigate(redirectTo, { replace: true });
     } catch (err) {

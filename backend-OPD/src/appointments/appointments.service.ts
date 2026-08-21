@@ -26,7 +26,6 @@ import {
   BookingSource,
   ConsultationStatus,
   NotificationType,
-  UserType,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { nowInClinic } from '../common/utils/clinic-time';
@@ -159,12 +158,13 @@ export class AppointmentsService {
     user: AuthUser,
   ): Promise<Record<string, any>[]> {
     const where: any = {};
-    // Data scope: a doctor only ever sees their own appointments.
-    if (user.type === UserType.DOCTOR) {
-      if (!user.doctorId) return [];
+    // Tenant scope: every clinical user (doctor + staff) has a doctorId and
+    // sees only their tenant's appointments. Super admin has doctorId=null and
+    // returns nothing on clinical routes.
+    if (user.doctorId) {
       where.doctor_id = user.doctorId;
-    } else if (query.doctorId) {
-      where.doctor_id = query.doctorId;
+    } else {
+      return []; // super admin has no clinical scope
     }
     if (query.date) where.appointment_date = query.date;
     // Relative window (clinic timezone) for the dashboard tabs.
@@ -347,8 +347,8 @@ export class AppointmentsService {
    * patient's next OPD.
    */
   async history(mobile: string, user: AuthUser, excludeId?: string) {
-    const doctorId = user.type === UserType.DOCTOR ? user.doctorId : undefined;
-    if (user.type === UserType.DOCTOR && !doctorId) return [];
+    const doctorId = user.doctorId ?? undefined;
+    if (!doctorId) return []; // super admin has no clinical scope
 
     // "Previous visits" means earlier than the visit being viewed — not merely
     // "every other visit". Anchor on the reference appointment's date/time so a
@@ -367,8 +367,8 @@ export class AppointmentsService {
   }
 
   /** All visits for a patient's mobile, unscoped — used by the patient portal. */
-  async patientVisits(mobile: string) {
-    return this.visitsForMobile(mobile);
+  async patientVisits(mobile: string, doctorId?: string | null) {
+    return this.visitsForMobile(mobile, doctorId ? { doctorId } : {});
   }
 
   private async visitsForMobile(
@@ -479,6 +479,7 @@ export class AppointmentsService {
       'Reminder for your next visit',
       body,
       { appointmentId: appointment.id, suggestedDate: dto.suggested_date ?? null },
+      appointment.doctor_id,
     );
 
     return this.withDoctor(id);
@@ -562,10 +563,10 @@ export class AppointmentsService {
   }
 
   private assertOwnership(appointment: Appointment, user: AuthUser): void {
-    if (
-      user.type === UserType.DOCTOR &&
-      appointment.doctor_id !== user.doctorId
-    ) {
+    // All clinical users (doctor + staff) have doctorId; they are scoped to
+    // their tenant. Super admin (doctorId=null) is not a clinical user and
+    // should not reach this path, but we block them anyway.
+    if (!user.doctorId || appointment.doctor_id !== user.doctorId) {
       throw new AppException(ErrorCode.FORBIDDEN, {
         message: 'You can only access your own appointments.',
       });

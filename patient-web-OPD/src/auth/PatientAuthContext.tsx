@@ -13,8 +13,8 @@ import type { PatientAuthUser } from '../types';
 interface PatientAuthContextValue {
   patient: PatientAuthUser | null;
   loading: boolean;
-  login: (mobile: string) => Promise<void>;
-  register: (mobile: string, name: string) => Promise<void>;
+  login: (mobile: string, doctorId?: string | null) => Promise<void>;
+  register: (mobile: string, name: string, doctorId?: string | null) => Promise<void>;
   logout: () => void;
 }
 
@@ -40,14 +40,14 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (mobile: string) => {
-    const res = await patientApi.login(mobile);
+  const login = useCallback(async (mobile: string, doctorId?: string | null) => {
+    const res = await patientApi.login(mobile, doctorId);
     patientTokenStore.set(res.accessToken);
     setPatient(res.patient);
   }, []);
 
-  const register = useCallback(async (mobile: string, name: string) => {
-    const res = await patientApi.register(mobile, name);
+  const register = useCallback(async (mobile: string, name: string, doctorId?: string | null) => {
+    const res = await patientApi.register(mobile, name, doctorId);
     patientTokenStore.set(res.accessToken);
     setPatient(res.patient);
   }, []);

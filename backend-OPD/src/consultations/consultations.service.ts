@@ -13,7 +13,6 @@ import {
   ConsultationSessionStatus,
   MedicineSource,
   PrescriptionStatus,
-  UserType,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -104,9 +103,9 @@ export class ConsultationsService {
     let transcript = '';
     let modelVersion: string | null = null;
 
-    // 1. Speech → text, biased toward the clinic's medicine vocabulary.
+    // 1. Speech → text, biased toward the tenant's medicine vocabulary.
     try {
-      const vocabulary = await this.medicines.vocabulary(60);
+      const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 60);
       const result = await this.ai.transcribe(audio, vocabulary);
       transcript = result.text;
       modelVersion = result.model_version;
@@ -136,7 +135,7 @@ export class ConsultationsService {
 
     // 2. Transcript → structured draft prescription.
     try {
-      const vocabulary = await this.medicines.vocabulary(120);
+      const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
       const { prescription, model_version } = await this.ai.extractPrescription({
         transcript,
         patient: {
@@ -247,7 +246,7 @@ export class ConsultationsService {
         message: 'Appointment not found.',
       });
     }
-    if (user.type === UserType.DOCTOR && appointment.doctor_id !== user.doctorId) {
+    if (!user.doctorId || appointment.doctor_id !== user.doctorId) {
       throw new AppException(ErrorCode.FORBIDDEN, {
         message: 'You can only access your own appointments.',
       });

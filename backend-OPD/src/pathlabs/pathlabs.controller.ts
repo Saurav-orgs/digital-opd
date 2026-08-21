@@ -4,6 +4,7 @@ import { PathlabsService } from './pathlabs.service';
 import { CreatePathlabDto, UpdatePathlabDto } from './dto/pathlab.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Pathlabs')
 @ApiBearerAuth()
@@ -13,14 +14,14 @@ export class PathlabsController {
 
   @Get()
   @Permissions({ module: PermissionModule.PATHLABS, action: PermissionAction.READ })
-  findAll() {
-    return this.service.findAll();
+  findAll(@CurrentUser() user: AuthUser) {
+    return this.service.findAll(user);
   }
 
   @Post()
   @Permissions({ module: PermissionModule.PATHLABS, action: PermissionAction.CREATE })
-  create(@Body() dto: CreatePathlabDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreatePathlabDto, @CurrentUser() user: AuthUser) {
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')

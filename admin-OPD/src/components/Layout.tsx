@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { NAV } from '../lib/nav';
 
 export default function Layout() {
-  const { user, logout, can, isDoctor } = useAuth();
+  const { user, logout, can, isDoctor, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -13,7 +13,9 @@ export default function Layout() {
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 
-  const items = NAV.filter((n) => can(n.module, 'read'));
+  const items = NAV.filter(
+    (n) => can(n.module, 'read') && (!n.superAdminOnly || isSuperAdmin),
+  );
 
   const getFormattedRole = (type?: string) => {
     if (!type) return '';

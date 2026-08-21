@@ -10,7 +10,7 @@ import {
 import { Appointment } from './appointment.model';
 import { ConsultationSession } from './consultation-session.model';
 import { EPrescriptionMedicine } from './e-prescription-medicine.model';
-import { PrescriptionStatus } from '../../common/enums';
+import { PrescriptionMode, PrescriptionStatus } from '../../common/enums';
 
 /**
  * The doctor's e-prescription for one visit. Exactly one per appointment: it
@@ -45,6 +45,18 @@ export class EPrescription extends Model<EPrescription> {
     defaultValue: PrescriptionStatus.DRAFT,
   })
   status: PrescriptionStatus;
+
+  /** Whether the body is structured rows or a handwritten image. */
+  @Column({
+    type: DataType.STRING,
+    allowNull: false,
+    defaultValue: PrescriptionMode.STRUCTURED,
+  })
+  mode: PrescriptionMode;
+
+  /** S3 key of the handwritten strokes image (only when mode=handwritten). */
+  @Column({ type: DataType.STRING, allowNull: true })
+  handwriting_image_key: string | null;
 
   @Column({ type: DataType.TEXT, allowNull: true })
   diagnosis: string | null;

@@ -4,7 +4,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
-import { AppointmentStatus, ConsultationStatus, UserType } from '../common/enums';
+import { AppointmentStatus, ConsultationStatus } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { nowInClinic } from '../common/utils/clinic-time';
 
@@ -20,24 +20,22 @@ export class DashboardService {
     const today = nowInClinic(
       this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
     ).date;
-    const scope: any = { appointment_date: today };
-    const doctorScope: any = {};
-    if (user.type === UserType.DOCTOR) {
-      if (!user.doctorId) {
-        return {
-          date: today,
-          total: 0,
-          upcoming: 0,
-          previous: 0,
-          pending: { today: 0, upcoming: 0, previous: 0 },
-          byDoctor: [],
-          byStatus: {},
-          appointments: [],
-        };
-      }
-      scope.doctor_id = user.doctorId;
-      doctorScope.doctor_id = user.doctorId;
+    // Tenant scope: all clinical users (doctor + staff) have doctorId. Super
+    // admin has doctorId=null and sees an empty dashboard (platform owner only).
+    if (!user.doctorId) {
+      return {
+        date: today,
+        total: 0,
+        upcoming: 0,
+        previous: 0,
+        pending: { today: 0, upcoming: 0, previous: 0 },
+        byDoctor: [],
+        byStatus: {},
+        appointments: [],
+      };
     }
+    const scope: any = { appointment_date: today, doctor_id: user.doctorId };
+    const doctorScope: any = { doctor_id: user.doctorId };
 
     // Confirmed counts outside today, for the dashboard cards.
     const [upcoming, previous] = await Promise.all([

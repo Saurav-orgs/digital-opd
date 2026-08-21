@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -45,15 +46,21 @@ export class PatientPortalController {
   ) {}
 
   @Get('appointments')
-  @ApiOperation({ summary: "Patient's consultation history (all visits by mobile)" })
-  listAppointments(@CurrentPatient() patient: AuthPatient) {
-    return this.appointments.patientVisits(patient.mobile);
+  @ApiOperation({ summary: "Patient's consultation history, optionally scoped to one doctor" })
+  listAppointments(
+    @CurrentPatient() patient: AuthPatient,
+    @Query('doctor_id') doctorId?: string,
+  ) {
+    return this.appointments.patientVisits(patient.mobile, doctorId ?? null);
   }
 
   @Get('reports')
-  @ApiOperation({ summary: "Patient's reports (pathlab-uploaded and self-uploaded)" })
-  listReports(@CurrentPatient() patient: AuthPatient) {
-    return this.reports.listForMobile(patient.mobile);
+  @ApiOperation({ summary: "Patient's reports, optionally scoped to one doctor" })
+  listReports(
+    @CurrentPatient() patient: AuthPatient,
+    @Query('doctor_id') doctorId?: string,
+  ) {
+    return this.reports.listForMobile(patient.mobile, doctorId ?? null);
   }
 
   @Post('appointments/:id/reports')
@@ -88,15 +95,21 @@ export class PatientPortalController {
   }
 
   @Get('notifications')
-  @ApiOperation({ summary: "Patient's notifications, newest first" })
-  listNotifications(@CurrentPatient() patient: AuthPatient) {
-    return this.notifications.listForPatient(patient.mobile);
+  @ApiOperation({ summary: "Patient's notifications, optionally scoped to one doctor" })
+  listNotifications(
+    @CurrentPatient() patient: AuthPatient,
+    @Query('doctor_id') doctorId?: string,
+  ) {
+    return this.notifications.listForPatient(patient.mobile, doctorId ?? null);
   }
 
   @Get('notifications/unread-count')
   @ApiOperation({ summary: 'Count of unread notifications' })
-  async unreadCount(@CurrentPatient() patient: AuthPatient) {
-    return { count: await this.notifications.unreadCount(patient.mobile) };
+  async unreadCount(
+    @CurrentPatient() patient: AuthPatient,
+    @Query('doctor_id') doctorId?: string,
+  ) {
+    return { count: await this.notifications.unreadCount(patient.mobile, doctorId ?? null) };
   }
 
   @Patch('notifications/:id/read')

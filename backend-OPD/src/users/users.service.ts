@@ -4,7 +4,6 @@ import * as bcrypt from 'bcrypt';
 import { User } from '../database/models/user.model';
 import { Role } from '../database/models/role.model';
 import { Permission } from '../database/models/permission.model';
-import { Doctor } from '../database/models/doctor.model';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AppException } from '../common/errors/app.exception';
@@ -17,7 +16,6 @@ export class UsersService {
   constructor(
     @InjectModel(User) private readonly userModel: typeof User,
     @InjectModel(Role) private readonly roleModel: typeof Role,
-    @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
   ) {}
 
   private readonly roleWithPerms = {
@@ -26,13 +24,14 @@ export class UsersService {
   };
 
   /**
-   * Creates a staff account for the clinic's doctor (nurse, receptionist…).
-   * Every account is auto-linked to the single doctor profile, so staff share
-   * the doctor's data scope without anyone picking a doctor. `overrides` is for
-   * internal callers that manage their own kind of login (see PathlabsService).
+   * Creates a staff account linked to the caller's tenant.
+   * `overrides` is for internal callers that manage their own kind of login
+   * (see PathlabsService). The caller's `doctorId` becomes the new account's
+   * `doctor_id` — this keeps staff siloed to their doctor's tenant.
    */
   async create(
     dto: CreateUserDto,
+    caller: AuthUser,
     overrides: { type?: UserType } = {},
   ): Promise<User> {
     await this.assertEmailFree(dto.email);
@@ -43,14 +42,17 @@ export class UsersService {
       password_hash,
       type: overrides.type ?? UserType.ADMIN,
       role_id: dto.role_id,
-      doctor_id: await this.clinicDoctorId(),
+      doctor_id: caller.doctorId ?? null,
       is_active: dto.is_active ?? true,
     } as any);
     return this.findOne(user.id);
   }
 
-  async findAll(): Promise<User[]> {
+  /** Returns users in the caller's tenant only (scoped by doctor_id). */
+  async findAll(caller: AuthUser): Promise<User[]> {
+    const where: any = caller.doctorId ? { doctor_id: caller.doctorId } : {};
     return this.userModel.findAll({
+      where,
       include: [this.roleWithPerms, 'doctor'],
       order: [['created_at', 'DESC']],
     });
@@ -126,15 +128,6 @@ export class UsersService {
       doctorId: user.doctor_id,
       permissions,
     };
-  }
-
-  /** The clinic's single doctor profile, seeded by MasterSetupService. */
-  private async clinicDoctorId(): Promise<string | null> {
-    const doctor = await this.doctorModel.findOne({
-      order: [['created_at', 'ASC']],
-      attributes: ['id'],
-    });
-    return doctor?.id ?? null;
   }
 
   private async assertEmailFree(email: string): Promise<void> {

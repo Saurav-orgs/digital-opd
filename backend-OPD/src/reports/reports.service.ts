@@ -35,6 +35,7 @@ export class ReportsService {
       title: dto.title,
       file_key: key,
       uploaded_by_user_id: user.id,
+      doctor_id: user.doctorId ?? null,
     } as any);
 
     await this.notifications.create(
@@ -43,6 +44,7 @@ export class ReportsService {
       'Your report is available',
       `"${dto.title}" has been uploaded and is ready to view.`,
       { reportId: report.id },
+      user.doctorId ?? null,
     );
 
     // Summarising takes tens of seconds — let the upload return now and fill the
@@ -106,9 +108,11 @@ export class ReportsService {
     );
   }
 
-  async listForMobile(mobile: string) {
+  async listForMobile(mobile: string, doctorId?: string | null) {
+    const where: any = { patient_mobile: mobile };
+    if (doctorId) where.doctor_id = doctorId;
     const rows = await this.reportModel.findAll({
-      where: { patient_mobile: mobile },
+      where,
       order: [['created_at', 'DESC']],
     });
     return Promise.all(

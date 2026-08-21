@@ -13,6 +13,7 @@ import { RolesService } from './roles.service';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Roles & Permissions')
 @ApiBearerAuth()
@@ -28,8 +29,8 @@ export class RolesController {
 
   @Get('roles')
   @Permissions({ module: PermissionModule.ROLES, action: PermissionAction.READ })
-  findAll() {
-    return this.rolesService.findAll();
+  findAll(@CurrentUser() user: AuthUser) {
+    return this.rolesService.findAll(user);
   }
 
   @Get('roles/:id')
@@ -40,8 +41,8 @@ export class RolesController {
 
   @Post('roles')
   @Permissions({ module: PermissionModule.ROLES, action: PermissionAction.CREATE })
-  create(@Body() dto: CreateRoleDto) {
-    return this.rolesService.create(dto);
+  create(@Body() dto: CreateRoleDto, @CurrentUser() user: AuthUser) {
+    return this.rolesService.create(dto, user);
   }
 
   @Patch('roles/:id')

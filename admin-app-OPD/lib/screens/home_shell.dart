@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../auth/auth_scope.dart';
 import '../theme.dart';
 import 'dashboard_screen.dart';
+import 'doctors_screen.dart';
 import 'pathlabs_screen.dart';
 import 'profile_screen.dart';
 import 'reports_screen.dart';
@@ -30,11 +31,6 @@ class _HomeShellState extends State<HomeShell> {
     final all = <_Destination>[
       const _Destination(
           'Dashboard', Icons.dashboard_outlined, 'dashboard', DashboardScreen()),
-      // Appointments are now managed from the Dashboard tabs (single-doctor
-      // setup), so the standalone Appointments section is intentionally hidden.
-      // There is no separate "Doctor Profile" section: the SuperAdmin is the
-      // clinic's one doctor and edits everything (profile + schedule) from the
-      // "My profile" entry added below.
       const _Destination(
           'Pathlabs', Icons.biotech_outlined, 'pathlabs', PathlabsScreen()),
       const _Destination(
@@ -46,6 +42,13 @@ class _HomeShellState extends State<HomeShell> {
     ];
     final visible =
         all.where((d) => auth.can(d.module, 'read')).toList();
+    // Super admin: manage all doctor tenants.
+    if (auth.user?.isSuperAdmin ?? false) {
+      visible.insert(
+          0,
+          const _Destination(
+              'Doctors', Icons.local_hospital_outlined, 'doctors', DoctorsScreen()));
+    }
     // Doctor accounts get a self-service profile page.
     if (auth.user?.isDoctor ?? false) {
       visible.add(const _Destination(

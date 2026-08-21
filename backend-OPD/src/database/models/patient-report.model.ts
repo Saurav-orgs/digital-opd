@@ -8,6 +8,7 @@ import {
 } from 'sequelize-typescript';
 import { User } from './user.model';
 import { Appointment } from './appointment.model';
+import { Doctor } from './doctor.model';
 import { AiJobStatus } from '../../common/enums';
 
 /** Structured summary produced by the local AI service. */
@@ -54,6 +55,14 @@ export class PatientReport extends Model<PatientReport> {
   @ForeignKey(() => Appointment)
   @Column({ type: DataType.UUID, allowNull: true })
   appointment_id: string | null;
+
+  /** Denormalised tenant key — lets pathlab/standalone reports silo correctly. */
+  @ForeignKey(() => Doctor)
+  @Column({ type: DataType.UUID, allowNull: true })
+  doctor_id: string | null;
+
+  @BelongsTo(() => Doctor)
+  doctor: Doctor;
 
   // ── AI summary (generated asynchronously after upload) ─────
 

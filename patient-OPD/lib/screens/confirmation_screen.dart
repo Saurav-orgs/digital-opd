@@ -58,7 +58,7 @@ class ConfirmationScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Please pay at the clinic reception on your visit. Arrive a few minutes early.',
+                'Arrive a few minutes early on the day of your visit.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),

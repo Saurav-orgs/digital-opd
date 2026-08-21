@@ -2,12 +2,14 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, ExternalLink } from 'lucide-react';
 import { patientApi } from '../../patientApi';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
 
 export const Reports: React.FC = () => {
+  const { doctor } = useDoctorCtx();
   const { data: reports, isLoading, error, refetch } = useQuery({
-    queryKey: ['patient-reports'],
-    queryFn: patientApi.myReports,
+    queryKey: ['patient-reports', doctor?.id],
+    queryFn: () => patientApi.myReports(doctor?.id),
   });
 
   return (

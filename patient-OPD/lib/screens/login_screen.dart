@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api/api_client.dart';
 import '../auth/patient_scope.dart';
+import '../doctor_context.dart';
 import '../theme.dart';
 
 /// Phone-only login/register — no password, no OTP.
@@ -40,11 +41,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _submitting = true);
     final auth = PatientAuthScope.of(context);
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
     try {
       if (_registerMode) {
-        await auth.register(_mobile.text.trim(), _name.text.trim());
+        await auth.register(_mobile.text.trim(), _name.text.trim(), doctorId: doctorId);
       } else {
-        await auth.login(_mobile.text.trim());
+        await auth.login(_mobile.text.trim(), doctorId: doctorId);
       }
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {

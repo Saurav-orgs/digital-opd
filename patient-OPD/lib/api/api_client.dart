@@ -167,17 +167,22 @@ class ApiClient {
       });
 
   // ── Patient auth (phone-only, no OTP) ───────────────────────
-  Future<PatientSession> registerPatient(String mobile, String name) =>
+  Future<PatientSession> registerPatient(String mobile, String name,
+          {String? doctorId}) =>
       _guard(() async {
+        final body = {'mobile': mobile, 'name': name};
+        if (doctorId != null) body['doctor_id'] = doctorId;
         final res = await http.post(_uri('/patient/auth/register'),
-            headers: _authHeaders(),
-            body: jsonEncode({'mobile': mobile, 'name': name}));
+            headers: _authHeaders(), body: jsonEncode(body));
         return PatientSession.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
-  Future<PatientSession> loginPatient(String mobile) => _guard(() async {
+  Future<PatientSession> loginPatient(String mobile, {String? doctorId}) =>
+      _guard(() async {
+        final body = <String, dynamic>{'mobile': mobile};
+        if (doctorId != null) body['doctor_id'] = doctorId;
         final res = await http.post(_uri('/patient/auth/login'),
-            headers: _authHeaders(), body: jsonEncode({'mobile': mobile}));
+            headers: _authHeaders(), body: jsonEncode(body));
         return PatientSession.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
@@ -187,15 +192,21 @@ class ApiClient {
       });
 
   // ── Patient portal ───────────────────────────────────────────
-  Future<List<PatientVisit>> myVisits() => _guard(() async {
-        final res = await http.get(_uri('/patient/appointments'), headers: _authHeaders());
+  Future<List<PatientVisit>> myVisits({String? doctorId}) => _guard(() async {
+        final res = await http.get(
+            _uri('/patient/appointments',
+                doctorId != null ? {'doctor_id': doctorId} : null),
+            headers: _authHeaders());
         return (_decode(res) as List)
             .map((v) => PatientVisit.fromJson(v as Map<String, dynamic>))
             .toList();
       });
 
-  Future<List<PatientReport>> myReports() => _guard(() async {
-        final res = await http.get(_uri('/patient/reports'), headers: _authHeaders());
+  Future<List<PatientReport>> myReports({String? doctorId}) => _guard(() async {
+        final res = await http.get(
+            _uri('/patient/reports',
+                doctorId != null ? {'doctor_id': doctorId} : null),
+            headers: _authHeaders());
         return (_decode(res) as List)
             .map((r) => PatientReport.fromJson(r as Map<String, dynamic>))
             .toList();
@@ -218,8 +229,12 @@ class ApiClient {
         _decode(res);
       });
 
-  Future<List<PatientNotification>> notifications() => _guard(() async {
-        final res = await http.get(_uri('/patient/notifications'), headers: _authHeaders());
+  Future<List<PatientNotification>> notifications({String? doctorId}) =>
+      _guard(() async {
+        final res = await http.get(
+            _uri('/patient/notifications',
+                doctorId != null ? {'doctor_id': doctorId} : null),
+            headers: _authHeaders());
         return (_decode(res) as List)
             .map((n) => PatientNotification.fromJson(n as Map<String, dynamic>))
             .toList();

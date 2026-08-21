@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import { Sequelize } from 'sequelize-typescript';
 import { Role } from '../database/models/role.model';
 import { Permission } from '../database/models/permission.model';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
+import { AuthUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
 export class RolesService {
@@ -24,8 +26,13 @@ export class RolesService {
     });
   }
 
-  findAll(): Promise<Role[]> {
+  /** Returns global (system) roles + the caller's tenant roles. */
+  findAll(user: AuthUser): Promise<Role[]> {
+    const where: any = user.doctorId
+      ? { [Op.or]: [{ doctor_id: user.doctorId }, { doctor_id: null }] }
+      : { doctor_id: null }; // super admin sees only global roles
     return this.roleModel.findAll({
+      where,
       include: [Permission],
       order: [['name', 'ASC']],
     });
@@ -38,12 +45,17 @@ export class RolesService {
     return role;
   }
 
-  async create(dto: CreateRoleDto): Promise<Role> {
-    await this.assertNameFree(dto.name);
+  async create(dto: CreateRoleDto, user: AuthUser): Promise<Role> {
+    await this.assertNameFree(dto.name, user.doctorId);
     await this.assertPermissionsExist(dto.permissionIds);
     return this.sequelize.transaction(async (t) => {
       const role = await this.roleModel.create(
-        { name: dto.name, description: dto.description ?? null, is_system: false } as any,
+        {
+          name: dto.name,
+          description: dto.description ?? null,
+          is_system: false,
+          doctor_id: user.doctorId ?? null,
+        } as any,
         { transaction: t },
       );
       await (role as any).$set('permissions', dto.permissionIds, { transaction: t });
@@ -61,7 +73,7 @@ export class RolesService {
         message: 'System roles cannot be modified.',
       });
     }
-    if (dto.name && dto.name !== role.name) await this.assertNameFree(dto.name);
+    if (dto.name && dto.name !== role.name) await this.assertNameFree(dto.name, role.doctor_id);
     if (dto.permissionIds) await this.assertPermissionsExist(dto.permissionIds);
 
     return this.sequelize.transaction(async (t) => {
@@ -98,8 +110,13 @@ export class RolesService {
     await role.destroy();
   }
 
-  private async assertNameFree(name: string): Promise<void> {
-    const existing = await this.roleModel.findOne({ where: { name } });
+  private async assertNameFree(name: string, doctorId: string | null): Promise<void> {
+    // A role name must be unique within the same scope: per-tenant for tenant
+    // roles, globally for system roles.
+    const where: any = { name };
+    if (doctorId) where.doctor_id = doctorId;
+    else where.doctor_id = null;
+    const existing = await this.roleModel.findOne({ where });
     if (existing) {
       throw new AppException(ErrorCode.CONFLICT, {
         message: 'A role with this name already exists.',

@@ -63,13 +63,13 @@ export class ReportsController {
   @Get()
   @ApiOperation({ summary: "A patient's reports, for admin/doctor viewing" })
   @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
-  list(@Query('mobile') mobile: string) {
+  list(@Query('mobile') mobile: string, @CurrentUser() user: AuthUser) {
     if (!mobile) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message: 'A mobile number is required.',
       });
     }
-    return this.service.listForMobile(mobile);
+    return this.service.listForMobile(mobile, user.doctorId);
   }
 
   @Post(':id/summary/retry')

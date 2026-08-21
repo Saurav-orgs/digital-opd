@@ -2,13 +2,15 @@ import React, { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Stethoscope, FileText, Bell, Upload, Pill, Download } from 'lucide-react';
 import { patientApi } from '../../patientApi';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException, type PatientVisit, type IssuedPrescription } from '../../types';
 import { StateView } from '../../components/StateView';
 
 export const MyVisits: React.FC = () => {
+  const { doctor } = useDoctorCtx();
   const { data: visits, isLoading, error, refetch } = useQuery({
-    queryKey: ['patient-visits'],
-    queryFn: patientApi.myVisits,
+    queryKey: ['patient-visits', doctor?.id],
+    queryFn: () => patientApi.myVisits(doctor?.id),
   });
 
   return (

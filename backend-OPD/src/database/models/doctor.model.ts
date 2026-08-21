@@ -41,6 +41,22 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.DECIMAL(10, 2), allowNull: true })
   consultation_fee: number | null;
 
+  // ── Prescription letterhead (per-doctor branding) ──────────
+  /** Clinic/practice name shown on the prescription pad. Falls back to the
+   *  env clinic, then the doctor's own name, when unset. */
+  @Column({ type: DataType.STRING, allowNull: true })
+  clinic_name: string | null;
+
+  /** S3 key of the clinic logo shown in the letterhead. */
+  @Column({ type: DataType.STRING, allowNull: true })
+  clinic_logo_key: string | null;
+
+  @Column({ type: DataType.TEXT, allowNull: true })
+  clinic_address: string | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  clinic_phone: string | null;
+
   /** For QR/deep-link to this doctor's booking screen. */
   @Column({ type: DataType.STRING, allowNull: false, unique: true })
   public_slug: string;

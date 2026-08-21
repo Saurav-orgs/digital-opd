@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api/models.dart';
 import '../auth/patient_scope.dart';
+import '../doctor_context.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -21,11 +22,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= PatientAuthScope.of(context).api.myReports();
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    _future ??= PatientAuthScope.of(context).api.myReports(doctorId: doctorId);
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = PatientAuthScope.of(context).api.myReports());
+    final doctorId = DoctorContextScope.of(context).doctor?.id;
+    setState(() => _future =
+        PatientAuthScope.of(context).api.myReports(doctorId: doctorId));
     await _future;
   }
 

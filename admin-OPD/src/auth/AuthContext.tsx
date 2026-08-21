@@ -17,8 +17,10 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   can: (module: PermModule, action: PermAction) => boolean;
-  /** The clinic's doctor — the SuperAdmin seeded from env, not their staff. */
+  /** True when the logged-in account is a doctor user (has a doctorId). */
   isDoctor: boolean;
+  /** True when the logged-in account is the platform super-admin. */
+  isSuperAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -64,15 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
-  // The SuperAdmin *is* the doctor (seeded from env and linked to the clinic's
-  // doctor profile). Staff accounts are linked to the same profile for data
-  // scope, so the link alone doesn't make an account the doctor.
-  const isDoctor =
-    !!user?.doctorId && (user.type === 'super_admin' || user.type === 'doctor');
+  // Doctor: has a doctorId and type=doctor (or legacy super_admin with doctorId).
+  const isDoctor = !!user?.doctorId && (user.type === 'doctor' || user.type === 'super_admin');
+  const isSuperAdmin = user?.type === 'super_admin';
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, can, isDoctor }),
-    [user, loading, login, logout, can, isDoctor],
+    () => ({ user, loading, login, logout, can, isDoctor, isSuperAdmin }),
+    [user, loading, login, logout, can, isDoctor, isSuperAdmin],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

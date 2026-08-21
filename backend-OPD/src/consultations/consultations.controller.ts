@@ -94,6 +94,33 @@ export class ConsultationsController {
     return this.prescriptions.update(id, dto, user);
   }
 
+  @Post('prescription/handwriting')
+  @ApiOperation({
+    summary: 'Save a handwritten prescription image (drawn on a tablet)',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 12 * 1024 * 1024 },
+    }),
+  )
+  saveHandwriting(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prescriptions.saveHandwriting(id, file, user);
+  }
+
   @Post('prescription/issue')
   @ApiOperation({
     summary: 'Issue the prescription to the patient (renders the PDF and notifies)',

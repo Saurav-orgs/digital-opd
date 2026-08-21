@@ -3,6 +3,7 @@ import type {
   Appointment,
   AuthUser,
   ConsultationSession,
+  CreateDoctorResult,
   EPrescription,
   MedicineCatalogEntry,
   DashboardSummary,
@@ -47,13 +48,24 @@ export const rolesApi = {
 };
 
 // ── Doctors ──────────────────────────────────────────────────
-// One profile per clinic, seeded on the server and owned by the SuperAdmin —
-// hence no create/delete here.
 export const doctorsApi = {
   list: () => api.get<Doctor[]>('/doctors').then((r) => r.data),
   get: (id: string) => api.get<Doctor>(`/doctors/${id}`).then((r) => r.data),
+  // Super-admin only: create a new doctor tenant
+  create: (body: {
+    name: string;
+    email: string;
+    password: string;
+    specialization?: string;
+    qualifications?: string;
+    bio?: string;
+    consultation_fee?: number;
+  }) => api.post<CreateDoctorResult>('/doctors', body).then((r) => r.data),
+  regenerateSlug: (id: string) =>
+    api.post<Doctor & { qrUrl: string }>(`/doctors/${id}/regenerate-slug`).then((r) => r.data),
   update: (id: string, body: Record<string, unknown>) =>
     api.patch<Doctor>(`/doctors/${id}`, body).then((r) => r.data),
+  remove: (id: string) => api.delete(`/doctors/${id}`).then((r) => r.data),
   enable: (id: string) => api.patch<Doctor>(`/doctors/${id}/enable`).then((r) => r.data),
   disable: (id: string) =>
     api.patch<Doctor>(`/doctors/${id}/disable`).then((r) => r.data),
@@ -63,6 +75,7 @@ export const doctorsApi = {
   updateMe: (body: Partial<Doctor>) =>
     api.patch<Doctor>('/doctors/me', body).then((r) => r.data),
   uploadMyPhoto: (file: File) => upload('/doctors/me/photo', file),
+  uploadMyLetterheadLogo: (file: File) => upload('/doctors/me/letterhead-logo', file),
 };
 
 function upload(url: string, file: File) {
@@ -175,6 +188,15 @@ export const consultationApi = {
     api
       .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`)
       .then((r) => r.data),
+  saveHandwriting: (appointmentId: string, image: Blob) => {
+    const fd = new FormData();
+    fd.append('file', image, 'handwriting.png');
+    return api
+      .post<EPrescription>(`/appointments/${appointmentId}/prescription/handwriting`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
 };
 
 export const medicinesApi = {

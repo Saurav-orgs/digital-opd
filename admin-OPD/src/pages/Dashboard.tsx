@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi, doctorsApi, appointmentsApi } from '../api/endpoints';
 import type { Appointment } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { AppointmentDetail } from '../components/AppointmentDetail';
 import { WalkInModal } from '../components/WalkInModal';
 import { Badge, Empty, Loading } from '../components/ui';
 
@@ -11,10 +11,10 @@ type Range = 'previous' | 'today' | 'upcoming';
 
 export default function Dashboard() {
   const { user, can } = useAuth();
+  const navigate = useNavigate();
   const [range, setRange] = useState<Range>('today');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState<string | undefined>(undefined);
-  const [selected, setSelected] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
 
   useEffect(() => {
@@ -96,9 +96,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <RangeList range={range} search={search} onSelect={setSelected} />
+      <RangeList range={range} search={search} onSelect={(id) => navigate(`/appointments/${id}`)} />
 
-      {selected && <AppointmentDetail id={selected} onClose={() => setSelected(null)} />}
       {walkInOpen && doctorId && (
         <WalkInModal doctorId={doctorId} onClose={() => setWalkInOpen(false)} />
       )}

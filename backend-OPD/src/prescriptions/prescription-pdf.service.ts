@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import PDFDocument from 'pdfkit';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
+import { StorageService } from '../uploads/storage.service';
+import { PrescriptionMode } from '../common/enums';
 
 /** Layout constants for an A4 prescription. */
 const PAGE = { width: 595.28, height: 841.89 };
@@ -28,7 +30,12 @@ const COLOR = {
  */
 @Injectable()
 export class PrescriptionPdfService {
-  constructor(private readonly config: ConfigService) {}
+  private readonly logger = new Logger(PrescriptionPdfService.name);
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly storage: StorageService,
+  ) {}
 
   async render(
     prescription: EPrescription,
@@ -49,11 +56,22 @@ export class PrescriptionPdfService {
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
 
-    let y = this.letterhead(doc, doctor);
+    // Images live in S3; fetch them up-front so the (sync) drawing helpers can
+    // place them. A missing/broken image must never break the prescription.
+    const logo = await this.fetchLogo(doctor);
+
+    let y = this.letterhead(doc, doctor, logo);
     y = this.patientBar(doc, appointment, y);
-    y = this.diagnosis(doc, prescription, y);
-    y = this.medicines(doc, medicines, y);
-    y = this.advice(doc, prescription, y);
+
+    if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
+      const drawing = await this.fetchHandwriting(prescription);
+      y = this.handwritingBody(doc, drawing, y);
+    } else {
+      y = this.diagnosis(doc, prescription, y);
+      y = this.medicines(doc, medicines, y);
+      y = this.advice(doc, prescription, y);
+    }
+
     this.signature(doc, doctor, y);
     this.pageFurniture(doc); // footer band + timestamp on every page
 
@@ -61,27 +79,78 @@ export class PrescriptionPdfService {
     return done;
   }
 
+  // ── Handwritten body ───────────────────────────────────────
+  /** Places the doctor's handwritten image in the body, above the signature. */
+  private handwritingBody(
+    doc: PDFKit.PDFDocument,
+    drawing: Buffer | null,
+    y: number,
+  ): number {
+    // The writable band runs from here down to the signature block.
+    const availH = PAGE.height - 150 - y;
+    if (!drawing) {
+      doc
+        .font('Helvetica-Oblique')
+        .fontSize(10)
+        .fillColor(COLOR.soft)
+        .text('The handwritten prescription could not be loaded.', MARGIN, y);
+      return y + 20;
+    }
+    try {
+      doc.image(drawing, MARGIN, y, {
+        fit: [CONTENT_W, availH],
+        align: 'center',
+      });
+    } catch (err) {
+      this.logger.warn(`Could not embed handwriting: ${(err as Error).message}`);
+    }
+    return y + availH;
+  }
+
   // ── Letterhead ─────────────────────────────────────────────
-  private letterhead(doc: PDFKit.PDFDocument, doctor: Doctor): number {
-    const clinic = this.config.get<{
+  private letterhead(
+    doc: PDFKit.PDFDocument,
+    doctor: Doctor,
+    logo: Buffer | null,
+  ): number {
+    const envClinic = this.config.get<{
       name: string;
       address: string;
       phone: string;
       email: string;
     }>('clinic')!;
 
+    // The doctor's own letterhead wins; fall back to env clinic, then their name.
+    const title = doctor.clinic_name || envClinic.name || doctor.name;
+    const address = doctor.clinic_address || envClinic.address;
+    const phone = doctor.clinic_phone || envClinic.phone;
+
     const bandH = 84;
     doc.save().rect(0, 0, PAGE.width, bandH).fill(COLOR.brand).restore();
     // A thin accent stripe under the band.
     doc.save().rect(0, bandH, PAGE.width, 3).fill(COLOR.brandDark).restore();
 
-    // Practice title: the clinic name if branded, otherwise the doctor's name.
-    const title = clinic.name || doctor.name;
+    // Optional logo at the far left; the title block shifts right to clear it.
+    let textLeft = MARGIN;
+    if (logo) {
+      const logoSize = 52;
+      try {
+        doc.image(logo, MARGIN, 16, {
+          fit: [logoSize, logoSize],
+          valign: 'center',
+        });
+        textLeft = MARGIN + logoSize + 14;
+      } catch (err) {
+        this.logger.warn(`Could not embed clinic logo: ${(err as Error).message}`);
+      }
+    }
+    const textW = PAGE.width - MARGIN - 200 - textLeft;
+
     doc
       .fillColor('#FFFFFF')
       .font('Helvetica-Bold')
       .fontSize(20)
-      .text(title, MARGIN, 20, { width: CONTENT_W - 150 });
+      .text(title, textLeft, 20, { width: textW });
 
     const creds = [doctor.qualifications, doctor.specialization]
       .filter(Boolean)
@@ -91,19 +160,20 @@ export class PrescriptionPdfService {
         .font('Helvetica')
         .fontSize(10.5)
         .fillColor('#DCEDEA')
-        .text(creds, MARGIN, 48, { width: CONTENT_W - 150 });
+        .text(creds, textLeft, 48, { width: textW });
     }
-    // When the clinic is branded, still name the doctor beneath the title.
-    if (clinic.name) {
+    // When the clinic is branded (name differs from the doctor), still name
+    // the doctor beneath the title.
+    if (title !== doctor.name) {
       doc
         .font('Helvetica-Oblique')
         .fontSize(10)
         .fillColor('#CFE6E2')
-        .text(doctor.name, MARGIN, creds ? 63 : 48);
+        .text(doctor.name, textLeft, creds ? 63 : 48, { width: textW });
     }
 
     // Right-aligned clinic contact block inside the band.
-    const contact = [clinic.address, clinic.phone, clinic.email]
+    const contact = [address, phone, envClinic.email]
       .filter(Boolean)
       .join('\n');
     if (contact) {
@@ -119,6 +189,28 @@ export class PrescriptionPdfService {
     }
 
     return bandH + 22;
+  }
+
+  /** Best-effort logo fetch — a missing logo just yields a text-only header. */
+  private async fetchLogo(doctor: Doctor): Promise<Buffer | null> {
+    if (!doctor.clinic_logo_key) return null;
+    try {
+      return await this.storage.download(doctor.clinic_logo_key);
+    } catch (err) {
+      this.logger.warn(`Could not fetch clinic logo: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** Best-effort handwriting fetch. */
+  private async fetchHandwriting(p: EPrescription): Promise<Buffer | null> {
+    if (!p.handwriting_image_key) return null;
+    try {
+      return await this.storage.download(p.handwriting_image_key);
+    } catch (err) {
+      this.logger.warn(`Could not fetch handwriting: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   // ── Patient bar ────────────────────────────────────────────

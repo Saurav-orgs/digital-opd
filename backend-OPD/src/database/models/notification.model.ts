@@ -1,4 +1,5 @@
-import { Column, DataType, Model, Table } from 'sequelize-typescript';
+import { BelongsTo, Column, DataType, ForeignKey, Model, Table } from 'sequelize-typescript';
+import { Doctor } from './doctor.model';
 import { NotificationType } from '../../common/enums';
 
 /** In-app notification for a patient, keyed by mobile. */
@@ -33,4 +34,11 @@ export class Notification extends Model<Notification> {
 
   @Column({ type: DataType.DATE, allowNull: true })
   read_at: Date | null;
+
+  @ForeignKey(() => Doctor)
+  @Column({ type: DataType.UUID, allowNull: true })
+  doctor_id: string | null;
+
+  @BelongsTo(() => Doctor)
+  doctor: Doctor;
 }

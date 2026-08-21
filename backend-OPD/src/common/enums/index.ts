@@ -85,6 +85,14 @@ export enum PrescriptionStatus {
   ISSUED = 'issued',
 }
 
+/** How the prescription body was produced. */
+export enum PrescriptionMode {
+  /** Diagnosis + structured medicine rows (voice draft or typed). */
+  STRUCTURED = 'structured',
+  /** A handwritten image the doctor drew, composited onto the letterhead. */
+  HANDWRITTEN = 'handwritten',
+}
+
 /** Whether a medicine row was suggested by the AI or typed by the doctor. */
 export enum MedicineSource {
   AI = 'ai',

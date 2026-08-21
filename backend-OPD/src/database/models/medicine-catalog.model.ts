@@ -1,4 +1,5 @@
-import { Column, DataType, Model, Table } from 'sequelize-typescript';
+import { BelongsTo, Column, DataType, ForeignKey, Model, Table } from 'sequelize-typescript';
+import { Doctor } from './doctor.model';
 
 /**
  * The clinic's own medicine vocabulary, grown from what the doctor actually
@@ -22,8 +23,16 @@ export class MedicineCatalog extends Model<MedicineCatalog> {
   })
   id: string;
 
-  @Column({ type: DataType.STRING, allowNull: false, unique: true })
+  // Uniqueness is (doctor_id, name) — enforced at DB level, not via Sequelize unique.
+  @Column({ type: DataType.STRING, allowNull: false })
   name: string;
+
+  @ForeignKey(() => Doctor)
+  @Column({ type: DataType.UUID, allowNull: true })
+  doctor_id: string | null;
+
+  @BelongsTo(() => Doctor)
+  doctor: Doctor;
 
   @Column({ type: DataType.STRING, allowNull: true })
   strength: string | null;

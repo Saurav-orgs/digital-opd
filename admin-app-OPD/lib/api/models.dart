@@ -34,10 +34,8 @@ class AuthUser {
 
   bool get isSuperAdmin => type == 'super_admin';
 
-  /// The clinic's doctor: the SuperAdmin seeded from env *is* the doctor.
-  /// Staff accounts carry the same `doctorId` for data scope, so the link
-  /// alone doesn't make an account the doctor.
-  bool get isDoctor => doctorId != null && (isSuperAdmin || type == 'doctor');
+  /// True only for doctor-type accounts (not super admin, not staff).
+  bool get isDoctor => doctorId != null && type == 'doctor';
 
   /// RBAC check mirroring the web `can(module, action)`.
   bool can(String module, String action) {
@@ -54,6 +52,40 @@ class LoginResponse {
   factory LoginResponse.fromJson(Map<String, dynamic> j) => LoginResponse(
         accessToken: j['accessToken'] as String,
         user: AuthUser.fromJson(j['user'] as Map<String, dynamic>),
+      );
+}
+
+/// Returned once by POST /doctors — show credentials immediately, they are not
+/// stored server-side.
+class CreateDoctorResult {
+  final Doctor doctor;
+  final String doctorRoleName;
+  final String pathlabRoleName;
+  final String loginEmail;
+  final String tempPassword;
+  final String qrUrl;
+
+  CreateDoctorResult({
+    required this.doctor,
+    required this.doctorRoleName,
+    required this.pathlabRoleName,
+    required this.loginEmail,
+    required this.tempPassword,
+    required this.qrUrl,
+  });
+
+  factory CreateDoctorResult.fromJson(Map<String, dynamic> j) =>
+      CreateDoctorResult(
+        doctor: Doctor.fromJson(j['doctor'] as Map<String, dynamic>),
+        doctorRoleName:
+            (j['doctorRole'] as Map?)?.cast<String, dynamic>()['name'] as String? ?? '',
+        pathlabRoleName:
+            (j['pathlabRole'] as Map?)?.cast<String, dynamic>()['name'] as String? ?? '',
+        loginEmail:
+            (j['login'] as Map?)?.cast<String, dynamic>()['email'] as String? ?? '',
+        tempPassword:
+            (j['login'] as Map?)?.cast<String, dynamic>()['tempPassword'] as String? ?? '',
+        qrUrl: j['qrUrl'] as String? ?? '',
       );
 }
 
@@ -106,6 +138,11 @@ class Doctor {
   final String? profilePhotoUrl;
   final String publicSlug;
   final bool isEnabled;
+  // Prescription letterhead (per-doctor branding)
+  final String? clinicName;
+  final String? clinicAddress;
+  final String? clinicPhone;
+  final String? clinicLogoUrl;
 
   Doctor({
     required this.id,
@@ -117,6 +154,10 @@ class Doctor {
     this.profilePhotoUrl,
     required this.publicSlug,
     required this.isEnabled,
+    this.clinicName,
+    this.clinicAddress,
+    this.clinicPhone,
+    this.clinicLogoUrl,
   });
 
   factory Doctor.fromJson(Map<String, dynamic> j) => Doctor(
@@ -129,6 +170,10 @@ class Doctor {
         profilePhotoUrl: j['profile_photo_url'] as String?,
         publicSlug: j['public_slug'] as String? ?? '',
         isEnabled: j['is_enabled'] as bool? ?? false,
+        clinicName: j['clinic_name'] as String?,
+        clinicAddress: j['clinic_address'] as String?,
+        clinicPhone: j['clinic_phone'] as String?,
+        clinicLogoUrl: j['clinic_logo_url'] as String?,
       );
 
   String get feeLabel => consultationFee == null ? '—' : '₹$consultationFee';
@@ -527,35 +572,42 @@ class PrescriptionMedicine {
 class EPrescription {
   final String id;
   final String status; // draft | issued
+  final String mode; // structured | handwritten
   final String? diagnosis;
   final String? advice;
   final String? followUpDate;
   final String? pdfUrl;
+  final String? handwritingImageUrl;
   final List<PrescriptionMedicine> medicines;
 
   EPrescription({
     required this.id,
     required this.status,
+    this.mode = 'structured',
     this.diagnosis,
     this.advice,
     this.followUpDate,
     this.pdfUrl,
+    this.handwritingImageUrl,
     this.medicines = const [],
   });
 
   factory EPrescription.fromJson(Map<String, dynamic> j) => EPrescription(
         id: j['id'] as String,
         status: j['status'] as String? ?? 'draft',
+        mode: j['mode'] as String? ?? 'structured',
         diagnosis: j['diagnosis'] as String?,
         advice: j['advice'] as String?,
         followUpDate: j['follow_up_date'] as String?,
         pdfUrl: j['pdf_url'] as String?,
+        handwritingImageUrl: j['handwriting_image_url'] as String?,
         medicines: ((j['medicines'] as List?) ?? [])
             .map((m) => PrescriptionMedicine.fromJson(m as Map<String, dynamic>))
             .toList(),
       );
 
   bool get isIssued => status == 'issued';
+  bool get isHandwritten => mode == 'handwritten';
 }
 
 class DoctorCount {

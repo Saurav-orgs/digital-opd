@@ -66,14 +66,24 @@ export interface PatientSession {
 }
 
 export const patientApi = {
-  register: (mobile: string, name: string) =>
-    unwrap<PatientSession>(client.post('/patient/auth/register', { mobile, name })),
-  login: (mobile: string) =>
-    unwrap<PatientSession>(client.post('/patient/auth/login', { mobile })),
+  register: (mobile: string, name: string, doctorId?: string | null) =>
+    unwrap<PatientSession>(client.post('/patient/auth/register', {
+      mobile, name, ...(doctorId ? { doctor_id: doctorId } : {}),
+    })),
+  login: (mobile: string, doctorId?: string | null) =>
+    unwrap<PatientSession>(client.post('/patient/auth/login', {
+      mobile, ...(doctorId ? { doctor_id: doctorId } : {}),
+    })),
   me: () => unwrap<PatientAuthUser>(client.get('/patient/auth/me')),
 
-  myVisits: () => unwrap<PatientVisit[]>(client.get('/patient/appointments')),
-  myReports: () => unwrap<PatientReport[]>(client.get('/patient/reports')),
+  myVisits: (doctorId?: string | null) =>
+    unwrap<PatientVisit[]>(client.get('/patient/appointments', {
+      params: doctorId ? { doctor_id: doctorId } : undefined,
+    })),
+  myReports: (doctorId?: string | null) =>
+    unwrap<PatientReport[]>(client.get('/patient/reports', {
+      params: doctorId ? { doctor_id: doctorId } : undefined,
+    })),
   // Upload a report against a specific appointment (allowed until the doctor
   // marks that visit done — the server enforces the cutoff).
   uploadVisitReport: (appointmentId: string, title: string, file: File) => {
@@ -87,7 +97,10 @@ export const patientApi = {
     );
   },
 
-  notifications: () => unwrap<PatientNotification[]>(client.get('/patient/notifications')),
+  notifications: (doctorId?: string | null) =>
+    unwrap<PatientNotification[]>(client.get('/patient/notifications', {
+      params: doctorId ? { doctor_id: doctorId } : undefined,
+    })),
   unreadCount: () =>
     unwrap<{ count: number }>(client.get('/patient/notifications/unread-count')),
   markRead: (id: string) =>

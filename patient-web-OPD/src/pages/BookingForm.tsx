@@ -7,7 +7,6 @@ import {
   Phone,
   MapPin,
   FileText,
-  Info,
   CheckCircle2,
 } from 'lucide-react';
 import { api } from '../api';
@@ -301,20 +300,6 @@ export const BookingForm: React.FC = () => {
               </div>
             </div>
 
-            <div className="section-card">
-              <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Info size={18} color="var(--primary)" />
-                <span>Payment</span>
-                {doctor.consultationFee && (
-                  <span className="fee-badge" style={{ marginLeft: 'auto' }}>₹{doctor.consultationFee} Fee</span>
-                )}
-              </div>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-                Payment is collected in person at the clinic — nothing to pay now.
-                Just confirm your appointment below.
-              </p>
-            </div>
-
             {formError && (
               <div className="section-card" style={{ background: '#FEE2E2', borderColor: '#FCA5A5', color: 'var(--error)', fontWeight: 600 }}>
                 {formError}
@@ -333,10 +318,6 @@ export const BookingForm: React.FC = () => {
                 )}
               </button>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '12px' }}>
-                <Info size={15} color="var(--primary)" />
-                <span>Please pay at the clinic reception on the day of your visit.</span>
-              </div>
             </div>
           </div>
         </div>

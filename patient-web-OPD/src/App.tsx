@@ -3,7 +3,9 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { PhoneCall } from 'lucide-react';
 import { queryClient } from './queryClient';
 import { PatientAuthProvider } from './auth/PatientAuthContext';
+import { DoctorProvider } from './context/DoctorContext';
 import { Home } from './pages/Home';
+import { DoctorLanding } from './pages/DoctorLanding';
 import { BookingForm } from './pages/BookingForm';
 import { Confirmation } from './pages/Confirmation';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
@@ -27,6 +29,7 @@ function RequirePatientAuth({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <DoctorProvider>
       <PatientAuthProvider>
         <BrowserRouter>
           <div className="web-app-shell">
@@ -50,6 +53,7 @@ export default function App() {
             <main className="web-container">
               <Routes>
                 <Route path="/" element={<Home />} />
+                <Route path="/d/:slug" element={<DoctorLanding />} />
                 <Route path="/book" element={<BookingForm />} />
                 <Route path="/confirmation" element={<Confirmation />} />
                 <Route path="/privacy" element={<PrivacyPolicy />} />
@@ -87,6 +91,7 @@ export default function App() {
           </div>
         </BrowserRouter>
       </PatientAuthProvider>
+      </DoctorProvider>
     </QueryClientProvider>
   );
 }

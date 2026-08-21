@@ -84,7 +84,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final d = widget.doctor;
     return Scaffold(
       appBar: AppBar(title: const Text('Your details')),
       body: Form(
@@ -127,8 +126,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
             }),
             _field(_address, 'Address (optional)', maxLines: 2),
             _field(_description, 'Reason for visit (optional)', maxLines: 2),
-            const SizedBox(height: 8),
-            _paymentCard(d),
             const SizedBox(height: 24),
             SizedBox(
               height: 50,
@@ -142,11 +139,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                             strokeWidth: 2.2, color: Colors.white))
                     : const Text('Confirm booking'),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Center(
-              child: Text('Please pay at the clinic reception on the day of your visit.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
             ),
             const SizedBox(height: 24),
           ],
@@ -185,33 +177,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
     );
   }
 
-  Widget _paymentCard(Doctor d) {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Payment',
-                  style: TextStyle(fontWeight: FontWeight.w500)),
-              if (d.consultationFee != null)
-                Text(d.feeLabel,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.secondary)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-              'Payment is collected in person at the clinic — nothing to pay now.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-        ],
-      ),
-    );
-  }
-
-  Widget _genderField() {
+Widget _genderField() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: DropdownButtonFormField<String>(

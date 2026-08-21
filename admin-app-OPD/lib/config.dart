@@ -22,4 +22,11 @@ class AppConfig {
     // return 'http://$host:3000/api';
     return 'https://76ml0vk8-3000.inc1.devtunnels.ms/api';
   }
+
+  /// Base URL of the patient web app — used to build QR/booking links.
+  static String get patientWebBase {
+    final fromEnv = dotenv.maybeGet('PATIENT_WEB_BASE')?.trim() ?? '';
+    if (fromEnv.isNotEmpty) return fromEnv;
+    return 'http://localhost:5174';
+  }
 }

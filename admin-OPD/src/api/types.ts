@@ -61,6 +61,20 @@ export interface Doctor {
   profile_photo_url: string | null;
   public_slug: string;
   is_enabled: boolean;
+  // Prescription letterhead (per-doctor branding)
+  clinic_name: string | null;
+  clinic_address: string | null;
+  clinic_phone: string | null;
+  clinic_logo_url: string | null;
+}
+
+/** Returned once by POST /doctors — never returned again, so show it immediately. */
+export interface CreateDoctorResult {
+  doctor: Doctor;
+  doctorRole: { id: string; name: string };
+  pathlabRole: { id: string; name: string };
+  login: { email: string; tempPassword: string };
+  qrUrl: string;
 }
 
 export interface ScheduleEntry {
@@ -193,11 +207,13 @@ export interface EPrescription {
   appointment_id: string;
   consultation_session_id: string | null;
   status: 'draft' | 'issued';
+  mode: 'structured' | 'handwritten';
   diagnosis: string | null;
   advice: string | null;
   follow_up_date: string | null;
   issued_at: string | null;
   pdf_url: string | null;
+  handwriting_image_url: string | null;
   medicines: PrescriptionMedicine[];
 }
 

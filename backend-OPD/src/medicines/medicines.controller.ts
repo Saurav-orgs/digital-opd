@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { MedicinesService } from './medicines.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Medicines')
 @ApiBearerAuth()
@@ -14,7 +15,7 @@ export class MedicinesController {
   @ApiOperation({ summary: "Autocomplete over the clinic's medicine catalogue" })
   // Gated on appointments:update — the people who write prescriptions.
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
-  search(@Query('q') q: string) {
-    return this.service.search(q ?? '');
+  search(@Query('q') q: string, @CurrentUser() user: AuthUser) {
+    return this.service.search(q ?? '', user.doctorId);
   }
 }

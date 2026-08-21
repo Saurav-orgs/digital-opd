@@ -2,13 +2,15 @@ import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, FileCheck, CalendarClock } from 'lucide-react';
 import { patientApi } from '../../patientApi';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
 
 export const Notifications: React.FC = () => {
   const qc = useQueryClient();
+  const { doctor } = useDoctorCtx();
   const { data: items, isLoading, error, refetch } = useQuery({
-    queryKey: ['patient-notifications'],
-    queryFn: patientApi.notifications,
+    queryKey: ['patient-notifications', doctor?.id],
+    queryFn: () => patientApi.notifications(doctor?.id),
   });
 
   const invalidate = () => {

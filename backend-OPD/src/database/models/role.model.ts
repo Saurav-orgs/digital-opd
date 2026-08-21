@@ -1,6 +1,8 @@
 import {
+  BelongsTo,
   Column,
   DataType,
+  ForeignKey,
   Model,
   Table,
   BelongsToMany,
@@ -9,6 +11,7 @@ import {
 import { Permission } from './permission.model';
 import { RolePermission } from './role-permission.model';
 import { User } from './user.model';
+import { Doctor } from './doctor.model';
 
 @Table({ tableName: 'roles', timestamps: true, underscored: true })
 export class Role extends Model<Role> {
@@ -19,8 +22,17 @@ export class Role extends Model<Role> {
   })
   id: string;
 
-  @Column({ type: DataType.STRING, allowNull: false, unique: true })
+  // Uniqueness is enforced at DB level via partial indexes; no Sequelize unique here.
+  @Column({ type: DataType.STRING, allowNull: false })
   name: string;
+
+  /** null = global/system role; set = belongs to this doctor's tenant. */
+  @ForeignKey(() => Doctor)
+  @Column({ type: DataType.UUID, allowNull: true })
+  doctor_id: string | null;
+
+  @BelongsTo(() => Doctor)
+  doctor: Doctor;
 
   @Column({ type: DataType.STRING, allowNull: true })
   description: string | null;

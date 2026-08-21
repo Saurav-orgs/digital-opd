@@ -1118,6 +1118,143 @@ body,
   }
 }
 
+/* ── Doctor Landing (booking entry) ─────────────────────────── */
+.doctor-landing-wrap {
+  width: 100%;
+}
+
+.doctor-hero-gradient {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  border-radius: var(--radius-card);
+  padding: 32px 40px 36px;
+  color: #fff;
+}
+
+.doctor-hero-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.70);
+  letter-spacing: 0.3px;
+  margin-bottom: 22px;
+}
+
+.doctor-hero-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.doctor-hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.doctor-hero-name {
+  font-size: 30px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.15;
+}
+
+.doctor-hero-spec {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.88);
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+.doctor-hero-qual {
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.62);
+  margin-top: 4px;
+}
+
+.doctor-hero-bio {
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.72);
+  margin-top: 14px;
+  line-height: 1.6;
+  max-width: 560px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.doctor-hero-info > img,
+.doctor-hero-info > .doctor-avatar {
+  flex-shrink: 0;
+}
+
+.doctor-hero-info > .doctor-avatar {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+@media (max-width: 560px) {
+  .doctor-hero-gradient {
+    padding: 24px 20px 28px;
+  }
+
+  .doctor-hero-info {
+    gap: 16px;
+    align-items: center;
+  }
+
+  .doctor-hero-name {
+    font-size: 22px;
+  }
+
+  .doctor-hero-spec {
+    font-size: 14px;
+  }
+}
+
+.doctor-landing-body {
+  padding: 24px 0 40px;
+}
+
+.landing-section-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.landing-slots-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.landing-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.landing-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.landing-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 /* ── Privacy Policy Page ─────────────────────────────────────── */
 .privacy-page-container {
   max-width: 900px;

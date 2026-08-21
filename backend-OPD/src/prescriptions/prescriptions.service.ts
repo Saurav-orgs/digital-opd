@@ -16,9 +16,9 @@ import { ErrorCode } from '../common/errors/error-codes';
 import {
   MedicineSource,
   NotificationType,
+  PrescriptionMode,
   PrescriptionStatus,
   TrainingSampleKind,
-  UserType,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -68,6 +68,8 @@ export class PrescriptionsService {
     this.assertEditable(prescription);
 
     await prescription.update({
+      // Editing the structured fields makes this a structured prescription.
+      mode: PrescriptionMode.STRUCTURED,
       diagnosis: dto.diagnosis?.trim() || null,
       advice: dto.advice?.trim() || null,
       follow_up_date: dto.follow_up_date || null,
@@ -76,6 +78,36 @@ export class PrescriptionsService {
     if (dto.medicines) {
       await this.replaceMedicines(prescription, dto.medicines);
     }
+
+    return this.toView(await this.reload(prescription.id));
+  }
+
+  /**
+   * Save a handwritten prescription image (drawn on a tablet). The strokes are
+   * a transparent PNG; issuing composites them onto the doctor's letterhead.
+   */
+  async saveHandwriting(
+    appointmentId: string,
+    file: Express.Multer.File,
+    user: AuthUser,
+  ) {
+    const appointment = await this.assertAccess(appointmentId, user);
+    const prescription = await this.findOrCreate(appointmentId);
+    this.assertEditable(prescription);
+    if (!file) throw new AppException(ErrorCode.FILE_REQUIRED);
+
+    const { key } = await this.storage.uploadImage(
+      file,
+      `prescriptions/${appointment.doctor_id}/handwriting`,
+    );
+    // Replace any previous drawing for this visit.
+    if (prescription.handwriting_image_key) {
+      await this.storage.delete(prescription.handwriting_image_key);
+    }
+    await prescription.update({
+      mode: PrescriptionMode.HANDWRITTEN,
+      handwriting_image_key: key,
+    } as any);
 
     return this.toView(await this.reload(prescription.id));
   }
@@ -118,13 +150,14 @@ export class PrescriptionsService {
       pdf_key: key,
     } as any);
 
-    // 3. Grow the clinic's medicine vocabulary from what was actually issued.
+    // 3. Grow the tenant's medicine vocabulary from what was actually issued.
     await this.medicines.recordUsage(
       medicines.map((m) => ({
         name: m.medicine_name,
         strength: m.strength,
         form: m.form,
       })),
+      appointment.doctor_id,
     );
 
     // 4. Capture the training pair. Best-effort: a logging failure must never
@@ -142,6 +175,7 @@ export class PrescriptionsService {
       'Your prescription is ready',
       `Dr. ${doctor.name} has issued your prescription for ${appointment.appointment_date}.`,
       { appointmentId: appointment.id, prescriptionId: prescription.id },
+      appointment.doctor_id,
     );
 
     return this.toView(await this.reload(prescription.id));
@@ -162,11 +196,15 @@ export class PrescriptionsService {
     const medicines = await this.medicinesFor(prescription.id);
     return {
       id: prescription.id,
+      mode: prescription.mode,
       diagnosis: prescription.diagnosis,
       advice: prescription.advice,
       follow_up_date: prescription.follow_up_date,
       issued_at: prescription.issued_at,
       pdf_url: await this.storage.presignedGetUrl(prescription.pdf_key),
+      handwriting_image_url: await this.storage.presignedGetUrl(
+        prescription.handwriting_image_key,
+      ),
       medicines: medicines.map((m) => this.medicineView(m)),
     };
   }
@@ -271,6 +309,7 @@ export class PrescriptionsService {
     await this.trainingModel.create({
       kind: TrainingSampleKind.PRESCRIPTION,
       appointment_id: appointment.id,
+      doctor_id: appointment.doctor_id,
       input_payload: {
         transcript: session.transcript,
         patient: {
@@ -304,6 +343,15 @@ export class PrescriptionsService {
     prescription: EPrescription,
     medicines: EPrescriptionMedicine[],
   ): void {
+    // A handwritten prescription only needs the drawing.
+    if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
+      if (!prescription.handwriting_image_key) {
+        throw new AppException(ErrorCode.BAD_REQUEST, {
+          message: 'Write the prescription before issuing it.',
+        });
+      }
+      return;
+    }
     if (medicines.length === 0 && !prescription.advice?.trim()) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message:
@@ -328,7 +376,8 @@ export class PrescriptionsService {
         message: 'Appointment not found.',
       });
     }
-    if (user.type === UserType.DOCTOR && appointment.doctor_id !== user.doctorId) {
+    // All clinical users have doctorId; reject any mismatch (covers doctor + staff).
+    if (!user.doctorId || appointment.doctor_id !== user.doctorId) {
       throw new AppException(ErrorCode.FORBIDDEN, {
         message: 'You can only access your own appointments.',
       });
@@ -358,11 +407,15 @@ export class PrescriptionsService {
       appointment_id: prescription.appointment_id,
       consultation_session_id: prescription.consultation_session_id,
       status: prescription.status,
+      mode: prescription.mode,
       diagnosis: prescription.diagnosis,
       advice: prescription.advice,
       follow_up_date: prescription.follow_up_date,
       issued_at: prescription.issued_at,
       pdf_url: await this.storage.presignedGetUrl(prescription.pdf_key),
+      handwriting_image_url: await this.storage.presignedGetUrl(
+        prescription.handwriting_image_key,
+      ),
       medicines: medicines.map((m) => this.medicineView(m)),
     };
   }

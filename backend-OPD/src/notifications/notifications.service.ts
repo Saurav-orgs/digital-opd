@@ -15,6 +15,7 @@ export class NotificationsService {
     title: string,
     body?: string,
     data?: Record<string, unknown>,
+    doctorId?: string | null,
   ): Promise<Notification> {
     return this.notificationModel.create({
       patient_mobile: mobile,
@@ -22,21 +23,21 @@ export class NotificationsService {
       title,
       body: body ?? null,
       data: data ?? null,
+      doctor_id: doctorId ?? null,
       read_at: null,
     } as any);
   }
 
-  async listForPatient(mobile: string): Promise<Notification[]> {
-    return this.notificationModel.findAll({
-      where: { patient_mobile: mobile },
-      order: [['created_at', 'DESC']],
-    });
+  async listForPatient(mobile: string, doctorId?: string | null): Promise<Notification[]> {
+    const where: any = { patient_mobile: mobile };
+    if (doctorId) where.doctor_id = doctorId;
+    return this.notificationModel.findAll({ where, order: [['created_at', 'DESC']] });
   }
 
-  async unreadCount(mobile: string): Promise<number> {
-    return this.notificationModel.count({
-      where: { patient_mobile: mobile, read_at: null },
-    });
+  async unreadCount(mobile: string, doctorId?: string | null): Promise<number> {
+    const where: any = { patient_mobile: mobile, read_at: null };
+    if (doctorId) where.doctor_id = doctorId;
+    return this.notificationModel.count({ where });
   }
 
   async markRead(mobile: string, id: string): Promise<void> {

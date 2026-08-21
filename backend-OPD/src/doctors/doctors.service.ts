@@ -1,15 +1,50 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import * as bcrypt from 'bcrypt';
+import { Sequelize } from 'sequelize-typescript';
 import { Doctor } from '../database/models/doctor.model';
-import { UpdateDoctorDto } from './dto/doctor.dto';
+import { Permission } from '../database/models/permission.model';
+import { Role } from '../database/models/role.model';
+import { RolePermission } from '../database/models/role-permission.model';
+import { User } from '../database/models/user.model';
+import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
 import { StorageService } from '../uploads/storage.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
+import { PermissionAction, PermissionModule, UserType } from '../common/enums';
+
+// Modules the tenant Doctor role receives (all clinical modules).
+// doctors:create and doctors:delete stay super-admin-only.
+const TENANT_DOCTOR_PERMS: { module: PermissionModule; action: PermissionAction }[] = [
+  ...Object.values(PermissionModule).flatMap((module) =>
+    Object.values(PermissionAction).map((action) => ({ module, action })),
+  ),
+].filter(
+  ({ module, action }) =>
+    !(
+      module === PermissionModule.DOCTORS &&
+      (action === PermissionAction.CREATE || action === PermissionAction.DELETE)
+    ),
+);
+
+// Tenant Pathlab role — upload and view reports only.
+const TENANT_PATHLAB_PERMS = [
+  { module: PermissionModule.REPORTS, action: PermissionAction.CREATE },
+  { module: PermissionModule.REPORTS, action: PermissionAction.READ },
+  { module: PermissionModule.PATHLABS, action: PermissionAction.CREATE },
+  { module: PermissionModule.PATHLABS, action: PermissionAction.READ },
+];
 
 @Injectable()
 export class DoctorsService {
   constructor(
     @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
+    @InjectModel(Role) private readonly roleModel: typeof Role,
+    @InjectModel(RolePermission)
+    private readonly rolePermissionModel: typeof RolePermission,
+    @InjectModel(Permission) private readonly permissionModel: typeof Permission,
+    @InjectModel(User) private readonly userModel: typeof User,
+    private readonly sequelize: Sequelize,
     private readonly storage: StorageService,
   ) {}
 
@@ -36,6 +71,12 @@ export class DoctorsService {
     return this.toView(doctor);
   }
 
+  async remove(id: string): Promise<{ message: string }> {
+    const doctor = await this.getOrFail(id);
+    await doctor.destroy(); // soft-delete (paranoid: true on the model)
+    return { message: 'Doctor removed.' };
+  }
+
   async uploadPhoto(id: string, file: Express.Multer.File) {
     const doctor = await this.getOrFail(id);
     const { key } = await this.storage.uploadImage(file, `doctors/${id}/photo`);
@@ -43,6 +84,159 @@ export class DoctorsService {
       await this.storage.delete(doctor.profile_photo_url);
     await doctor.update({ profile_photo_url: key } as any);
     return this.toView(doctor);
+  }
+
+  /** Upload the clinic logo shown on the prescription letterhead. */
+  async uploadLetterheadLogo(id: string, file: Express.Multer.File) {
+    const doctor = await this.getOrFail(id);
+    const { key } = await this.storage.uploadImage(file, `doctors/${id}/logo`);
+    if (doctor.clinic_logo_key) await this.storage.delete(doctor.clinic_logo_key);
+    await doctor.update({ clinic_logo_key: key } as any);
+    return this.toView(doctor);
+  }
+
+  /**
+   * Creates a new doctor tenant in a single transaction:
+   *   1. Doctor profile + public QR slug.
+   *   2. Two tenant roles: Doctor (all clinical) and Pathlab (reports only).
+   *   3. The doctor's own login User (type=doctor).
+   *
+   * Returns everything the super-admin needs to hand to the new doctor,
+   * including the one-time credentials (never stored again) and the QR URL.
+   */
+  async createTenant(
+    dto: CreateDoctorDto,
+    patientWebBase: string,
+  ): Promise<{
+    doctor: any;
+    doctorRole: any;
+    pathlabRole: any;
+    login: { email: string; tempPassword: string };
+    qrUrl: string;
+  }> {
+    // Check email uniqueness before the transaction so we get a clean error.
+    const existing = await this.userModel.findOne({
+      where: { email: dto.email.toLowerCase() },
+      paranoid: false,
+    });
+    if (existing) {
+      throw new AppException(ErrorCode.CONFLICT, {
+        message: 'An account with this email already exists.',
+      });
+    }
+
+    return this.sequelize.transaction(async (t) => {
+      // 1 — Doctor profile
+      const slug = await this.uniqueSlug(dto.name);
+      const doctor = await this.doctorModel.create(
+        {
+          name: dto.name,
+          specialization: dto.specialization ?? null,
+          qualifications: dto.qualifications ?? null,
+          bio: dto.bio ?? null,
+          consultation_fee: dto.consultation_fee ?? null,
+          public_slug: slug,
+          is_enabled: true,
+        } as any,
+        { transaction: t },
+      );
+
+      // 2 — Tenant roles
+      const doctorRole = await this.createTenantRole(
+        'Doctor',
+        'Full clinical access for this tenant.',
+        TENANT_DOCTOR_PERMS,
+        doctor.id,
+        t,
+      );
+      const pathlabRole = await this.createTenantRole(
+        'Pathlab',
+        'Report upload access for this tenant.',
+        TENANT_PATHLAB_PERMS,
+        doctor.id,
+        t,
+      );
+
+      // 3 — Doctor login
+      const password_hash = await bcrypt.hash(dto.password, 10);
+      await this.userModel.create(
+        {
+          name: dto.name,
+          email: dto.email.toLowerCase(),
+          password_hash,
+          type: UserType.DOCTOR,
+          role_id: doctorRole.id,
+          doctor_id: doctor.id,
+          is_active: true,
+        } as any,
+        { transaction: t },
+      );
+
+      return {
+        doctor: this.toView(doctor),
+        doctorRole: { id: doctorRole.id, name: doctorRole.name },
+        pathlabRole: { id: pathlabRole.id, name: pathlabRole.name },
+        login: { email: dto.email.toLowerCase(), tempPassword: dto.password },
+        qrUrl: `${patientWebBase}/d/${slug}`,
+      };
+    });
+  }
+
+  /** Creates a named role with given permissions, scoped to a tenant. */
+  private async createTenantRole(
+    name: string,
+    description: string,
+    perms: { module: PermissionModule; action: PermissionAction }[],
+    doctorId: string,
+    transaction: any,
+  ) {
+    const role = await this.roleModel.create(
+      { name, description, is_system: false, doctor_id: doctorId } as any,
+      { transaction },
+    );
+
+    const permissions = await this.permissionModel.findAll({
+      where: { module: perms.map((p) => p.module), action: perms.map((p) => p.action) },
+      attributes: ['id', 'module', 'action'],
+    });
+    // Filter to only the exact (module, action) pairs we want.
+    const wantedSet = new Set(perms.map((p) => `${p.module}:${p.action}`));
+    const matched = permissions.filter((p) => wantedSet.has(`${p.module}:${p.action}`));
+
+    if (matched.length) {
+      await this.rolePermissionModel.bulkCreate(
+        matched.map((p) => ({ role_id: role.id, permission_id: p.id })) as any,
+        { transaction },
+      );
+    }
+    return role;
+  }
+
+  /** Rotates the doctor's public_slug (invalidates old QR). */
+  async regenerateSlug(id: string, patientWebBase: string) {
+    const doctor = await this.getOrFail(id);
+    const slug = await this.uniqueSlug(doctor.name);
+    await doctor.update({ public_slug: slug } as any);
+    return {
+      ...this.toView(doctor),
+      qrUrl: `${patientWebBase}/d/${slug}`,
+    };
+  }
+
+  /** Slug for the doctor's public booking link, unique across soft-deletes. */
+  private async uniqueSlug(name: string): Promise<string> {
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '')
+        .slice(0, 40) || 'doctor';
+    let slug = base;
+    let n = 1;
+    while (await this.doctorModel.findOne({ where: { public_slug: slug }, paranoid: false })) {
+      slug = `${base}-${n++}`;
+    }
+    return slug;
   }
 
   /** Raw model fetch (internal use). */
@@ -59,6 +253,7 @@ export class DoctorsService {
     return {
       ...json,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
+      clinic_logo_url: this.storage.publicUrl(d.clinic_logo_key),
     };
   }
 

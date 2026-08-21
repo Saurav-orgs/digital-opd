@@ -31,15 +31,15 @@ class PatientAuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> login(String mobile) async {
-    final session = await api.loginPatient(mobile);
+  Future<void> login(String mobile, {String? doctorId}) async {
+    final session = await api.loginPatient(mobile, doctorId: doctorId);
     await api.tokens.set(session.accessToken);
     patient = session.patient;
     notifyListeners();
   }
 
-  Future<void> register(String mobile, String name) async {
-    final session = await api.registerPatient(mobile, name);
+  Future<void> register(String mobile, String name, {String? doctorId}) async {
+    final session = await api.registerPatient(mobile, name, doctorId: doctorId);
     await api.tokens.set(session.accessToken);
     patient = session.patient;
     notifyListeners();

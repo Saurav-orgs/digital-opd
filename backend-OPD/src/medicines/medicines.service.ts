@@ -19,10 +19,12 @@ export class MedicinesService {
   ) {}
 
   /** Autocomplete for the prescription editor. Most-used names rank first. */
-  async search(query: string, limit = 20): Promise<MedicineCatalog[]> {
+  async search(query: string, doctorId?: string | null, limit = 20): Promise<MedicineCatalog[]> {
     const q = query?.trim();
+    const where: any = q ? { name: { [Op.iLike]: `%${q}%` } } : {};
+    if (doctorId) where.doctor_id = doctorId;
     return this.catalogModel.findAll({
-      where: q ? { name: { [Op.iLike]: `%${q}%` } } : {},
+      where,
       order: [
         ['usage_count', 'DESC'],
         ['name', 'ASC'],
@@ -36,8 +38,11 @@ export class MedicinesService {
    * because a long list crowds out the transcript in the model's context and
    * exceeds what Whisper conditions on.
    */
-  async vocabulary(limit = 120): Promise<string[]> {
+  async vocabulary(doctorId?: string | null, limit = 120): Promise<string[]> {
+    const where: any = {};
+    if (doctorId) where.doctor_id = doctorId;
     const rows = await this.catalogModel.findAll({
+      where,
       order: [
         ['usage_count', 'DESC'],
         ['name', 'ASC'],
@@ -54,15 +59,16 @@ export class MedicinesService {
    */
   async recordUsage(
     medicines: { name: string; strength?: string | null; form?: string | null }[],
+    doctorId?: string | null,
   ): Promise<void> {
     for (const medicine of medicines) {
       const name = medicine.name?.trim();
       if (!name) continue;
 
-      // Case-insensitive match so "Dolo 650" and "dolo 650" stay one entry.
-      const existing = await this.catalogModel.findOne({
-        where: sqlWhere(fn('lower', col('name')), name.toLowerCase()),
-      });
+      // Case-insensitive match within the same tenant.
+      const where: any = { ...sqlWhere(fn('lower', col('name')), name.toLowerCase()) };
+      if (doctorId) where.doctor_id = doctorId;
+      const existing = await this.catalogModel.findOne({ where });
 
       if (existing) {
         await existing.increment('usage_count');
@@ -73,6 +79,7 @@ export class MedicinesService {
         name,
         strength: medicine.strength ?? null,
         form: medicine.form ?? null,
+        doctor_id: doctorId ?? null,
         usage_count: 1,
       } as any);
     }

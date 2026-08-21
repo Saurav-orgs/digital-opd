@@ -6,8 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from './Toast';
 import { Badge, Loading, Modal } from './ui';
 import { InlineSlotPicker } from './InlineSlotPicker';
-import { ConsultationRecorder } from './ConsultationRecorder';
-import { PrescriptionEditor } from './PrescriptionEditor';
+import { PrescriptionTabs } from './PrescriptionTabs';
 import { reportsApi } from '../api/endpoints';
 import type { PatientReport } from '../api/types';
 
@@ -405,22 +404,14 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
 
       {a && (
         <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>
-            Voice prescription
+          <div className="card-title" style={{ marginBottom: 10 }}>
+            Prescription
           </div>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 10 }}>
-            Record the consultation and the system will draft a prescription. Nothing
-            is sent to the patient until you issue it.
-          </p>
-          {canUpdate && (
-            <ConsultationRecorder
-              appointmentId={id}
-              disabled={a.status === 'rejected'}
-            />
-          )}
-          <div style={{ marginTop: 16 }}>
-            <PrescriptionEditor appointmentId={id} canEdit={canUpdate} />
-          </div>
+          <PrescriptionTabs
+            appointmentId={id}
+            canEdit={canUpdate}
+            disabled={a.status === 'rejected'}
+          />
         </div>
       )}
 

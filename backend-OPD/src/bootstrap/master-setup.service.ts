@@ -6,7 +6,6 @@ import { Sequelize as SequelizeStatic } from 'sequelize';
 import Umzug from 'umzug';
 import * as bcrypt from 'bcrypt';
 import * as path from 'path';
-import { Doctor } from '../database/models/doctor.model';
 import { Permission } from '../database/models/permission.model';
 import { Role } from '../database/models/role.model';
 import { RolePermission } from '../database/models/role-permission.model';
@@ -55,7 +54,6 @@ export class MasterSetupService implements OnApplicationBootstrap {
     @InjectModel(RolePermission)
     private readonly rolePermissionModel: typeof RolePermission,
     @InjectModel(User) private readonly userModel: typeof User,
-    @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -63,8 +61,8 @@ export class MasterSetupService implements OnApplicationBootstrap {
       await this.runPendingMigrations();
       const permissionIds = await this.ensurePermissionCatalog();
       const role = await this.ensureSuperAdminRole(permissionIds);
-      const doctor = await this.ensureDoctorProfile();
-      await this.ensureSuperAdminUser(role.id, doctor.id);
+      // Super admin is the platform owner only — no doctor profile attached.
+      await this.ensureSuperAdminUser(role.id);
       await this.ensurePathlabRole();
     } catch (err) {
       // Never crash the app over setup — surface it loudly and move on so
@@ -169,59 +167,11 @@ export class MasterSetupService implements OnApplicationBootstrap {
   }
 
   /**
-   * Ensures the clinic's single doctor profile exists. The SuperAdmin *is* the
-   * doctor, so the profile is seeded here from `SUPERADMIN_NAME` and then
-   * edited in-app (photo, specialization, fee…) — there is no
-   * "add doctor" flow anywhere in the admin surfaces.
+   * Ensures a SuperAdmin login exists, using credentials from env config.
+   * The super admin is the platform owner only — no doctor_id, no clinical data.
+   * Doctors are created via POST /doctors (super-admin only API).
    */
-  private async ensureDoctorProfile(): Promise<Doctor> {
-    const existing = await this.doctorModel.findOne({
-      order: [['created_at', 'ASC']],
-    });
-    if (existing) return existing;
-
-    const { name } = this.config.get<{ name: string }>('superAdmin')!;
-    const doctor = await this.doctorModel.create({
-      name,
-      public_slug: await this.uniqueSlug(name),
-      // Live from the start — a single-doctor clinic has nothing to enable.
-      is_enabled: true,
-    } as any);
-    this.logger.log(`Master setup: created the clinic doctor profile (${name}).`);
-    return doctor;
-  }
-
-  /** Slug for the doctor's public booking link, unique across soft-deletes. */
-  private async uniqueSlug(name: string): Promise<string> {
-    const base =
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-        .slice(0, 40) || 'doctor';
-    let slug = base;
-    let n = 1;
-    while (
-      await this.doctorModel.findOne({
-        where: { public_slug: slug },
-        paranoid: false,
-      })
-    ) {
-      slug = `${base}-${n++}`;
-    }
-    return slug;
-  }
-
-  /**
-   * Ensures a SuperAdmin login exists, using credentials from env config, and
-   * that it is linked to the clinic doctor profile — that link is what makes
-   * the SuperAdmin the doctor for every doctor-scoped route (`/doctors/me`,
-   * walk-ins, schedules).
-   */
-  private async ensureSuperAdminUser(
-    roleId: string,
-    doctorId: string,
-  ): Promise<void> {
+  private async ensureSuperAdminUser(roleId: string): Promise<void> {
     const { email, password, name } = this.config.get<{
       email: string;
       password: string;
@@ -234,10 +184,11 @@ export class MasterSetupService implements OnApplicationBootstrap {
       paranoid: false, // still find a soft-deleted account so we don't duplicate
     });
     if (existing) {
-      if (existing.doctor_id !== doctorId) {
-        await existing.update({ doctor_id: doctorId } as any);
+      // Unlink from any doctor that was set in the old single-tenant setup.
+      if (existing.doctor_id !== null) {
+        await existing.update({ doctor_id: null } as any);
         this.logger.log(
-          'Master setup: linked the SuperAdmin login to the doctor profile.',
+          'Master setup: unlinked SuperAdmin from doctor profile (platform-owner mode).',
         );
       }
       return;
@@ -250,7 +201,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
       password_hash,
       type: UserType.SUPER_ADMIN,
       role_id: roleId,
-      doctor_id: doctorId,
+      doctor_id: null,
       is_active: true,
     } as any);
 
