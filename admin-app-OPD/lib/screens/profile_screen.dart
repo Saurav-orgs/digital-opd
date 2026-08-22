@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/auth_scope.dart';
@@ -23,19 +24,20 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Future<Doctor>? _future;
+
   final _name = TextEditingController();
   final _specialization = TextEditingController();
   final _qualifications = TextEditingController();
-  final _fee = TextEditingController();
   final _bio = TextEditingController();
+  final _fee = TextEditingController();
+
   final _clinicName = TextEditingController();
   final _clinicAddress = TextEditingController();
   final _clinicPhone = TextEditingController();
 
-  bool _hydrated = false;
   bool _saving = false;
-  bool _savingLetterhead = false;
   bool _uploadingPhoto = false;
+  bool _savingLetterhead = false;
   bool _uploadingLogo = false;
 
   AuthController get _auth => AuthScope.of(context);
@@ -45,34 +47,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= _load();
+    _future ??= _auth.api.getMe().then((d) {
+      _populate(d);
+      return d;
+    });
   }
 
-  Future<Doctor> _load() async {
-    final me = await _auth.api.getMe();
-    if (!_hydrated) {
-      _name.text = me.name;
-      _specialization.text = me.specialization ?? '';
-      _qualifications.text = me.qualifications ?? '';
-      _fee.text = me.consultationFee ?? '';
-      _bio.text = me.bio ?? '';
-      _clinicName.text = me.clinicName ?? '';
-      _clinicAddress.text = me.clinicAddress ?? '';
-      _clinicPhone.text = me.clinicPhone ?? '';
-      _hydrated = true;
-    }
-    return me;
+  void _populate(Doctor d) {
+    _name.text = d.name;
+    _specialization.text = d.specialization ?? '';
+    _qualifications.text = d.qualifications ?? '';
+    _bio.text = d.bio ?? '';
+    _fee.text = d.consultationFee ?? '';
+    _clinicName.text = d.clinicName ?? '';
+    _clinicAddress.text = d.clinicAddress ?? '';
+    _clinicPhone.text = d.clinicPhone ?? '';
   }
 
-  void _reload() => setState(() { _future = _load(); });
+  void _reload() {
+    setState(() {
+      _future = _auth.api.getMe().then((d) {
+        _populate(d);
+        return d;
+      });
+    });
+  }
 
   @override
   void dispose() {
     _name.dispose();
     _specialization.dispose();
     _qualifications.dispose();
-    _fee.dispose();
     _bio.dispose();
+    _fee.dispose();
     _clinicName.dispose();
     _clinicAddress.dispose();
     _clinicPhone.dispose();
@@ -82,17 +89,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await _auth.api.updateMe({
+      final feeNum = _fee.text.trim().isEmpty ? null : _fee.text.trim();
+      final updated = await _auth.api.updateMe({
         'name': _name.text.trim(),
         'specialization':
             _specialization.text.trim().isEmpty ? null : _specialization.text.trim(),
         'qualifications':
             _qualifications.text.trim().isEmpty ? null : _qualifications.text.trim(),
         'bio': _bio.text.trim().isEmpty ? null : _bio.text.trim(),
-        'consultation_fee':
-            _fee.text.trim().isEmpty ? null : num.tryParse(_fee.text.trim()),
+        'consultation_fee': feeNum == null ? null : num.tryParse(feeNum),
       });
-      if (mounted) showSuccessSnack(context, 'Profile updated');
+      _populate(updated);
+      if (mounted) showSuccessSnack(context, 'Profile saved');
     } on ApiException catch (e) {
       if (mounted) showErrorSnack(context, e.message);
     } finally {
@@ -163,18 +171,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _qrCard(String slug) {
-    final url = '${AppConfig.patientWebBase}/d/$slug';
+  Widget _qrCard(Doctor me) {
+    final base = (me.profileBaseUrl != null && me.profileBaseUrl!.trim().isNotEmpty)
+        ? me.profileBaseUrl!.trim().replaceAll(RegExp(r'/+$'), '')
+        : AppConfig.patientWebBase;
+    final url = me.bookingUrl ?? '$base/d/${me.publicSlug}';
+
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('My booking link'),
+          const CardTitle('My booking link & QR'),
           const Text(
-            'Share this link (or its QR code) with patients to book appointments.',
+            'Share this link or QR code with patients to book appointments directly.',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
-          const SizedBox(height: 10),
+          if (me.qrCodeUrl != null && me.qrCodeUrl!.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.control),
+                  border: Border.all(color: AppColors.border, width: 0.5),
+                ),
+                child: Image.network(
+                  me.qrCodeUrl!,
+                  height: 150,
+                  width: 150,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const Icon(Icons.qr_code, size: 80, color: AppColors.textSecondary),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -182,20 +214,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
               color: AppColors.page,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(url,
-                style: const TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    color: AppColors.textSecondary)),
+            child: Text(
+              url,
+              style: const TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: AppColors.textSecondary,
+              ),
+            ),
           ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: url));
-              showSuccessSnack(context, 'Link copied');
-            },
-            icon: const Icon(Icons.copy, size: 16),
-            label: const Text('Copy link'),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: url));
+                    showSuccessSnack(context, 'Link copied');
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy link'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    SharePlus.instance.share(
+                      ShareParams(
+                        text: 'Book an appointment with ${me.name}:\n$url',
+                        subject: 'Book OPD Appointment with ${me.name}',
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.share, size: 16),
+                  label: const Text('Share'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -279,7 +335,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _letterheadCard(me),
             if (me.publicSlug.isNotEmpty) ...[
               const SizedBox(height: 12),
-              _qrCard(me.publicSlug),
+              _qrCard(me),
             ],
             if (_canSchedule) ...[
               const SizedBox(height: 12),

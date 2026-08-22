@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
@@ -399,57 +397,31 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                SectionCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _row('Patient', a.patientName),
-                      _row('Mobile', a.patientMobile),
-                      if (a.patientGender != null || a.patientAge != null)
-                        _row('Gender & age', _genderAge(a)),
-                      _row('Date & time',
-                          '${a.appointmentDate} · ${a.startTime}–${a.endTime}'),
-                      _row('Doctor', a.doctor?.name ?? '—'),
-                      if (a.patientAddress != null &&
-                          a.patientAddress!.isNotEmpty)
-                        _row('Address', a.patientAddress!),
-                      if (a.description != null && a.description!.isNotEmpty)
-                        _row('Reason', a.description!),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          if (a.isWalkIn)
-                            const StatusBadge('walk_in', label: 'Walk-in'),
-                          StatusBadge(a.status),
-                          StatusBadge(a.consultationStatus),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _notesCard(a, canUpdate),
-                const SizedBox(height: 16),
-                _prescriptionsCard(a, canUpdate),
-                const SizedBox(height: 16),
-                _historyCard(a),
-                if (canUpdate && a.status != 'rejected') ...[
+                _patientDetailsCard(a),
+                if (a.reports.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _rescheduleCard(a),
+                  _reportsCard(a),
                 ],
-                if (canUpdate) ...[
-                  const SizedBox(height: 16),
-                  _reminderCard(a),
-                ],
-                const SizedBox(height: 16),
-                _reportsCard(a),
                 const SizedBox(height: 16),
                 ConsultationPanel(
                   appointmentId: widget.id,
                   canEdit: canUpdate && a.status != 'rejected',
+                  onChanged: () => setState(() {
+                    _future = _api.getAppointment(widget.id);
+                  }),
                 ),
+                const SizedBox(height: 16),
+                _notesCard(a, canUpdate),
+                if (canUpdate) ...[
+                  const SizedBox(height: 16),
+                  _reminderCard(a),
+                ],
+                if (canUpdate && a.status != 'rejected') ...[
+                  const SizedBox(height: 16),
+                  _rescheduleCard(a),
+                ],
+                const SizedBox(height: 16),
+                _historyCard(a),
                 if (canUpdate) ...[
                   const SizedBox(height: 16),
                   _reviewCard(a),
@@ -688,28 +660,37 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
   }
 
   // ── Reports (pathlab-uploaded or patient self-uploaded) ─────
-  /// AI summary under a report. `pending` means queued (usually the AI service
-  /// isn't up) — saying "summarising" there would promise work that isn't
-  /// happening, so the two states read differently.
   Widget _reportSummary(PatientReport r) {
     if (r.summaryStatus == 'processing') {
       return const Padding(
-        padding: EdgeInsets.only(top: 4, left: 24),
-        child: Text('Summarising…',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+        padding: EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 8),
+            Text('Summarising report…',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+          ],
+        ),
       );
     }
     if (r.summaryStatus == 'pending' || r.summaryStatus == 'failed') {
       return Padding(
-        padding: const EdgeInsets.only(top: 4, left: 24),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
-            Text(
-              r.summaryStatus == 'pending'
-                  ? 'Waiting to be summarised.'
-                  : 'Couldn’t summarise this report.',
-              style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 12.5),
+            Expanded(
+              child: Text(
+                r.summaryStatus == 'pending'
+                    ? 'Waiting to be summarised.'
+                    : 'Couldn’t summarise this report.',
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 12.5),
+              ),
             ),
             TextButton(
               onPressed: () async {
@@ -729,7 +710,7 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: const Size(0, 30),
               ),
-              child: const Text('Summarise now'),
+              child: Text(r.summaryStatus == 'pending' ? 'Summarise now' : 'Retry'),
             ),
           ],
         ),
@@ -737,61 +718,15 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
     }
 
     final summary = r.aiSummary;
-    if (summary == null) return const SizedBox.shrink();
+    if (summary == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Text('No summary available.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+      );
+    }
 
-    return Container(
-      margin: const EdgeInsets.only(top: 6, left: 24),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.page,
-        borderRadius: BorderRadius.circular(AppRadius.control),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (summary.reportType.isNotEmpty)
-            Text(summary.reportType,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 12.5)),
-          Text(summary.summary, style: const TextStyle(fontSize: 13)),
-          if (summary.abnormalValues.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: summary.abnormalValues
-                  .map((v) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: v.direction == 'high'
-                              ? AppColors.errorTint
-                              : AppColors.onHoldTint,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text('${v.label}: ${v.value}',
-                            style: TextStyle(
-                                fontSize: 11.5,
-                                color: v.direction == 'high'
-                                    ? AppColors.error
-                                    : AppColors.onHold)),
-                      ))
-                  .toList(),
-            ),
-          ],
-          if (summary.keyFindings.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            ...summary.keyFindings.map((f) => Text('• $f',
-                style: const TextStyle(fontSize: 12.5))),
-          ],
-          const SizedBox(height: 6),
-          const Text(
-            'AI-generated — check the report itself before acting.',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-          ),
-        ],
-      ),
-    );
+    return _summaryBody(summary);
   }
 
   Widget _reportsCard(Appointment a) {
@@ -799,46 +734,84 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('Reports for this visit'),
+          const CardTitle('AI summary report'),
+          const SizedBox(height: 8),
           if (a.reports.isEmpty)
             const Text('No reports uploaded for this appointment.',
                 style: TextStyle(color: AppColors.textSecondary))
           else ...[
             _visitSummary(a),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: a.reports
-                  .map((r) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            InkWell(
-                              onTap: r.url == null
-                                  ? null
-                                  : () => launchUrl(Uri.parse(r.url!),
-                                      mode: LaunchMode.externalApplication),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.description_outlined,
-                                      size: 16, color: AppColors.primary),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(r.title,
-                                        style: const TextStyle(
-                                            color: AppColors.primary)),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            _reportSummary(r),
-                          ],
-                        ),
-                      ))
-                  .toList(),
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(top: 4),
+                initiallyExpanded: a.reports.length == 1 && a.reportsSummaryStatus != 'ready',
+                title: Text(
+                  'Individual reports (${a.reports.length})',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                children: a.reports.map((r) => _individualReportTile(r)).toList(),
+              ),
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _individualReportTile(PatientReport r) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.page,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          childrenPadding: const EdgeInsets.only(left: 12, right: 12, bottom: 10),
+          title: Row(
+            children: [
+              const Icon(Icons.description_outlined, size: 16, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  r.title,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (r.url != null && r.url!.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.open_in_new, size: 16, color: AppColors.textSecondary),
+                  tooltip: 'Open report file',
+                  onPressed: () => launchUrl(
+                    Uri.parse(r.url!),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                ),
+              const Icon(Icons.expand_more, size: 20, color: AppColors.textSecondary),
+            ],
+          ),
+          children: [
+            _reportSummary(r),
+          ],
+        ),
       ),
     );
   }
@@ -956,73 +929,84 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
     );
   }
 
-  // ── Prescriptions ──────────────────────────────────────────
-  Future<void> _pickPrescriptions(Appointment a) async {
-    final picked =
-        await ImagePicker().pickMultiImage(imageQuality: 85);
-    if (picked.isEmpty) return;
-    final files = picked.map((x) => File(x.path)).toList();
-    await _run(() => _api.addPrescriptions(a.id, files),
-        'Prescription${files.length > 1 ? 's' : ''} uploaded');
-  }
-
-  Future<void> _confirmDeleteRx(Appointment a, String prescriptionId) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Delete prescription?'),
-        content: const Text('This image will be removed permanently.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await _run(() => _api.deletePrescription(a.id, prescriptionId),
-          'Prescription deleted');
-    }
-  }
-
-  Widget _prescriptionsCard(Appointment a, bool canUpdate) {
+  Widget _patientDetailsCard(Appointment a) {
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('Prescriptions'),
-          if (a.prescriptions.isEmpty)
-            const Text('No prescriptions uploaded yet.',
-                style: TextStyle(color: AppColors.textSecondary))
-          else
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: a.prescriptions
-                  .map((p) => _RxThumb(
-                        url: p.url,
-                        onDelete: canUpdate && !_busy
-                            ? () => _confirmDeleteRx(a, p.id)
-                            : null,
-                      ))
-                  .toList(),
-            ),
-          if (canUpdate) ...[
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : () => _pickPrescriptions(a),
-                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                label: const Text('Upload images'),
-              ),
-            ),
-          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const CardTitle('Patient details'),
+              if (a.doctor != null)
+                Text('Doctor: ${a.doctor!.name}',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 500;
+              final colWidth = isWide
+                  ? (constraints.maxWidth - 32) / 3
+                  : (constraints.maxWidth - 16) / 2;
+              return Wrap(
+                spacing: 16,
+                runSpacing: 12,
+                children: [
+                  SizedBox(width: colWidth, child: _detailItem('Patient', a.patientName)),
+                  SizedBox(width: colWidth, child: _detailItem('Mobile', a.patientMobile)),
+                  if (a.patientGender != null || a.patientAge != null)
+                    SizedBox(width: colWidth, child: _detailItem('Gender & age', _genderAge(a))),
+                  SizedBox(width: colWidth, child: _detailItem('Booking', a.isWalkIn ? 'Walk-in' : (a.source == 'app' ? 'Mobile App' : 'Web Booking'))),
+                  SizedBox(width: colWidth, child: _detailItem('Schedule', '${a.appointmentDate} (${a.startTime}–${a.endTime})')),
+                  if (a.patientAddress != null && a.patientAddress!.isNotEmpty)
+                    SizedBox(width: colWidth, child: _detailItem('Address', a.patientAddress!)),
+                  if (a.description != null && a.description!.isNotEmpty)
+                    SizedBox(width: colWidth, child: _detailItem('Reason', a.description!)),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              if (a.isWalkIn)
+                const StatusBadge('walk_in', label: 'Walk-in'),
+              StatusBadge(a.status),
+              StatusBadge(a.consultationStatus),
+            ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _detailItem(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 2,
+        ),
+      ],
     );
   }
 
@@ -1145,29 +1129,12 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
       ),
     );
   }
-
-  Widget _row(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 12)),
-          const SizedBox(height: 2),
-          Text(value, style: const TextStyle(fontSize: 15)),
-        ],
-      ),
-    );
-  }
 }
 
-/// A prescription image thumbnail. Tap to view full-size; optional delete badge.
+/// A prescription image thumbnail. Tap to view full-size.
 class _RxThumb extends StatelessWidget {
   final String? url;
-  final VoidCallback? onDelete;
-  const _RxThumb({required this.url, this.onDelete});
+  const _RxThumb({required this.url});
 
   @override
   Widget build(BuildContext context) {
@@ -1188,19 +1155,6 @@ class _RxThumb extends StatelessWidget {
             fallback: Icons.description_outlined,
           ),
         ),
-        if (onDelete != null)
-          Positioned(
-            top: -6,
-            right: -6,
-            child: IconButton(
-              icon: const CircleAvatar(
-                radius: 12,
-                backgroundColor: AppColors.error,
-                child: Icon(Icons.close, size: 14, color: Colors.white),
-              ),
-              onPressed: onDelete,
-            ),
-          ),
       ],
     );
   }

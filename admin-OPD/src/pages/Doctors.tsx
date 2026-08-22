@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { doctorsApi } from '../api/endpoints';
 import type { CreateDoctorResult, Doctor } from '../api/types';
@@ -114,7 +114,10 @@ function DoctorCard({
   onDelete: () => void;
   deleting: boolean;
 }) {
-  const qrUrl = `${window.location.origin.replace(':5173', ':5174')}/d/${doctor.public_slug}`;
+  const defaultBase = window.location.origin.replace(':5173', ':5174');
+  const base = doctor.profile_base_url ? doctor.profile_base_url.replace(/\/+$/, '') : defaultBase;
+  const qrUrl = doctor.booking_url || `${base}/d/${doctor.public_slug}`;
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -129,8 +132,19 @@ function DoctorCard({
         </div>
       </div>
 
-      <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--surface-2, #f4f4f5)', borderRadius: 8, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-        {qrUrl}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+        {doctor.qr_code_url && (
+          <a href={doctor.qr_code_url} target="_blank" rel="noreferrer" title="Click to view full QR">
+            <img
+              src={doctor.qr_code_url}
+              alt="Doctor QR"
+              style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: 6, border: 'var(--hairline)', background: '#fff' }}
+            />
+          </a>
+        )}
+        <div style={{ flex: 1, padding: '8px 12px', background: 'var(--surface-2, #f4f4f5)', borderRadius: 8, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+          {qrUrl}
+        </div>
       </div>
 
       <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
@@ -141,7 +155,7 @@ function DoctorCard({
           {doctor.is_enabled ? 'Disable' : 'Enable'}
         </button>
         <button className="btn btn-sm" onClick={onEdit}>
-          Edit
+          Edit & QR
         </button>
         <button
           className="btn btn-sm"
@@ -149,7 +163,7 @@ function DoctorCard({
           disabled={rotating}
           title="Generate a new QR slug — old QR links stop working"
         >
-          {rotating ? 'Rotating…' : 'Rotate QR'}
+          {rotating ? 'Rotating…' : 'Rotate Slug'}
         </button>
         <button
           className="btn btn-sm"
@@ -179,12 +193,15 @@ function EditDoctorModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const qrRef = useRef<HTMLInputElement>(null);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(doctor.qr_code_url ?? null);
   const [form, setForm] = useState({
     name: doctor.name ?? '',
     specialization: doctor.specialization ?? '',
     qualifications: doctor.qualifications ?? '',
     bio: doctor.bio ?? '',
     consultation_fee: doctor.consultation_fee != null ? String(doctor.consultation_fee) : '',
+    profile_base_url: doctor.profile_base_url ?? '',
   });
   const [error, setError] = useState('');
 
@@ -195,6 +212,7 @@ function EditDoctorModal({
         specialization: form.specialization.trim() || undefined,
         qualifications: form.qualifications.trim() || undefined,
         bio: form.bio.trim() || undefined,
+        profile_base_url: form.profile_base_url.trim() || undefined,
         consultation_fee: form.consultation_fee.trim()
           ? Number(form.consultation_fee)
           : undefined,
@@ -203,19 +221,98 @@ function EditDoctorModal({
     onError: (e: any) => setError(e?.message ?? 'Something went wrong.'),
   });
 
+  const uploadQrMut = useMutation({
+    mutationFn: (file: File) => doctorsApi.uploadQr(doctor.id, file),
+    onSuccess: (updated) => {
+      setQrCodeUrl(updated.qr_code_url ?? null);
+    },
+    onError: (e: any) => setError(e?.message ?? 'Could not upload QR code.'),
+  });
+
+  const removeQrMut = useMutation({
+    mutationFn: () => doctorsApi.removeQr(doctor.id),
+    onSuccess: () => {
+      setQrCodeUrl(null);
+    },
+    onError: (e: any) => setError(e?.message ?? 'Could not remove QR code.'),
+  });
+
   const field = (key: keyof typeof form) => ({
     value: form[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.value })),
   });
 
+  const defaultBase = window.location.origin.replace(':5173', ':5174');
+  const resolvedBase = form.profile_base_url ? form.profile_base_url.replace(/\/+$/, '') : defaultBase;
+  const fullBookingUrl = `${resolvedBase}/d/${doctor.public_slug}`;
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginBottom: 16 }}>Edit doctor</h2>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginBottom: 16 }}>Edit doctor profile & QR</h2>
 
         <label className="form-label">Full name *</label>
         <input className="input" placeholder="Dr. Asha Rao" {...field('name')} />
+
+        <label className="form-label" style={{ marginTop: 12 }}>Profile Base URL (Domain / Host)</label>
+        <input
+          className="input"
+          placeholder={`e.g. https://booking.myclinic.com (default: ${defaultBase})`}
+          {...field('profile_base_url')}
+        />
+        <div style={{ marginTop: 4, fontSize: 12, color: 'var(--muted)' }}>
+          Full doctor URL: <code style={{ wordBreak: 'break-all', background: 'var(--surface-2, #f4f4f5)', padding: '2px 4px', borderRadius: 4 }}>{fullBookingUrl}</code>
+        </div>
+
+        {/* ── Doctor Profile QR Code Section ── */}
+        <div style={{ marginTop: 16, padding: '12px 14px', borderRadius: 8, border: 'var(--hairline)', background: 'var(--surface-2, #f8f9fa)' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Doctor Profile QR Code</div>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            {qrCodeUrl ? (
+              <img
+                src={qrCodeUrl}
+                alt="Doctor QR code"
+                style={{ width: 68, height: 68, objectFit: 'contain', background: '#fff', borderRadius: 6, border: 'var(--hairline)' }}
+              />
+            ) : (
+              <div style={{ width: 68, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', borderRadius: 6, border: 'var(--hairline)', fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: 4 }}>
+                No QR uploaded
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                ref={qrRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadQrMut.mutate(f);
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => qrRef.current?.click()}
+                disabled={uploadQrMut.isPending}
+              >
+                {uploadQrMut.isPending ? 'Uploading…' : qrCodeUrl ? 'Change QR code image' : 'Upload QR code image'}
+              </button>
+              {qrCodeUrl && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ color: 'var(--danger, #dc2626)' }}
+                  onClick={() => removeQrMut.mutate()}
+                  disabled={removeQrMut.isPending}
+                >
+                  {removeQrMut.isPending ? 'Removing…' : 'Remove QR'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
         <label className="form-label" style={{ marginTop: 12 }}>Specialization</label>
         <input className="input" placeholder="Cardiologist" {...field('specialization')} />

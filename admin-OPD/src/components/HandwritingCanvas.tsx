@@ -36,6 +36,7 @@ export function HandwritingCanvas({
 
   const [tool, setTool] = useState<Tool>('pen');
   const [dirty, setDirty] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const prescriptionQ = useQuery({
     queryKey: ['prescription', appointmentId],
@@ -51,112 +52,128 @@ export function HandwritingCanvas({
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctxRef.current = ctx;
-  }, [issued]);
 
-  const posFromEvent = (e: React.PointerEvent) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
-      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    // Prevent touch gestures/scrolling on mobile & tablet while interacting with the canvas
+    const preventTouchScroll = (e: TouchEvent) => {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
     };
-  };
 
-  const drawSegment = (
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-    pressure: number,
-  ) => {
-    const ctx = ctxRef.current;
-    if (!ctx) return;
-    if (tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = ERASER_PT * SCALE;
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = INK;
-      const p = pressure > 0 ? pressure : 0.5;
-      ctx.lineWidth = PEN_PT * SCALE * (0.6 + p * 0.9);
-    }
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  };
+    canvas.addEventListener('touchstart', preventTouchScroll, { passive: false });
+    canvas.addEventListener('touchmove', preventTouchScroll, { passive: false });
+    canvas.addEventListener('touchend', preventTouchScroll, { passive: false });
+    canvas.addEventListener('touchcancel', preventTouchScroll, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', preventTouchScroll);
+      canvas.removeEventListener('touchmove', preventTouchScroll);
+      canvas.removeEventListener('touchend', preventTouchScroll);
+      canvas.removeEventListener('touchcancel', preventTouchScroll);
+    };
+  }, [isFullscreen]);
 
   const pushUndo = () => {
     const ctx = ctxRef.current;
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
-    undoStack.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    if (undoStack.current.length > 30) undoStack.current.shift();
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (!canEdit) return;
-    (e.target as Element).setPointerCapture(e.pointerId);
-    pushUndo();
-    drawing.current = true;
-    const p = posFromEvent(e);
-    last.current = p;
-    drawSegment(p, p, e.pressure);
-    if (tool === 'pen') setDirty(true);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!drawing.current || !last.current) return;
-    const p = posFromEvent(e);
-    drawSegment(last.current, p, e.pressure);
-    last.current = p;
-  };
-
-  const onPointerUp = () => {
-    drawing.current = false;
-    last.current = null;
+    if (!ctx) return;
+    undoStack.current.push(ctx.getImageData(0, 0, CANVAS_W, CANVAS_H));
+    if (undoStack.current.length > 20) undoStack.current.shift();
   };
 
   const undo = () => {
     const ctx = ctxRef.current;
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
-    const img = undoStack.current.pop();
-    if (img) ctx.putImageData(img, 0, 0);
-    else ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!ctx || undoStack.current.length === 0) return;
+    const prev = undoStack.current.pop()!;
+    ctx.putImageData(prev, 0, 0);
   };
 
   const clear = () => {
     const ctx = ctxRef.current;
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
+    if (!ctx) return;
     pushUndo();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     setDirty(false);
+  };
+
+  const toCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * CANVAS_W;
+    const y = ((e.clientY - rect.top) / rect.height) * CANVAS_H;
+    return { x, y };
+  };
+
+  const strokeWidth = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (tool === 'eraser') return ERASER_PT * SCALE;
+    const pressure = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
+    return PEN_PT * SCALE * (0.6 + pressure * 0.9);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!canEdit) return;
+    e.preventDefault();
+    canvasRef.current?.setPointerCapture(e.pointerId);
+    pushUndo();
+    drawing.current = true;
+    last.current = toCanvasCoords(e);
+    setDirty(true);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current || !last.current) return;
+    e.preventDefault();
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    const pt = toCanvasCoords(e);
+    ctx.beginPath();
+    ctx.moveTo(last.current.x, last.current.y);
+    ctx.lineTo(pt.x, pt.y);
+
+    if (tool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = strokeWidth(e);
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.lineWidth = strokeWidth(e);
+      ctx.strokeStyle = INK;
+    }
+    ctx.stroke();
+    last.current = pt;
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return;
+    drawing.current = false;
+    last.current = null;
+    try {
+      canvasRef.current?.releasePointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const issue = useMutation({
     mutationFn: async () => {
-      const canvas = canvasRef.current!;
-      const blob = await new Promise<Blob | null>((res) =>
-        canvas.toBlob(res, 'image/png'),
+      const canvas = canvasRef.current;
+      if (!canvas) throw new Error('No canvas');
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Export failed'))), 'image/png'),
       );
-      if (!blob) throw new Error('Could not read the drawing.');
-      await consultationApi.saveHandwriting(appointmentId, blob);
-      return consultationApi.issuePrescription(appointmentId);
+      const file = new File([blob], 'handwriting.png', { type: 'image/png' });
+      await consultationApi.saveHandwriting(appointmentId, file);
+      await consultationApi.issuePrescription(appointmentId);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
       qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
-      toast.success('Prescription issued', 'The patient has been notified.');
+      toast.success('Prescription issued');
+      setIsFullscreen(false);
     },
     onError: (e) => toast.error(e),
   });
 
-  if (prescriptionQ.isLoading) {
-    return <span className="muted">Loading…</span>;
-  }
-
-  if (issued) {
-    const p = prescriptionQ.data!;
+  if (issued && prescriptionQ.data) {
+    const p = prescriptionQ.data;
     return (
       <div>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
@@ -178,44 +195,110 @@ export function HandwritingCanvas({
     );
   }
 
-  return (
-    <div>
-      <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <button className={`btn btn-sm ${tool === 'pen' ? 'btn-primary' : ''}`} onClick={() => setTool('pen')}>
-          ✒️ Pen
-        </button>
-        <button className={`btn btn-sm ${tool === 'eraser' ? 'btn-primary' : ''}`} onClick={() => setTool('eraser')}>
-          Eraser
-        </button>
-        <button className="btn btn-sm" onClick={undo} disabled={!canEdit}>Undo</button>
-        <button className="btn btn-sm" onClick={clear} disabled={!canEdit}>Clear</button>
-      </div>
-
-      <div
+  const canvasContent = (
+    <div
+      style={{
+        width: '100%',
+        height: isFullscreen ? 'calc(100vh - 120px)' : 'auto',
+        aspectRatio: isFullscreen ? undefined : `${CANVAS_W} / 1200`,
+        background: '#fff',
+        border: 'var(--hairline)',
+        borderRadius: 8,
+        overflow: 'hidden',
+        touchAction: 'none',
+        overscrollBehavior: 'none',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        boxShadow: isFullscreen ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_W}
+        height={CANVAS_H}
         style={{
           width: '100%',
-          aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
-          background: '#fff',
-          border: 'var(--hairline)',
-          borderRadius: 8,
-          overflow: 'hidden',
+          height: '100%',
+          display: 'block',
+          cursor: canEdit ? 'crosshair' : 'default',
           touchAction: 'none',
+          overscrollBehavior: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      />
+    </div>
+  );
+
+  if (isFullscreen) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'var(--bg, #f8f9fa)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '12px 18px',
         }}
       >
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          style={{ width: '100%', height: '100%', display: 'block', cursor: canEdit ? 'crosshair' : 'default', touchAction: 'none' }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <strong style={{ fontSize: 16 }}>✍️ Fullscreen Whiteboard</strong>
+            <button className={`btn btn-sm ${tool === 'pen' ? 'btn-primary' : ''}`} onClick={() => setTool('pen')}>
+              ✒️ Pen
+            </button>
+            <button className={`btn btn-sm ${tool === 'eraser' ? 'btn-primary' : ''}`} onClick={() => setTool('eraser')}>
+              Eraser
+            </button>
+            <button className="btn btn-sm" onClick={undo} disabled={!canEdit}>Undo</button>
+            <button className="btn btn-sm" onClick={clear} disabled={!canEdit}>Clear</button>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn btn-sm" onClick={() => setIsFullscreen(false)}>Exit Fullscreen</button>
+            {canEdit && (
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={issue.isPending || !dirty}
+                onClick={() => issue.mutate()}
+              >
+                {issue.isPending ? 'Issuing…' : 'Issue prescription'}
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflow: 'hidden' }}>{canvasContent}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button className={`btn btn-sm ${tool === 'pen' ? 'btn-primary' : ''}`} onClick={() => setTool('pen')}>
+            ✒️ Pen
+          </button>
+          <button className={`btn btn-sm ${tool === 'eraser' ? 'btn-primary' : ''}`} onClick={() => setTool('eraser')}>
+            Eraser
+          </button>
+          <button className="btn btn-sm" onClick={undo} disabled={!canEdit}>Undo</button>
+          <button className="btn btn-sm" onClick={clear} disabled={!canEdit}>Clear</button>
+        </div>
+        <button className="btn btn-sm" onClick={() => setIsFullscreen(true)}>
+          ⛶ Fullscreen Whiteboard
+        </button>
       </div>
 
+      {canvasContent}
+
       <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0' }}>
-        Write with a stylus or mouse. This prints on your letterhead when issued.
+        Write with a stylus or mouse. Click <strong>Fullscreen Whiteboard</strong> for a large distraction-free writing space.
       </p>
 
       {canEdit && (

@@ -211,9 +211,16 @@ class ApiClient {
   Future<Doctor> uploadDoctorPhoto(String id, File file) =>
       _uploadImage('/doctors/$id/photo', file);
 
+  Future<Doctor> uploadDoctorQr(String id, File file) =>
+      _uploadImage('/doctors/$id/qr', file);
+
+  Future<void> removeDoctorQr(String id) => _delete('/doctors/$id/qr');
+
   // Doctor self-service
   Future<Doctor> getMe() async =>
       Doctor.fromJson(await _get('/doctors/me') as Map<String, dynamic>);
+
+  Future<Doctor> meDoctor() async => getMe();
 
   Future<Doctor> updateMe(Map<String, dynamic> body) async =>
       Doctor.fromJson(await _patch('/doctors/me', body) as Map<String, dynamic>);
@@ -223,6 +230,10 @@ class ApiClient {
 
   Future<Doctor> uploadMyLetterheadLogo(File file) =>
       _uploadImage('/doctors/me/letterhead-logo', file);
+
+  Future<Doctor> uploadMyQr(File file) => _uploadImage('/doctors/me/qr', file);
+
+  Future<void> removeMyQr() => _delete('/doctors/me/qr');
 
   // ── Schedules & leave ──────────────────────────────────────
   Future<List<ScheduleEntry>> listSchedules(String doctorId) async =>

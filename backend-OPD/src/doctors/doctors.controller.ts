@@ -90,6 +90,26 @@ export class DoctorsController {
     return this.doctorsService.uploadLetterheadLogo(this.selfId(user), file);
   }
 
+  @Post('me/qr')
+  @ApiOperation({ summary: 'Doctor uploads own profile QR code image' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(fileBody)
+  @UseInterceptors(FileInterceptor('file', imageUpload))
+  uploadOwnQr(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.doctorsService.uploadQr(this.selfId(user), file);
+  }
+
+  @Delete('me/qr')
+  @ApiOperation({ summary: 'Doctor removes own profile QR code image' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  removeOwnQr(@CurrentUser() user: AuthUser) {
+    return this.doctorsService.removeQr(this.selfId(user));
+  }
+
   // ── Super-admin: tenant management ────────────────────────
   /**
    * Creates a new doctor tenant (doctor profile + roles + login).
@@ -115,6 +135,26 @@ export class DoctorsController {
     this.assertSuperAdmin(user);
     const base = this.config.get<string>('patientWebBase') ?? '';
     return this.doctorsService.regenerateSlug(id, base);
+  }
+
+  @Post(':id/qr')
+  @ApiOperation({ summary: 'Super-admin: upload doctor profile QR code image' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(fileBody)
+  @UseInterceptors(FileInterceptor('file', imageUpload))
+  uploadDoctorQr(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.doctorsService.uploadQr(id, file);
+  }
+
+  @Delete(':id/qr')
+  @ApiOperation({ summary: 'Super-admin: remove doctor profile QR code image' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  removeDoctorQr(@Param('id', ParseUUIDPipe) id: string) {
+    return this.doctorsService.removeQr(id);
   }
 
   // ── Admin reads/edits ──────────────────────────────────────

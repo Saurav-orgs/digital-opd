@@ -70,12 +70,16 @@ export const doctorsApi = {
   disable: (id: string) =>
     api.patch<Doctor>(`/doctors/${id}/disable`).then((r) => r.data),
   uploadPhoto: (id: string, file: File) => upload(`/doctors/${id}/photo`, file),
+  uploadQr: (id: string, file: File) => upload(`/doctors/${id}/qr`, file),
+  removeQr: (id: string) => api.delete<Doctor>(`/doctors/${id}/qr`).then((r) => r.data),
   // Doctor self-service
   me: () => api.get<Doctor>('/doctors/me').then((r) => r.data),
   updateMe: (body: Partial<Doctor>) =>
     api.patch<Doctor>('/doctors/me', body).then((r) => r.data),
   uploadMyPhoto: (file: File) => upload('/doctors/me/photo', file),
   uploadMyLetterheadLogo: (file: File) => upload('/doctors/me/letterhead-logo', file),
+  uploadMyQr: (file: File) => upload('/doctors/me/qr', file),
+  removeMyQr: () => api.delete<Doctor>('/doctors/me/qr').then((r) => r.data),
 };
 
 function upload(url: string, file: File) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, reportsApi } from '../api/endpoints';
@@ -7,8 +7,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Badge, Loading } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
-import { ConsultationRecorder } from '../components/ConsultationRecorder';
-import { PrescriptionEditor } from '../components/PrescriptionEditor';
+import { PrescriptionTabs } from '../components/PrescriptionTabs';
 
 export default function AppointmentPage() {
   const { id } = useParams<{ id: string }>();
@@ -59,19 +58,6 @@ export default function AppointmentPage() {
     onError: (e) => toast.error(e),
   });
 
-  // ── Prescriptions (uploaded images) ──────────────────────
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const addRx = useMutation({
-    mutationFn: (files: File[]) => appointmentsApi.addPrescriptions(id!, files),
-    onSuccess: (_data, files) => { invalidate(); toast.success(`Prescription${files.length > 1 ? 's' : ''} uploaded`); },
-    onError: (e) => toast.error(e),
-  });
-  const deleteRx = useMutation({
-    mutationFn: (rxId: string) => appointmentsApi.deletePrescription(id!, rxId),
-    onSuccess: () => { invalidate(); toast.success('Prescription deleted'); },
-    onError: (e) => toast.error(e),
-  });
-
   // ── History ───────────────────────────────────────────────
   const historyQ = useQuery({
     queryKey: ['appointment-history', a?.patient_mobile, id],
@@ -106,22 +92,24 @@ export default function AppointmentPage() {
   ].filter(Boolean).join(' · ');
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       {/* ── Page header ─────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <button
-          className="btn btn-sm"
-          onClick={() => navigate('/dashboard')}
-          style={{ marginTop: 2, flexShrink: 0 }}
-        >
-          ← Back
-        </button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 20, margin: 0, lineHeight: 1.3 }}>
-            {a?.patient_name ?? 'Appointment'}
-          </h1>
-          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
-            {a?.appointment_date} · {a?.start_time?.slice(0, 5)}–{a?.end_time?.slice(0, 5)}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            className="btn btn-sm"
+            onClick={() => navigate('/dashboard')}
+            style={{ flexShrink: 0 }}
+          >
+            ← Back
+          </button>
+          <div>
+            <h1 style={{ fontSize: 20, margin: 0, lineHeight: 1.2 }}>
+              {a?.patient_name ?? 'Appointment'}
+            </h1>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {a?.appointment_date} · {a?.start_time?.slice(0, 5)}–{a?.end_time?.slice(0, 5)}
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -131,27 +119,40 @@ export default function AppointmentPage() {
         </div>
       </div>
 
-      {/* ── 1. Patient details card ─────────────────────────── */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-title" style={{ marginBottom: 14 }}>Patient details</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
-          <Field label="Name" value={a?.patient_name} />
-          <Field label="Mobile" value={a?.patient_mobile} />
-          {genderAge && <Field label="Gender & age" value={genderAge} />}
-          {a?.patient_address && <Field label="Address" value={a.patient_address} />}
-          {a?.description && <Field label="Reason for visit" value={a.description} />}
+      {/* ── 1. Patient details card (Compact 3-4 items per row) ─── */}
+      <div className="card" style={{ marginBottom: 16, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div className="card-title" style={{ margin: 0 }}>Patient details</div>
+          {a?.doctor?.name && (
+            <span className="muted" style={{ fontSize: 12.5 }}>Doctor: <strong style={{ color: 'var(--text)' }}>{a.doctor.name}</strong></span>
+          )}
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+          gap: '12px 20px',
+        }}>
+          <Field label="Patient Name" value={a?.patient_name} />
+          <Field label="Mobile Number" value={a?.patient_mobile} />
+          {genderAge && <Field label="Gender & Age" value={genderAge} />}
           {a?.source && (
             <Field
-              label="Booking"
-              value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web'}
+              label="Booking Source"
+              value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web Booking'}
             />
           )}
+          {a?.appointment_date && (
+            <Field label="Schedule" value={`${a.appointment_date} (${a.start_time?.slice(0, 5)}–${a.end_time?.slice(0, 5)})`} />
+          )}
+          {a?.patient_address && <Field label="Address" value={a.patient_address} />}
+          {a?.description && <Field label="Reason for Visit" value={a.description} />}
         </div>
 
         {/* Consultation outcome row inside patient card */}
         {a && canUpdate && a.status !== 'rejected' && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: 'var(--hairline)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span className="muted" style={{ fontSize: 12 }}>Mark outcome:</span>
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: 'var(--hairline)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 500 }}>Mark outcome:</span>
             <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>✓ Done</button>
             <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>⏸ On hold</button>
             <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
@@ -159,267 +160,210 @@ export default function AppointmentPage() {
         )}
       </div>
 
-      {/* ── 2. Report summary ────────────────────────────────── */}
-      {a && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 12 }}>Reports &amp; summary</div>
-          {a.reports.length === 0 ? (
-            <span className="muted">No reports uploaded for this appointment.</span>
-          ) : (
-            <div className="stack" style={{ gap: 12 }}>
-              <VisitReportSummary
-                appointmentId={id}
-                summary={a.reports_summary}
-                status={a.reports_summary_status}
-                error={a.reports_summary_error}
-                count={a.reports_summary_count}
-                reportCount={a.reports.length}
-                onRetried={invalidate}
-              />
-              <details>
-                <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
-                  Individual reports ({a.reports.length})
-                </summary>
-                <div className="stack" style={{ gap: 12, marginTop: 10 }}>
-                  {a.reports.map((r) => (
-                    <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
-                  ))}
-                </div>
-              </details>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 3. Prescription ──────────────────────────────────── */}
-      {a && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 4 }}>Prescription</div>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 12 }}>
-            Record the consultation to auto-draft a prescription. Nothing is sent until you issue it.
-          </p>
-          {canUpdate && (
-            <ConsultationRecorder appointmentId={id} disabled={a.status === 'rejected'} />
-          )}
-          <div style={{ marginTop: 16 }}>
-            <PrescriptionEditor appointmentId={id} canEdit={canUpdate} />
-          </div>
-        </div>
-      )}
-
-      {/* ── 4. Doctor's note ─────────────────────────────────── */}
-      {a && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Doctor's note</div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Shown when this patient books their next OPD.
-          </div>
-          {canUpdate ? (
-            <>
-              <textarea
-                className="input"
-                rows={3}
-                placeholder="Add a note for this patient's next visit…"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={saveNotes.isPending || notes === (a.doctor_notes ?? '')}
-                  onClick={() => saveNotes.mutate(notes)}
-                >
-                  {saveNotes.isPending ? 'Saving…' : 'Save note'}
-                </button>
-              </div>
-            </>
-          ) : a.doctor_notes ? (
-            <div style={{ whiteSpace: 'pre-wrap' }}>{a.doctor_notes}</div>
-          ) : (
-            <span className="muted">No note yet.</span>
-          )}
-        </div>
-      )}
-
-      {/* ── 5. Reschedule ────────────────────────────────────── */}
-      {a && canUpdate && a.status !== 'rejected' && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Reschedule</div>
-          {!rescheduling ? (
-            <button className="btn btn-sm" onClick={() => setRescheduling(true)}>Reschedule slot</button>
-          ) : (
-            <>
-              <InlineSlotPicker
-                doctorId={a.doctor_id}
-                onChange={(date, slot) => { setRDate(date); setRSlot(slot); }}
-              />
-              <div className="row" style={{ marginTop: 12 }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={!rDate || !rSlot || reschedule.isPending}
-                  onClick={() => reschedule.mutate()}
-                >
-                  {reschedule.isPending ? 'Saving…' : 'Confirm new slot'}
-                </button>
-                <button className="btn btn-sm" onClick={() => { setRescheduling(false); setRDate(null); setRSlot(null); }}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── 6. Uploaded prescription images ──────────────────── */}
-      {a && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Uploaded prescription images</div>
-          {a.prescriptions.length === 0 ? (
-            <span className="muted">No images uploaded yet.</span>
-          ) : (
-            <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-              {a.prescriptions.map((p) => (
-                <div key={p.id} style={{ position: 'relative' }}>
-                  <a href={p.url} target="_blank" rel="noreferrer">
-                    <img
-                      src={p.url}
-                      alt="Prescription"
-                      style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 8, border: 'var(--hairline)' }}
-                    />
-                  </a>
-                  {canUpdate && (
-                    <button
-                      type="button"
-                      title="Delete"
-                      disabled={deleteRx.isPending}
-                      onClick={() => deleteRx.mutate(p.id)}
-                      style={{
-                        position: 'absolute', top: -8, right: -8, width: 22, height: 22,
-                        borderRadius: '50%', background: 'var(--state-error)', color: '#fff',
-                        border: 'none', cursor: 'pointer', lineHeight: 1, fontSize: 13,
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {canUpdate && (
-            <div style={{ marginTop: 10 }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                multiple
-                hidden
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length) addRx.mutate(files);
-                  e.target.value = '';
-                }}
-              />
-              <button className="btn btn-sm" disabled={addRx.isPending} onClick={() => fileInputRef.current?.click()}>
-                {addRx.isPending ? 'Uploading…' : '+ Upload images'}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 7. Previous visits ───────────────────────────────── */}
-      {a && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Previous visits</div>
-          {historyQ.isLoading ? (
-            <span className="muted">Loading history…</span>
-          ) : !historyQ.data?.length ? (
-            <span className="muted">No earlier visits for this patient.</span>
-          ) : (
-            <div className="stack" style={{ gap: 10 }}>
-              {historyQ.data.map((h) => (
-                <div key={h.id} style={{ borderBottom: 'var(--hairline)', paddingBottom: 10 }}>
-                  <div className="row" style={{ justifyContent: 'space-between' }}>
-                    <strong style={{ fontWeight: 500, fontSize: 14 }}>
-                      {h.appointment_date} · {h.start_time?.slice(0, 5)}
-                    </strong>
-                    <Badge value={h.consultation_status} />
+      {/* ── 2-Column Clinical Layout ────────────────────────── */}
+      <div className="grid cols-2-1" style={{ gap: 16, alignItems: 'start' }}>
+        {/* Left / Primary Workspace: Summary then Prescription */}
+        <div className="stack" style={{ gap: 16 }}>
+          {/* AI Summary Report */}
+          {a && a.reports.length > 0 && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 12 }}>AI summary report</div>
+              <div className="stack" style={{ gap: 12 }}>
+                <VisitReportSummary
+                  appointmentId={id}
+                  summary={a.reports_summary}
+                  status={a.reports_summary_status}
+                  error={a.reports_summary_error}
+                  count={a.reports_summary_count}
+                  reportCount={a.reports.length}
+                  onRetried={invalidate}
+                />
+                <details>
+                  <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
+                    Individual reports ({a.reports.length})
+                  </summary>
+                  <div className="stack" style={{ gap: 12, marginTop: 10 }}>
+                    {a.reports.map((r) => (
+                      <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
+                    ))}
                   </div>
-                  {h.description && (
-                    <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Reason: {h.description}</div>
-                  )}
-                  {h.doctor_notes && (
-                    <div style={{ fontSize: 13, marginTop: 4 }}>Note: {h.doctor_notes}</div>
-                  )}
-                  {h.prescriptions.length > 0 && (
-                    <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                      {h.prescriptions.map((p) => (
-                        <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
-                          <img src={p.url} alt="Prescription" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: 'var(--hairline)' }} />
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {h.reports.length > 0 && (
-                    <div className="stack" style={{ gap: 4, marginTop: 8 }}>
-                      {h.reports.map((r) => (
-                        <a key={r.id} href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
-                          📄 {r.title}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                </details>
+              </div>
+            </div>
+          )}
+
+          {/* Prescription Tabs (Handwrite, Voice, Type, Upload Rx) */}
+          {a && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 10 }}>Prescription</div>
+              <PrescriptionTabs
+                appointmentId={id}
+                canEdit={canUpdate}
+                disabled={a.status === 'rejected'}
+              />
             </div>
           )}
         </div>
-      )}
 
-      {/* ── 8. Next-visit reminder ───────────────────────────── */}
-      {a && canUpdate && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Next-visit reminder</div>
-          {a.next_visit_note && !addingReminder && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{a.next_visit_note}</div>
-              {a.next_visit_date && (
-                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Suggested date: {a.next_visit_date}</div>
+        {/* Right / Secondary Panel: Notes, Reminders, Reschedule, History */}
+        <div className="stack" style={{ gap: 16 }}>
+          {/* Doctor's note */}
+          {a && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 6 }}>Doctor's note</div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                Shown when this patient books their next OPD.
+              </div>
+              {canUpdate ? (
+                <>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    placeholder="Add a clinical note for patient's next visit…"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={saveNotes.isPending || notes === (a.doctor_notes ?? '')}
+                      onClick={() => saveNotes.mutate(notes)}
+                    >
+                      {saveNotes.isPending ? 'Saving…' : 'Save note'}
+                    </button>
+                  </div>
+                </>
+              ) : a.doctor_notes ? (
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{a.doctor_notes}</div>
+              ) : (
+                <span className="muted" style={{ fontSize: 13 }}>No note yet.</span>
               )}
             </div>
           )}
-          {!addingReminder ? (
-            <button className="btn btn-sm" onClick={() => setAddingReminder(true)}>
-              {a.next_visit_note ? 'Update reminder' : 'Add reminder'}
-            </button>
-          ) : (
-            <>
-              <textarea
-                className="input"
-                rows={3}
-                placeholder="e.g. Come back for a follow-up in 2 weeks."
-                value={reminderMsg}
-                onChange={(e) => setReminderMsg(e.target.value)}
-              />
-              <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
-                <input className="input" type="date" style={{ width: 170 }} value={reminderDate} onChange={(e) => setReminderDate(e.target.value)} />
-                <span className="muted" style={{ fontSize: 12 }}>Suggested date (optional)</span>
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={!reminderMsg.trim() || reminder.isPending}
-                  onClick={() => reminder.mutate()}
-                >
-                  {reminder.isPending ? 'Sending…' : 'Send reminder'}
+
+          {/* Next-visit reminder */}
+          {a && canUpdate && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 6 }}>Next-visit reminder</div>
+              {a.next_visit_note && !addingReminder && (
+                <div style={{ marginBottom: 8, background: 'var(--page)', padding: '8px 10px', borderRadius: 6 }}>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{a.next_visit_note}</div>
+                  {a.next_visit_date && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Suggested date: {a.next_visit_date}</div>
+                  )}
+                </div>
+              )}
+              {!addingReminder ? (
+                <button className="btn btn-sm" onClick={() => setAddingReminder(true)}>
+                  {a.next_visit_note ? 'Update reminder' : '+ Add reminder'}
                 </button>
-                <button className="btn btn-sm" onClick={() => setAddingReminder(false)}>Cancel</button>
-              </div>
-            </>
+              ) : (
+                <>
+                  <textarea
+                    className="input"
+                    rows={2}
+                    placeholder="e.g. Come back for a follow-up in 2 weeks."
+                    value={reminderMsg}
+                    onChange={(e) => setReminderMsg(e.target.value)}
+                  />
+                  <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
+                    <input className="input" type="date" style={{ width: 160 }} value={reminderDate} onChange={(e) => setReminderDate(e.target.value)} />
+                    <span className="muted" style={{ fontSize: 11.5 }}>Suggested date</span>
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={!reminderMsg.trim() || reminder.isPending}
+                      onClick={() => reminder.mutate()}
+                    >
+                      {reminder.isPending ? 'Sending…' : 'Send reminder'}
+                    </button>
+                    <button className="btn btn-sm" onClick={() => setAddingReminder(false)}>Cancel</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Reschedule */}
+          {a && canUpdate && a.status !== 'rejected' && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 8 }}>Reschedule</div>
+              {!rescheduling ? (
+                <button className="btn btn-sm" onClick={() => setRescheduling(true)}>Reschedule slot</button>
+              ) : (
+                <>
+                  <InlineSlotPicker
+                    doctorId={a.doctor_id}
+                    onChange={(date, slot) => { setRDate(date); setRSlot(slot); }}
+                  />
+                  <div className="row" style={{ marginTop: 12 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={!rDate || !rSlot || reschedule.isPending}
+                      onClick={() => reschedule.mutate()}
+                    >
+                      {reschedule.isPending ? 'Saving…' : 'Confirm new slot'}
+                    </button>
+                    <button className="btn btn-sm" onClick={() => { setRescheduling(false); setRDate(null); setRSlot(null); }}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Previous visits */}
+          {a && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 8 }}>Previous visits</div>
+              {historyQ.isLoading ? (
+                <span className="muted" style={{ fontSize: 13 }}>Loading history…</span>
+              ) : !historyQ.data?.length ? (
+                <span className="muted" style={{ fontSize: 13 }}>No earlier visits for this patient.</span>
+              ) : (
+                <div className="stack" style={{ gap: 10 }}>
+                  {historyQ.data.map((h) => (
+                    <div key={h.id} style={{ borderBottom: 'var(--hairline)', paddingBottom: 8 }}>
+                      <div className="row" style={{ justifyContent: 'space-between' }}>
+                        <strong style={{ fontWeight: 500, fontSize: 13 }}>
+                          {h.appointment_date} · {h.start_time?.slice(0, 5)}
+                        </strong>
+                        <Badge value={h.consultation_status} />
+                      </div>
+                      {h.description && (
+                        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Reason: {h.description}</div>
+                      )}
+                      {h.doctor_notes && (
+                        <div style={{ fontSize: 12.5, marginTop: 2 }}>Note: {h.doctor_notes}</div>
+                      )}
+                      {h.prescriptions.length > 0 && (
+                        <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                          {h.prescriptions.map((p) => (
+                            <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
+                              <img src={p.url} alt="Prescription" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: 'var(--hairline)' }} />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                      {h.reports.length > 0 && (
+                        <div className="stack" style={{ gap: 3, marginTop: 6 }}>
+                          {h.reports.map((r) => (
+                            <a key={r.id} href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                              📄 {r.title}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

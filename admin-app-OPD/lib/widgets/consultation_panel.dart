@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,18 +15,17 @@ import 'common.dart';
 import 'handwriting_pad.dart';
 
 /// Records the OPD conversation, then shows the AI-drafted prescription for the
-/// doctor to correct and issue.
-///
-/// Transcription runs on the server and takes minutes on modest hardware, so the
-/// session is polled rather than awaited. Nothing here reaches the patient: the
-/// draft only becomes real when the doctor presses Issue.
+/// doctor to correct and issue. Also supports Handwriting, Structured Typing,
+/// and Uploading prescription images.
 class ConsultationPanel extends StatefulWidget {
   final String appointmentId;
   final bool canEdit;
+  final VoidCallback? onChanged;
   const ConsultationPanel({
     super.key,
     required this.appointmentId,
     required this.canEdit,
+    this.onChanged,
   });
 
   @override
@@ -37,23 +37,25 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
 
   bool _recording = false;
   bool _uploading = false;
+  bool _uploadingImages = false;
   int _elapsed = 0;
   Timer? _tick;
   Timer? _poll;
 
   ConsultationSession? _session;
   EPrescription? _prescription;
+  Appointment? _appointment;
   bool _loading = true;
   bool _saving = false;
 
-  // Which input method is showing: handwrite | voice | type.
+  // Which input method is showing: handwrite | voice | type | upload.
   String _mode = 'voice';
   final HandwritingController _handwriting = HandwritingController();
 
   // Local edit buffer — replaced from the server only when not mid-edit.
   final _diagnosis = TextEditingController();
   final _advice = TextEditingController();
-  List<PrescriptionMedicine> _medicines = [];
+  List<PrescriptionMedicine> _medicines = [PrescriptionMedicine()];
   bool _dirty = false;
 
   ApiClient get _api => AuthScope.of(context).api;
@@ -79,9 +81,11 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     try {
       final session = await _api.getConsultation(widget.appointmentId);
       final prescription = await _api.getPrescription(widget.appointmentId);
+      final appointment = await _api.getAppointment(widget.appointmentId);
       if (!mounted) return;
       setState(() {
         _session = session;
+        _appointment = appointment;
         _loading = false;
         if (!_dirty) _adopt(prescription);
       });
@@ -96,19 +100,23 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     _prescription = p;
     _diagnosis.text = p.diagnosis ?? '';
     _advice.text = p.advice ?? '';
-    _medicines = p.medicines
-        .map((m) => PrescriptionMedicine(
-              id: m.id,
-              medicineName: m.medicineName,
-              strength: m.strength,
-              form: m.form,
-              dosage: m.dosage,
-              timing: m.timing,
-              durationDays: m.durationDays,
-              instructions: m.instructions,
-              source: m.source,
-            ))
-        .toList();
+    if (p.medicines.isNotEmpty) {
+      _medicines = p.medicines
+          .map((m) => PrescriptionMedicine(
+                id: m.id,
+                medicineName: m.medicineName,
+                strength: m.strength,
+                form: m.form,
+                dosage: m.dosage,
+                timing: m.timing,
+                durationDays: m.durationDays,
+                instructions: m.instructions,
+                source: m.source,
+              ))
+          .toList();
+    } else {
+      _medicines = [PrescriptionMedicine()];
+    }
   }
 
   void _startPolling() {
@@ -251,7 +259,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
   Widget _modeTabs() {
     Widget tab(String id, String label) {
       final active = _mode == id;
-      final onTap = () => setState(() => _mode = id);
+      void onTap() => setState(() => _mode = id);
       return Padding(
         padding: const EdgeInsets.only(right: 8),
         child: active
@@ -260,12 +268,16 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
       );
     }
 
+    final rxCount = _appointment?.prescriptions.length ?? 0;
+    final uploadLabel = rxCount > 0 ? '📷 Upload Rx ($rxCount)' : '📷 Upload Rx';
+
     return Wrap(
       runSpacing: 8,
       children: [
         tab('handwrite', '✍️ Handwrite'),
         tab('voice', '🎙 Voice'),
         tab('type', '⌨️ Type'),
+        tab('upload', uploadLabel),
       ],
     );
   }
@@ -286,6 +298,8 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
             _editor(),
           ],
         );
+      case 'upload':
+        return _uploadBody();
       case 'voice':
       default:
         return Column(
@@ -309,11 +323,155 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     }
   }
 
+  Widget _uploadBody() {
+    final prescriptions = _appointment?.prescriptions ?? [];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Upload photos or scanned copies of the physical prescription.',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        if (prescriptions.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.page,
+              borderRadius: BorderRadius.circular(AppRadius.control),
+              border: Border.all(color: AppColors.border, width: 0.5),
+            ),
+            child: const Column(
+              children: [
+                Icon(Icons.description_outlined, size: 36, color: AppColors.textSecondary),
+                SizedBox(height: 8),
+                Text(
+                  'No prescription images uploaded yet',
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Upload photos of physical prescription pad or records',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: prescriptions.map((p) {
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GestureDetector(
+                    onTap: p.url == null
+                        ? null
+                        : () => launchUrl(Uri.parse(p.url!), mode: LaunchMode.externalApplication),
+                    child: Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(AppRadius.control),
+                        border: Border.all(color: AppColors.border, width: 0.5),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: p.url != null && p.url!.isNotEmpty
+                          ? Image.network(
+                              p.url!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Container(
+                                color: AppColors.page,
+                                child: const Icon(Icons.broken_image, color: AppColors.textSecondary),
+                              ),
+                            )
+                          : Container(
+                              color: AppColors.page,
+                              child: const Icon(Icons.description, color: AppColors.textSecondary),
+                            ),
+                    ),
+                  ),
+                  if (widget.canEdit)
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: GestureDetector(
+                        onTap: _uploadingImages ? null : () => _deletePrescription(p.id),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: const BoxDecoration(
+                            color: AppColors.error,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.close, size: 14, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            }).toList(),
+          ),
+        if (widget.canEdit) ...[
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: _uploadingImages ? null : _pickAndUploadImages,
+            icon: _uploadingImages
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.upload_file, size: 18),
+            label: Text(_uploadingImages ? 'Uploading…' : '+ Upload prescription images'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickAndUploadImages() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickMultiImage();
+    if (picked.isEmpty) return;
+
+    setState(() => _uploadingImages = true);
+    try {
+      final files = picked.map((x) => File(x.path)).toList();
+      final updated = await _api.addPrescriptions(widget.appointmentId, files);
+      if (!mounted) return;
+      setState(() => _appointment = updated);
+      widget.onChanged?.call();
+      showSuccessSnack(context, 'Prescription uploaded');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _uploadingImages = false);
+    }
+  }
+
+  Future<void> _deletePrescription(String rxId) async {
+    setState(() => _uploadingImages = true);
+    try {
+      final updated = await _api.deletePrescription(widget.appointmentId, rxId);
+      if (!mounted) return;
+      setState(() => _appointment = updated);
+      widget.onChanged?.call();
+      showSuccessSnack(context, 'Prescription deleted');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _uploadingImages = false);
+    }
+  }
+
   Widget _handwriteBody() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        HandwritingPad(controller: _handwriting, enabled: widget.canEdit),
+        HandwritingPad(
+          controller: _handwriting,
+          enabled: widget.canEdit,
+          onOpenFullscreen: _openHandwritingFullscreen,
+        ),
         if (widget.canEdit) ...[
           const SizedBox(height: 16),
           Row(
@@ -327,6 +485,20 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
           ),
         ],
       ],
+    );
+  }
+
+  void _openHandwritingFullscreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => FullScreenHandwritingScreen(
+          controller: _handwriting,
+          enabled: widget.canEdit,
+          onIssue: widget.canEdit ? _issueHandwriting : null,
+        ),
+      ),
     );
   }
 
@@ -545,12 +717,6 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
         const Text('Medicines',
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         const SizedBox(height: 6),
-        if (_medicines.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Text('No medicines yet.',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-          ),
         ..._medicines.asMap().entries.map((e) => _medicineCard(e.key, e.value)),
         if (widget.canEdit)
           OutlinedButton.icon(
@@ -593,41 +759,82 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
   Widget _medicineCard(int index, PrescriptionMedicine m) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: m.fromAi ? AppColors.primaryTint : AppColors.page,
+        color: m.fromAi ? AppColors.primaryTint : Colors.white,
         borderRadius: BorderRadius.circular(AppRadius.control),
-        border: m.fromAi
-            ? const Border(
-                left: BorderSide(color: AppColors.primary, width: 3))
-            : null,
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (m.fromAi)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 6),
-              child: Text('Suggested from the recording — please verify',
-                  style: TextStyle(
-                      color: AppColors.textSecondary, fontSize: 11.5)),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Medicine #${index + 1}',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.primary),
+                  ),
+                  if (m.fromAi) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryTint,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('AI Suggested', style: TextStyle(fontSize: 11, color: AppColors.primary)),
+                    ),
+                  ],
+                ],
+              ),
+              if (widget.canEdit)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _dirty = true;
+                    _medicines.removeAt(index);
+                    if (_medicines.isEmpty) {
+                      _medicines.add(PrescriptionMedicine());
+                    }
+                  }),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(_medicines.length > 1 ? '✕ Remove' : 'Clear'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
           TextFormField(
             initialValue: m.medicineName,
             enabled: widget.canEdit,
-            decoration: const InputDecoration(labelText: 'Medicine'),
+            decoration: const InputDecoration(
+              labelText: 'Medicine name',
+              hintText: 'e.g. Paracetamol',
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
             onChanged: (v) {
               _dirty = true;
               m.medicineName = v;
             },
           ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: TextFormField(
                   initialValue: m.strength,
                   enabled: widget.canEdit,
-                  decoration: const InputDecoration(labelText: 'Strength'),
+                  decoration: const InputDecoration(
+                    labelText: 'Strength',
+                    hintText: 'e.g. 500mg',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
                   onChanged: (v) {
                     _dirty = true;
                     m.strength = v;
@@ -639,8 +846,11 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                 child: TextFormField(
                   initialValue: m.dosage,
                   enabled: widget.canEdit,
-                  decoration:
-                      const InputDecoration(labelText: 'Dosage', hintText: '1-0-1'),
+                  decoration: const InputDecoration(
+                    labelText: 'Dosage',
+                    hintText: '1-0-1',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
                   onChanged: (v) {
                     _dirty = true;
                     m.dosage = v;
@@ -649,6 +859,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
@@ -656,7 +867,10 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                   initialValue: m.timing,
                   enabled: widget.canEdit,
                   decoration: const InputDecoration(
-                      labelText: 'Timing', hintText: 'after food'),
+                    labelText: 'Timing',
+                    hintText: 'after food',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
                   onChanged: (v) {
                     _dirty = true;
                     m.timing = v;
@@ -669,7 +883,11 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                   initialValue: m.durationDays?.toString(),
                   enabled: widget.canEdit,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Days'),
+                  decoration: const InputDecoration(
+                    labelText: 'Duration (days)',
+                    hintText: '5',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
                   onChanged: (v) {
                     _dirty = true;
                     m.durationDays = int.tryParse(v);
@@ -678,18 +896,20 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
               ),
             ],
           ),
-          if (widget.canEdit)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => setState(() {
-                  _dirty = true;
-                  _medicines.removeAt(index);
-                }),
-                style: TextButton.styleFrom(foregroundColor: AppColors.error),
-                child: const Text('Remove'),
-              ),
+          const SizedBox(height: 8),
+          TextFormField(
+            initialValue: m.instructions,
+            enabled: widget.canEdit,
+            decoration: const InputDecoration(
+              labelText: 'Special instructions',
+              hintText: 'e.g. with warm water',
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
+            onChanged: (v) {
+              _dirty = true;
+              m.instructions = v;
+            },
+          ),
         ],
       ),
     );

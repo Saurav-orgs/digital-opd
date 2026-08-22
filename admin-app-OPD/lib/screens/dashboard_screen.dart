@@ -77,7 +77,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final canCreate = auth.can('appointments', 'create');
-    final firstName = (auth.user?.name ?? '').split(' ').first;
 
     return DefaultTabController(
       length: 3,
@@ -100,10 +99,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Row(
                     children: [
-                      Expanded(
+                      const Expanded(
                         child: Text(
-                          firstName.isEmpty ? 'Appointments' : 'Hi, $firstName',
-                          style: const TextStyle(
+                          'Dashboard',
+                          style: TextStyle(
                               fontSize: 18, fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -202,40 +201,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// A grid of count cards — all visible at once (no scrolling).
+  /// A grid of count cards — Today, Upcoming, and Previous.
   Widget _summaryCards() {
     final d = _summary;
     final cards = <Widget>[
-          _StatCard(
-              accent: AppColors.primary,
-              icon: Icons.today_outlined,
-              value: d?.total,
-              label: 'Today'),
-          _StatCard(
-              accent: AppColors.booked,
-              icon: Icons.event_outlined,
-              value: d?.upcoming,
-              label: 'Upcoming'),
-          _StatCard(
-              accent: AppColors.textSecondary,
-              icon: Icons.history,
-              value: d?.previous,
-              label: 'Previous'),
-          _StatCard(
-              accent: AppColors.secondary,
-              icon: Icons.check_circle_outline,
-              value: d?.status('done'),
-              label: "Today's Done"),
-          _StatCard(
-              accent: AppColors.onHold,
-              icon: Icons.pause_circle_outline,
-              value: d?.status('on_hold'),
-              label: "Today's On Hold"),
-          _StatCard(
-              accent: AppColors.primary,
-              icon: Icons.pending_outlined,
-              value: d?.status('pending'),
-              label: "Today's Pending"),
+      _StatCard(
+          accent: AppColors.primary,
+          icon: Icons.today_outlined,
+          value: d?.total,
+          label: 'Today'),
+      _StatCard(
+          accent: AppColors.booked,
+          icon: Icons.event_outlined,
+          value: d?.upcoming,
+          label: 'Upcoming'),
+      _StatCard(
+          accent: AppColors.textSecondary,
+          icon: Icons.history,
+          value: d?.previous,
+          label: 'Previous'),
     ];
     return GridView.count(
       crossAxisCount: 3,
@@ -244,7 +228,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: EdgeInsets.zero,
       mainAxisSpacing: 10,
       crossAxisSpacing: 10,
-      childAspectRatio: 1.55,
+      childAspectRatio: 1.45,
       children: cards,
     );
   }

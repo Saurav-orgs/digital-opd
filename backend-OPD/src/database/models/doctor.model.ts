@@ -57,6 +57,14 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.STRING, allowNull: true })
   clinic_phone: string | null;
 
+  /** Custom base URL for the doctor's booking page (e.g. 'https://booking.myclinic.com'). */
+  @Column({ type: DataType.STRING, allowNull: true })
+  profile_base_url: string | null;
+
+  /** S3 key of the doctor's custom profile QR code image. */
+  @Column({ type: DataType.STRING, allowNull: true })
+  qr_code_key: string | null;
+
   /** For QR/deep-link to this doctor's booking screen. */
   @Column({ type: DataType.STRING, allowNull: false, unique: true })
   public_slug: string;

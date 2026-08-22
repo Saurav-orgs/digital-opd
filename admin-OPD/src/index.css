@@ -733,20 +733,21 @@ tr.clickable-row:hover {
 
 /* ── Dashboard ─────────────────────────────────────────────── */
 .stat-tiles {
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 }
-@media (min-width: 760px) {
+@media (max-width: 640px) {
   .stat-tiles {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
   }
 }
 @media (max-width: 480px) {
   .stat-tiles {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
   }
   .stat {
-    padding: 12px 10px;
+    padding: 12px 8px;
   }
   .stat .num {
     font-size: 22px;

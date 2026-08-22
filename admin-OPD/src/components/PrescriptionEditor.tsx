@@ -38,7 +38,7 @@ export function PrescriptionEditor({
   });
 
   const [form, setForm] = useState({ diagnosis: '', advice: '', follow_up_date: '' });
-  const [rows, setRows] = useState<PrescriptionMedicine[]>([]);
+  const [rows, setRows] = useState<PrescriptionMedicine[]>([blankRow()]);
   const [dirty, setDirty] = useState(false);
 
   // Adopt server state unless the doctor has unsaved edits — otherwise the
@@ -51,7 +51,7 @@ export function PrescriptionEditor({
       advice: data.advice ?? '',
       follow_up_date: data.follow_up_date ?? '',
     });
-    setRows(data.medicines.length ? data.medicines : []);
+    setRows(data.medicines && data.medicines.length > 0 ? data.medicines : [blankRow()]);
   }, [prescriptionQ.data, dirty]);
 
   const body = () => ({
@@ -191,12 +191,17 @@ export function PrescriptionEditor({
         {rows.map((row, i) => (
           <MedicineRow
             key={row.id ?? `new-${i}`}
+            index={i}
+            total={rows.length}
             row={row}
             canEdit={canEdit}
             onChange={(patch) => patchRow(i, patch)}
             onRemove={() => {
               setDirty(true);
-              setRows((prev) => prev.filter((_, idx) => idx !== i));
+              setRows((prev) => {
+                const next = prev.filter((_, idx) => idx !== i);
+                return next.length > 0 ? next : [blankRow()];
+              });
             }}
           />
         ))}
@@ -252,11 +257,15 @@ export function PrescriptionEditor({
 
 function MedicineRow({
   row,
+  index,
+  total,
   canEdit,
   onChange,
   onRemove,
 }: {
   row: PrescriptionMedicine;
+  index: number;
+  total: number;
   canEdit: boolean;
   onChange: (patch: Partial<PrescriptionMedicine>) => void;
   onRemove: () => void;
@@ -275,20 +284,42 @@ function MedicineRow({
       className="card"
       style={{
         padding: 12,
-        background: fromAi ? '#f4f8ff' : undefined,
+        background: fromAi ? '#f4f8ff' : '#ffffff',
         borderLeft: fromAi ? '3px solid var(--primary)' : undefined,
+        border: 'var(--hairline)',
+        position: 'relative',
       }}
     >
-      {fromAi && (
-        <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
-          Suggested from the recording — please verify
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--primary)' }}>
+            Medicine #{index + 1}
+          </span>
+          {fromAi && (
+            <span className="badge badge-available" style={{ fontSize: 11, padding: '1px 6px' }}>
+              AI Suggested
+            </span>
+          )}
         </div>
-      )}
-      <div className="grid cols-2">
-        <Field label="Medicine">
+        {canEdit && (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            style={{ color: 'var(--state-error)', padding: '2px 8px', fontSize: 12 }}
+            onClick={onRemove}
+            title={total > 1 ? 'Remove medicine' : 'Clear medicine'}
+          >
+            {total > 1 ? '✕ Remove' : 'Clear'}
+          </button>
+        )}
+      </div>
+
+      <div className="grid cols-2" style={{ gap: 8 }}>
+        <Field label="Medicine name">
           <input
             className="input"
-            list={`meds-${row.id ?? row.medicine_name}`}
+            list={`meds-${row.id ?? row.medicine_name}-${index}`}
+            placeholder="e.g. Paracetamol"
             disabled={!canEdit}
             value={row.medicine_name}
             onChange={(e) => {
@@ -296,7 +327,7 @@ function MedicineRow({
               setQuery(e.target.value);
             }}
           />
-          <datalist id={`meds-${row.id ?? row.medicine_name}`}>
+          <datalist id={`meds-${row.id ?? row.medicine_name}-${index}`}>
             {suggestionsQ.data?.map((m) => (
               <option key={m.id} value={m.name} />
             ))}
@@ -305,18 +336,20 @@ function MedicineRow({
         <Field label="Strength">
           <input
             className="input"
+            placeholder="e.g. 500mg"
             disabled={!canEdit}
             value={row.strength ?? ''}
             onChange={(e) => onChange({ strength: e.target.value })}
           />
         </Field>
       </div>
-      <div className="grid cols-2">
-        <Field label="Dosage (e.g. 1-0-1)">
+
+      <div className="grid cols-2" style={{ gap: 8 }}>
+        <Field label="Dosage">
           <input
             className="input"
             disabled={!canEdit}
-            placeholder="1-0-1"
+            placeholder="e.g. 1-0-1 or 1 tablet"
             value={row.dosage ?? ''}
             onChange={(e) => onChange({ dosage: e.target.value })}
           />
@@ -331,15 +364,19 @@ function MedicineRow({
             <option value="">—</option>
             <option value="before food">Before food</option>
             <option value="after food">After food</option>
+            <option value="empty stomach">Empty stomach</option>
+            <option value="bedtime">At bedtime</option>
           </select>
         </Field>
       </div>
-      <div className="grid cols-2">
+
+      <div className="grid cols-2" style={{ gap: 8, marginBottom: 0 }}>
         <Field label="Duration (days)">
           <input
             className="input"
             type="number"
             min={1}
+            placeholder="e.g. 5"
             disabled={!canEdit}
             value={row.duration_days ?? ''}
             onChange={(e) =>
@@ -349,20 +386,16 @@ function MedicineRow({
             }
           />
         </Field>
-        <Field label="Instructions">
+        <Field label="Special instructions">
           <input
             className="input"
+            placeholder="e.g. with warm water"
             disabled={!canEdit}
             value={row.instructions ?? ''}
             onChange={(e) => onChange({ instructions: e.target.value })}
           />
         </Field>
       </div>
-      {canEdit && (
-        <button className="btn btn-sm btn-danger" onClick={onRemove}>
-          Remove
-        </button>
-      )}
     </div>
   );
 }

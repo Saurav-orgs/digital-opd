@@ -53,6 +53,11 @@ export class DoctorProfileDto {
   @IsOptional()
   @IsString()
   clinic_phone?: string;
+
+  @ApiPropertyOptional({ example: 'https://booking.myclinic.com' })
+  @IsOptional()
+  @IsString()
+  profile_base_url?: string;
 }
 
 export class UpdateDoctorDto extends PartialType(DoctorProfileDto) {}

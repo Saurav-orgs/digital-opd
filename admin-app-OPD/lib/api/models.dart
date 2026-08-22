@@ -138,6 +138,9 @@ class Doctor {
   final String? profilePhotoUrl;
   final String publicSlug;
   final bool isEnabled;
+  final String? profileBaseUrl;
+  final String? bookingUrl;
+  final String? qrCodeUrl;
   // Prescription letterhead (per-doctor branding)
   final String? clinicName;
   final String? clinicAddress;
@@ -154,6 +157,9 @@ class Doctor {
     this.profilePhotoUrl,
     required this.publicSlug,
     required this.isEnabled,
+    this.profileBaseUrl,
+    this.bookingUrl,
+    this.qrCodeUrl,
     this.clinicName,
     this.clinicAddress,
     this.clinicPhone,
@@ -170,6 +176,9 @@ class Doctor {
         profilePhotoUrl: j['profile_photo_url'] as String?,
         publicSlug: j['public_slug'] as String? ?? '',
         isEnabled: j['is_enabled'] as bool? ?? false,
+        profileBaseUrl: j['profile_base_url'] as String?,
+        bookingUrl: j['booking_url'] as String?,
+        qrCodeUrl: j['qr_code_url'] as String?,
         clinicName: j['clinic_name'] as String?,
         clinicAddress: j['clinic_address'] as String?,
         clinicPhone: j['clinic_phone'] as String?,

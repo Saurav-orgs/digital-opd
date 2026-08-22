@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../auth/auth_scope.dart';
@@ -104,8 +106,13 @@ class _DoctorTile extends StatefulWidget {
 class _DoctorTileState extends State<_DoctorTile> {
   bool _busy = false;
 
-  String get _qrUrl =>
-      '${AppConfig.patientWebBase}/d/${widget.doctor.publicSlug}';
+  String get _qrUrl {
+    final base = (widget.doctor.profileBaseUrl != null &&
+            widget.doctor.profileBaseUrl!.trim().isNotEmpty)
+        ? widget.doctor.profileBaseUrl!.trim().replaceAll(RegExp(r'/+$'), '')
+        : AppConfig.patientWebBase;
+    return widget.doctor.bookingUrl ?? '$base/d/${widget.doctor.publicSlug}';
+  }
 
   Future<void> _toggle() async {
     setState(() => _busy = true);
@@ -166,9 +173,9 @@ class _DoctorTileState extends State<_DoctorTile> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Rotate QR?'),
+        title: const Text('Rotate slug?'),
         content: const Text(
-            'Old QR links will stop working. The doctor will need to share the new link.'),
+            'Old QR/booking links will stop working. The doctor will need to share the new link.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
@@ -237,19 +244,45 @@ class _DoctorTileState extends State<_DoctorTile> {
             ],
           ),
           const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.page,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              _qrUrl,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                  color: AppColors.textSecondary),
-            ),
+          Row(
+            children: [
+              if (d.qrCodeUrl != null && d.qrCodeUrl!.isNotEmpty) ...[
+                Container(
+                  width: 44,
+                  height: 44,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.border, width: 0.5),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Image.network(
+                      d.qrCodeUrl!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const Icon(Icons.qr_code, size: 24, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ),
+              ],
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.page,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _qrUrl,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                        color: AppColors.textSecondary),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -262,25 +295,23 @@ class _DoctorTileState extends State<_DoctorTile> {
               ),
               OutlinedButton(
                 onPressed: _busy ? null : _edit,
-                child: const Text('Edit'),
+                child: const Text('Edit & QR'),
               ),
               OutlinedButton(
                 onPressed: _busy ? null : _rotateQr,
-                child: const Text('Rotate QR'),
+                child: const Text('Rotate slug'),
               ),
-              OutlinedButton.icon(
+              OutlinedButton(
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: _qrUrl));
                   showSuccessSnack(context, 'Link copied');
                 },
-                icon: const Icon(Icons.copy, size: 16),
-                label: const Text('Copy link'),
+                child: const Text('Copy link'),
               ),
               OutlinedButton(
                 onPressed: _busy ? null : _delete,
                 style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFDC2626),
-                    side: const BorderSide(color: Color(0xFFDC2626))),
+                    foregroundColor: const Color(0xFFDC2626)),
                 child: const Text('Delete'),
               ),
             ],
@@ -306,6 +337,9 @@ class _EditDoctorDialogState extends State<_EditDoctorDialog> {
   late final TextEditingController _quals;
   late final TextEditingController _fee;
   late final TextEditingController _bio;
+  late final TextEditingController _profileBaseUrl;
+  String? _qrCodeUrl;
+  bool _uploadingQr = false;
   bool _submitting = false;
   String? _error;
 
@@ -319,6 +353,8 @@ class _EditDoctorDialogState extends State<_EditDoctorDialog> {
     _fee = TextEditingController(
         text: d.consultationFee != null ? d.consultationFee! : '');
     _bio = TextEditingController(text: d.bio ?? '');
+    _profileBaseUrl = TextEditingController(text: d.profileBaseUrl ?? '');
+    _qrCodeUrl = d.qrCodeUrl;
   }
 
   @override
@@ -328,7 +364,50 @@ class _EditDoctorDialogState extends State<_EditDoctorDialog> {
     _quals.dispose();
     _fee.dispose();
     _bio.dispose();
+    _profileBaseUrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAndUploadQr() async {
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 95);
+    if (picked == null) return;
+    final file = File(picked.path);
+    setState(() {
+      _uploadingQr = true;
+      _error = null;
+    });
+    try {
+      final updated = await widget.api.uploadDoctorQr(widget.doctor.id, file);
+      if (mounted) {
+        setState(() {
+          _qrCodeUrl = updated.qrCodeUrl;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _uploadingQr = false);
+    }
+  }
+
+  Future<void> _removeQr() async {
+    setState(() {
+      _uploadingQr = true;
+      _error = null;
+    });
+    try {
+      await widget.api.removeDoctorQr(widget.doctor.id);
+      if (mounted) {
+        setState(() {
+          _qrCodeUrl = null;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _uploadingQr = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -343,6 +422,7 @@ class _EditDoctorDialogState extends State<_EditDoctorDialog> {
       if (_spec.text.trim().isNotEmpty) body['specialization'] = _spec.text.trim();
       if (_quals.text.trim().isNotEmpty) body['qualifications'] = _quals.text.trim();
       if (_bio.text.trim().isNotEmpty) body['bio'] = _bio.text.trim();
+      body['profile_base_url'] = _profileBaseUrl.text.trim().isEmpty ? null : _profileBaseUrl.text.trim();
       final feeStr = _fee.text.trim();
       if (feeStr.isNotEmpty) {
         final feeVal = num.tryParse(feeStr);
@@ -361,14 +441,107 @@ class _EditDoctorDialogState extends State<_EditDoctorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final defaultBase = AppConfig.patientWebBase;
+    final currentBase = _profileBaseUrl.text.trim().isNotEmpty
+        ? _profileBaseUrl.text.trim().replaceAll(RegExp(r'/+$'), '')
+        : defaultBase;
+    final fullUrlPreview = '$currentBase/d/${widget.doctor.publicSlug}';
+
     return AlertDialog(
-      title: const Text('Edit doctor'),
+      title: const Text('Edit doctor & QR'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _field('Full name *', _name),
+            _field('Profile base URL', _profileBaseUrl,
+                type: TextInputType.url),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Full URL: $fullUrlPreview',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            // ── QR Code Section ──
+            Container(
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: AppColors.page,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border, width: 0.5),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Doctor Profile QR Code',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.text)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppColors.border, width: 0.5),
+                        ),
+                        child: _qrCodeUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(5),
+                                child: Image.network(
+                                  _qrCodeUrl!,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, _, _) => const Icon(
+                                      Icons.qr_code,
+                                      size: 30,
+                                      color: AppColors.textSecondary),
+                                ),
+                              )
+                            : const Center(
+                                child: Text('No QR',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: AppColors.textSecondary))),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            OutlinedButton(
+                              onPressed: _uploadingQr ? null : _pickAndUploadQr,
+                              child: Text(_uploadingQr
+                                  ? 'Uploading…'
+                                  : _qrCodeUrl != null
+                                      ? 'Change QR image'
+                                      : 'Upload QR image'),
+                            ),
+                            if (_qrCodeUrl != null)
+                              TextButton(
+                                onPressed: _uploadingQr ? null : _removeQr,
+                                style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFFDC2626)),
+                                child: const Text('Remove QR'),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
             _field('Specialization', _spec),
             _field('Qualifications', _quals),
             _field('Consultation fee (₹)', _fee,

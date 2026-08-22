@@ -61,6 +61,9 @@ export interface Doctor {
   profile_photo_url: string | null;
   public_slug: string;
   is_enabled: boolean;
+  profile_base_url?: string | null;
+  booking_url?: string;
+  qr_code_url?: string | null;
   // Prescription letterhead (per-doctor branding)
   clinic_name: string | null;
   clinic_address: string | null;

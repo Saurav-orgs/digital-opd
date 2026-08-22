@@ -38,25 +38,16 @@ export default function Dashboard() {
   const doctorId = user?.doctorId ?? doctorsQ.data?.[0]?.id;
 
   const canCreate = can('appointments', 'create');
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   if (isLoading) return <Loading />;
   if (error) return <Empty>Could not load the dashboard.</Empty>;
   if (!data) return null;
 
-  const done = data.byStatus['done'] ?? 0;
-  const onHold = data.byStatus['on_hold'] ?? 0;
-  const pending = data.byStatus['pending'] ?? 0;
-
   return (
     <>
-      <div className="page-head">
+      <div className="page-head" style={{ marginBottom: 20 }}>
         <div>
-          <h1>
-            {greeting}, {user?.name?.split(' ')[0]} 👋
-          </h1>
-          <p className="muted">Here’s what’s happening · {data.date}</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Dashboard</h1>
         </div>
         {canCreate && (
           <button
@@ -69,30 +60,65 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div className="grid stat-tiles" style={{ marginBottom: 16 }}>
+      <div className="grid stat-tiles" style={{ marginBottom: 20 }}>
         <Tile accent="blue" icon="🗓" num={data.total} label="Today" />
         <Tile accent="gray" icon="📅" num={data.upcoming} label="Upcoming" />
         <Tile accent="gray" icon="🕓" num={data.previous} label="Previous" />
-        <Tile accent="teal" icon="✔" num={done} label="Today's done" />
-        <Tile accent="amber" icon="⏸" num={onHold} label="Today's on hold" />
-        <Tile accent="blue" icon="⏳" num={pending} label="Today's pending" />
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ flexWrap: 'wrap' }}>
-          <input
-            className="input"
-            type="search"
-            placeholder="Search name or phone…"
-            style={{ width: 260 }}
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </div>
-        <div className="row" style={{ marginTop: 12, gap: 8 }}>
-          <TabButton label="Previous" active={range === 'previous'} pending={data.pending.previous} onClick={() => setRange('previous')} />
-          <TabButton label="Today" active={range === 'today'} pending={data.pending.today} onClick={() => setRange('today')} />
-          <TabButton label="Upcoming" active={range === 'upcoming'} pending={data.pending.upcoming} onClick={() => setRange('upcoming')} />
+      <div className="card" style={{ marginBottom: 20, padding: '20px 22px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Big Search Input */}
+          <div style={{ position: 'relative', width: '100%' }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 14,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: 16,
+                color: 'var(--muted)',
+                pointerEvents: 'none',
+              }}
+            >
+              🔍
+            </span>
+            <input
+              className="input"
+              type="search"
+              placeholder="Search patient name, mobile number…"
+              style={{
+                width: '100%',
+                padding: '12px 16px 12px 42px',
+                fontSize: 15,
+                borderRadius: 8,
+              }}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
+
+          {/* Big Tab Buttons */}
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <TabButton
+              label="Previous"
+              active={range === 'previous'}
+              pending={data.pending.previous}
+              onClick={() => setRange('previous')}
+            />
+            <TabButton
+              label="Today"
+              active={range === 'today'}
+              pending={data.pending.today}
+              onClick={() => setRange('today')}
+            />
+            <TabButton
+              label="Upcoming"
+              active={range === 'upcoming'}
+              pending={data.pending.upcoming}
+              onClick={() => setRange('upcoming')}
+            />
+          </div>
         </div>
       </div>
 
@@ -117,18 +143,29 @@ function TabButton({
   onClick: () => void;
 }) {
   return (
-    <button className={`btn btn-sm ${active ? 'btn-primary' : ''}`} onClick={onClick}>
-      {label}
+    <button
+      className={`btn ${active ? 'btn-primary' : ''}`}
+      onClick={onClick}
+      style={{
+        padding: '10px 24px',
+        fontSize: 15,
+        fontWeight: 600,
+        borderRadius: 8,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+      }}
+    >
+      <span>{label}</span>
       {pending > 0 && (
         <span
           style={{
-            marginLeft: 6,
-            padding: '1px 6px',
+            padding: '2px 8px',
             borderRadius: 999,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 700,
-            background: 'var(--state-on-hold)',
-            color: '#fff',
+            background: active ? '#fff' : 'var(--state-on-hold)',
+            color: active ? 'var(--primary)' : '#fff',
           }}
         >
           {pending}

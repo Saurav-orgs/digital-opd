@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi } from '../api/endpoints';
 import type { Slot } from '../api/types';
@@ -66,22 +66,6 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
     onError: (e) => toast.error(e),
   });
 
-  // ── Prescriptions ──────────────────────────────────────────
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const addRx = useMutation({
-    mutationFn: (files: File[]) => appointmentsApi.addPrescriptions(id, files),
-    onSuccess: (_data, files) => {
-      invalidate();
-      toast.success(`Prescription${files.length > 1 ? 's' : ''} uploaded`);
-    },
-    onError: (e) => toast.error(e),
-  });
-  const deleteRx = useMutation({
-    mutationFn: (prescriptionId: string) => appointmentsApi.deletePrescription(id, prescriptionId),
-    onSuccess: () => { invalidate(); toast.success('Prescription deleted'); },
-    onError: (e) => toast.error(e),
-  });
-
   // ── Prior visits (matched by mobile) ────────────────────────
   const historyQ = useQuery({
     queryKey: ['appointment-history', a?.patient_mobile, id],
@@ -117,7 +101,7 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
       {isLoading || !a ? (
         <Loading />
       ) : (
-        <div className="stack">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 18px', marginBottom: 14 }}>
           <Detail label="Patient" value={a.patient_name} />
           <Detail label="Mobile" value={a.patient_mobile} />
           {(a.patient_gender || a.patient_age != null) && (
@@ -133,7 +117,7 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
               value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web'}
             />
           )}
-          <div className="row">
+          <div className="row" style={{ gridColumn: '1 / -1', marginTop: 4 }}>
             {a.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
             <Badge value={a.status} />
             <Badge value={a.consultation_status} />
@@ -142,7 +126,7 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
       )}
 
       {a && (
-        <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
+        <div style={{ marginTop: 14, borderTop: 'var(--hairline)', paddingTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
             Doctor’s note · shown when this patient books their next OPD
           </div>
@@ -150,7 +134,7 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
             <>
               <textarea
                 className="input"
-                rows={4}
+                rows={3}
                 placeholder="Add a note for this patient’s next visit…"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -169,68 +153,6 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
             <div style={{ whiteSpace: 'pre-wrap' }}>{a.doctor_notes}</div>
           ) : (
             <span className="muted">No note yet.</span>
-          )}
-        </div>
-      )}
-
-      {a && (
-        <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Prescriptions</div>
-          {a.prescriptions.length === 0 ? (
-            <span className="muted">No prescriptions uploaded yet.</span>
-          ) : (
-            <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-              {a.prescriptions.map((p) => (
-                <div key={p.id} style={{ position: 'relative' }}>
-                  <a href={p.url} target="_blank" rel="noreferrer">
-                    <img
-                      src={p.url}
-                      alt="Prescription"
-                      style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 8, border: 'var(--hairline)' }}
-                    />
-                  </a>
-                  {canUpdate && (
-                    <button
-                      type="button"
-                      className="btn-dots"
-                      title="Delete"
-                      disabled={deleteRx.isPending}
-                      onClick={() => deleteRx.mutate(p.id)}
-                      style={{
-                        position: 'absolute', top: -8, right: -8, width: 22, height: 22,
-                        borderRadius: '50%', background: 'var(--state-error)', color: '#fff',
-                        border: 'none', lineHeight: 1, fontSize: 13,
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {canUpdate && (
-            <div style={{ marginTop: 10 }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                multiple
-                hidden
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length) addRx.mutate(files);
-                  e.target.value = '';
-                }}
-              />
-              <button
-                className="btn btn-sm"
-                disabled={addRx.isPending}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {addRx.isPending ? 'Uploading…' : '+ Upload images'}
-              </button>
-            </div>
           )}
         </div>
       )}
@@ -373,7 +295,7 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
 
       {a && (
         <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>Reports for this visit</div>
+          <div className="card-title" style={{ marginBottom: 8 }}>AI summary report</div>
           {a.reports.length === 0 ? (
             <span className="muted">No reports uploaded for this appointment.</span>
           ) : (

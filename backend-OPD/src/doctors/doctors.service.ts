@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
 import { Sequelize } from 'sequelize-typescript';
@@ -46,6 +47,7 @@ export class DoctorsService {
     @InjectModel(User) private readonly userModel: typeof User,
     private readonly sequelize: Sequelize,
     private readonly storage: StorageService,
+    private readonly config: ConfigService,
   ) {}
 
   async findAll() {
@@ -92,6 +94,23 @@ export class DoctorsService {
     const { key } = await this.storage.uploadImage(file, `doctors/${id}/logo`);
     if (doctor.clinic_logo_key) await this.storage.delete(doctor.clinic_logo_key);
     await doctor.update({ clinic_logo_key: key } as any);
+    return this.toView(doctor);
+  }
+
+  /** Upload a custom doctor profile QR code image. */
+  async uploadQr(id: string, file: Express.Multer.File) {
+    const doctor = await this.getOrFail(id);
+    const { key } = await this.storage.uploadImage(file, `doctors/${id}/qr`);
+    if (doctor.qr_code_key) await this.storage.delete(doctor.qr_code_key);
+    await doctor.update({ qr_code_key: key } as any);
+    return this.toView(doctor);
+  }
+
+  /** Remove the custom doctor profile QR code image. */
+  async removeQr(id: string) {
+    const doctor = await this.getOrFail(id);
+    if (doctor.qr_code_key) await this.storage.delete(doctor.qr_code_key);
+    await doctor.update({ qr_code_key: null } as any);
     return this.toView(doctor);
   }
 
@@ -250,10 +269,14 @@ export class DoctorsService {
   /** Admin/self projection — resolves image keys to loadable URLs. */
   private toView(d: Doctor) {
     const json = d.toJSON() as any;
+    const base = d.profile_base_url || this.config.get<string>('patientWebBase') || '';
+    const cleanBase = base ? base.replace(/\/+$/, '') : '';
     return {
       ...json,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       clinic_logo_url: this.storage.publicUrl(d.clinic_logo_key),
+      qr_code_url: this.storage.publicUrl(d.qr_code_key),
+      booking_url: cleanBase ? `${cleanBase}/d/${d.public_slug}` : `/d/${d.public_slug}`,
     };
   }
 
@@ -285,6 +308,8 @@ export class DoctorsService {
 
   /** Public-safe projection with resolved image URLs (no internal fields). */
   toPublic(d: Doctor) {
+    const base = d.profile_base_url || this.config.get<string>('patientWebBase') || '';
+    const cleanBase = base ? base.replace(/\/+$/, '') : '';
     return {
       id: d.id,
       name: d.name,
@@ -293,7 +318,10 @@ export class DoctorsService {
       bio: d.bio,
       consultation_fee: d.consultation_fee,
       public_slug: d.public_slug,
+      profile_base_url: d.profile_base_url,
+      booking_url: cleanBase ? `${cleanBase}/d/${d.public_slug}` : `/d/${d.public_slug}`,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
+      qr_code_url: this.storage.publicUrl(d.qr_code_key),
     };
   }
 }

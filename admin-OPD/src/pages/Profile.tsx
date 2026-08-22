@@ -148,31 +148,79 @@ export default function Profile() {
 
           {meQ.data?.public_slug && (
             <div className="card">
-              <div className="card-title">My booking link</div>
-              <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                Share this link (or its QR code) with patients so they can book appointments.
+              <div className="card-title">My booking link & QR</div>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+                Share this link or QR code with patients so they can book appointments directly.
               </p>
-              <div style={{
-                fontSize: 12,
-                fontFamily: 'monospace',
-                wordBreak: 'break-all',
-                background: 'var(--surface-2, #f4f4f5)',
-                padding: '8px 12px',
-                borderRadius: 8,
-                marginBottom: 10,
-              }}>
-                {`${window.location.origin.replace(':5173', ':5174')}/d/${meQ.data.public_slug}`}
-              </div>
-              <button
-                className="btn btn-sm"
-                onClick={() => {
-                  const url = `${window.location.origin.replace(':5173', ':5174')}/d/${meQ.data!.public_slug}`;
-                  navigator.clipboard.writeText(url);
-                  toast.success('Link copied!');
-                }}
-              >
-                Copy link
-              </button>
+
+              {meQ.data.qr_code_url && (
+                <div style={{ textAlign: 'center', marginBottom: 14, padding: '12px', background: '#fff', borderRadius: 8, border: 'var(--hairline)' }}>
+                  <img
+                    src={meQ.data.qr_code_url}
+                    alt="Doctor booking QR"
+                    style={{ width: 140, height: 140, objectFit: 'contain', display: 'inline-block' }}
+                  />
+                  <div style={{ marginTop: 8 }}>
+                    <a
+                      className="btn btn-sm"
+                      href={meQ.data.qr_code_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      download="doctor-booking-qr.png"
+                    >
+                      ⬇ Download QR code
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {(() => {
+                const defaultBase = window.location.origin.replace(':5173', ':5174');
+                const base = meQ.data.profile_base_url ? meQ.data.profile_base_url.replace(/\/+$/, '') : defaultBase;
+                const url = meQ.data.booking_url || `${base}/d/${meQ.data.public_slug}`;
+                return (
+                  <>
+                    <div style={{
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      wordBreak: 'break-all',
+                      background: 'var(--surface-2, #f4f4f5)',
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      marginBottom: 10,
+                    }}>
+                      {url}
+                    </div>
+                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(url);
+                          toast.success('Link copied!');
+                        }}
+                      >
+                        Copy link
+                      </button>
+                      {'share' in navigator && (
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={async () => {
+                            try {
+                              await navigator.share({
+                                title: `Book appointment with ${meQ.data?.name}`,
+                                text: `Book an appointment with ${meQ.data?.name}:`,
+                                url,
+                              });
+                            } catch (_) {}
+                          }}
+                        >
+                          Share
+                        </button>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
