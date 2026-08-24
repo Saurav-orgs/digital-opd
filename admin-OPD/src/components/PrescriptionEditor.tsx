@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi, medicinesApi } from '../api/endpoints';
 import type { PrescriptionMedicine } from '../api/types';
@@ -40,18 +40,29 @@ export function PrescriptionEditor({
   const [form, setForm] = useState({ diagnosis: '', advice: '', follow_up_date: '' });
   const [rows, setRows] = useState<PrescriptionMedicine[]>([blankRow()]);
   const [dirty, setDirty] = useState(false);
+  const lastLoadedSessionRef = useRef<string | null>(null);
 
-  // Adopt server state unless the doctor has unsaved edits — otherwise the
-  // poll would wipe what they are typing.
+  // Adopt server state when prescription data arrives or when a new AI draft lands
   useEffect(() => {
     const data = prescriptionQ.data;
-    if (!data || dirty) return;
-    setForm({
-      diagnosis: data.diagnosis ?? '',
-      advice: data.advice ?? '',
-      follow_up_date: data.follow_up_date ?? '',
-    });
-    setRows(data.medicines && data.medicines.length > 0 ? data.medicines : [blankRow()]);
+    if (!data) return;
+
+    const isNewAiDraft =
+      !!data.consultation_session_id &&
+      data.consultation_session_id !== lastLoadedSessionRef.current;
+
+    if (!dirty || isNewAiDraft) {
+      if (isNewAiDraft) {
+        lastLoadedSessionRef.current = data.consultation_session_id ?? null;
+        setDirty(false);
+      }
+      setForm({
+        diagnosis: data.diagnosis ?? '',
+        advice: data.advice ?? '',
+        follow_up_date: data.follow_up_date ?? '',
+      });
+      setRows(data.medicines && data.medicines.length > 0 ? data.medicines : [blankRow()]);
+    }
   }, [prescriptionQ.data, dirty]);
 
   const body = () => ({

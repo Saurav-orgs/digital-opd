@@ -27,8 +27,9 @@ class Settings:
     # int8 keeps the M1 fast and the memory footprint low; use float16 on a GPU.
     whisper_compute_type: str = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
     whisper_device: str = os.environ.get("WHISPER_DEVICE", "cpu")
-    # Hinglish: Whisper handles code-switching best when told the base language.
-    whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "hi")
+    # Multilingual: Whisper handles Indian English + Hindi code-switching best when
+    # language is left to auto-detect with a rich medical prompt.
+    whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "")
 
     # ── LLM (Ollama) ─────────────────────────────────────────
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -40,18 +41,18 @@ class Settings:
     lora_adapter_path: str = os.environ.get("LORA_ADAPTER_PATH", "")
 
     # ── Gemini (prescription extraction only) ────────────────
-    # When true, /extract-prescription uses Gemini instead of the local Ollama.
+    # When true, /extract-prescription uses Gemini (with automatic Ollama fallback).
     # All other endpoints (report summaries, transcription) always use local models.
-    gemini_enabled: bool = os.environ.get("GEMINI_ENABLED", "").lower() in ("1", "true", "yes")
+    gemini_enabled: bool = os.environ.get("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
-    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     # ── OCR ──────────────────────────────────────────────────
     # Indian lab reports are usually phone photos, so Hindi + English together.
     ocr_languages: str = os.environ.get("OCR_LANGUAGES", "eng+hin")
 
     # Guard against a pathological report blowing up the context window.
-    max_document_chars: int = _int("MAX_DOCUMENT_CHARS", 24000)
+    max_document_chars: int = _int("MAX_DOCUMENT_CHARS", 150000)
 
     @property
     def model_version(self) -> str:

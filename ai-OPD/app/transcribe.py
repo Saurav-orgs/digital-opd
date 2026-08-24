@@ -46,37 +46,83 @@ def is_loaded() -> bool:
     return _model is not None
 
 
-def _vocabulary_prompt(medicine_catalog: list[str] | None) -> str | None:
-    """Bias decoding toward clinic vocabulary.
+def _vocabulary_prompt(medicine_catalog: list[str] | None) -> str:
+    """Bias decoding toward clinic medical vocabulary in Roman script (English & Hinglish).
 
-    Whisper conditions on this text as if it preceded the audio, so listing the
-    medicine names makes it far likelier to transcribe them correctly instead of
-    an acoustically similar everyday word.
+    Whisper conditions on this text as if it preceded the audio, ensuring it
+    transcribes in Roman script (e.g. 'thik hai, Dolo 500 kha lena subah shaam')
+    and never outputs Devanagari characters or mangles medicine names.
     """
-    if not medicine_catalog:
-        return None
-    # Whisper only conditions on the last ~224 tokens, so a long catalogue is
-    # counterproductive — keep the most-used names.
-    names = ", ".join(medicine_catalog[:60])
-    return f"Medical consultation. Medicines discussed may include: {names}."
+    base_terms = [
+        "Doctor prescription",
+        "thik hai",
+        "Dolo 500",
+        "Dolo 650",
+        "Paracetamol 500mg",
+        "Pantocid 40",
+        "Pan 40",
+        "Azithral 500",
+        "Azithromycin 500",
+        "Augmentin 625",
+        "Clavam 625",
+        "Montair LC",
+        "Cetirizine 10mg",
+        "Combiflam",
+        "Meftal Spas",
+        "Zerodol SP",
+        "Telma 40",
+        "Metformin 500",
+        "Amlodipine 5mg",
+        "subah shaam",
+        "kha lena",
+        "dopahar",
+        "raat ko",
+        "khana khane ke baad",
+        "khali pet",
+        "din mein do baar",
+        "din mein teen baar",
+        "5 din",
+        "3 din",
+        "1 hafta",
+    ]
+    if medicine_catalog:
+        seen = set(t.lower() for t in base_terms)
+        for name in medicine_catalog:
+            clean = name.strip()
+            if clean and clean.lower() not in seen:
+                seen.add(clean.lower())
+                base_terms.append(clean)
+
+    # Keep prompt within token budget (~200 tokens)
+    return ", ".join(base_terms[:45]) + "."
 
 
 def transcribe(
     audio_path: str,
     medicine_catalog: list[str] | None = None,
 ) -> tuple[str, str, float]:
-    """Transcribe an audio file. Returns (text, language, duration_seconds)."""
+    """Transcribe an audio file. Returns (text, language, duration_seconds).
+
+    Always transcribes in Roman script (English / Romanized Hinglish).
+    """
     if _model is None:
         raise RuntimeError("Whisper model is not loaded.")
 
+    lang = settings.whisper_language.strip() if settings.whisper_language.strip() else "en"
+
     segments, info = _model.transcribe(
         audio_path,
-        language=settings.whisper_language or None,
+        language=lang,
         initial_prompt=_vocabulary_prompt(medicine_catalog),
-        # VAD drops the silence between doctor and patient turns, which on a
-        # long consultation is a large share of the audio.
+        # VAD drops the silence between doctor and patient turns
         vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
         beam_size=5,
+        best_of=5,
+        condition_on_previous_text=False,
+        repetition_penalty=1.2,
+        no_speech_threshold=0.6,
+        compression_ratio_threshold=2.2,
     )
 
     # `segments` is a generator — consuming it is what actually runs inference.

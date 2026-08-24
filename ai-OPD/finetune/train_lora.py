@@ -15,21 +15,23 @@ adapter only if it actually beats the base model.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 
 
 def main() -> None:
+    here = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data", default="data")
-    parser.add_argument("--adapter-path", default="adapters")
+    parser.add_argument("--data", default=os.path.join(here, "data"))
+    parser.add_argument("--adapter-path", default=os.path.join(here, "adapters"))
     parser.add_argument("--iters", type=int, default=600)
     parser.add_argument("--batch-size", type=int, default=1)
-    # Only the top layers: enough for a format/extraction task and it keeps
-    # memory within a 16GB machine.
     parser.add_argument("--num-layers", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
+    parser.add_argument("--max-seq-length", type=int, default=1024)
+    parser.add_argument("--val-batches", type=int, default=5)
     args = parser.parse_args()
 
     cmd = [
@@ -42,6 +44,11 @@ def main() -> None:
         "--batch-size", str(args.batch_size),
         "--num-layers", str(args.num_layers),
         "--learning-rate", str(args.learning_rate),
+        "--max-seq-length", str(args.max_seq_length),
+        "--val-batches", str(args.val_batches),
+        "--grad-checkpoint",
+        "--steps-per-eval", "25",
+        "--save-every", "50",
     ]
     print("Running:", " ".join(cmd), flush=True)
 

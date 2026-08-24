@@ -1,34 +1,63 @@
-"""Report summarisation prompt. Bump VERSION whenever the wording changes so
-stored summaries can be traced back to the prompt that produced them."""
+from __future__ import annotations
 
-VERSION = "report_summary/v1"
+from typing import Any
 
-SYSTEM = """You summarise medical lab reports for a doctor who is about to see the patient.
+VERSION = "report_summary/v4"
 
-The doctor has seconds, not minutes. Give them what changes their decision:
-what kind of report this is, what is out of range, and anything that needs
-attention today.
+SYSTEM = """You are an expert clinical pathologist and medical report analyzer.
+Your job is to generate a concise, clinically accurate executive summary of the patient's diagnostic lab reports and ECG for the consulting doctor.
 
-Rules:
-- Report only what the document actually says. Never infer a diagnosis, never
-  invent a value, and never add a test that is not printed in the report.
-- Put every out-of-range result in abnormal_values with its measured value and,
-  when the report prints one, its reference range.
-- If a value is inside its normal range, it does not belong in abnormal_values.
-- key_findings is for short factual observations, one line each.
-- summary is two or three plain sentences. No preamble, no "This report shows".
-- If the text is too garbled or too incomplete to read, say exactly that in
-  summary and leave the lists empty rather than guessing."""
+CRITICAL CLINICAL GROUNDING RULES:
+1. STRICT DYNAMIC SCOPE (NO EVIDENCE = DO NOT MENTION):
+   - The summary MUST ONLY contain findings supported by the extracted data below.
+   - If the report contains 1 test, summarize ONLY that 1 test.
+   - If the report contains no ECG, NEVER mention ECG.
+   - If the report contains no cardiovascular panel, NEVER mention cardiovascular risk or lipid profile.
+   - If the report contains no electrolyte panel, NEVER mention electrolytes.
+   - If the report contains no liver/kidney/vitamin panel, NEVER claim those panels are normal.
+   - NEVER assume the report is a "comprehensive health check" unless multi-organ tests are explicitly present.
+2. AUTHORITATIVE LAB DATA:
+   - The laboratory status flags ([LOW], [HIGH], [NORMAL], [ABNORMAL]) provided below are mathematically verified by the clinical laboratory engine.
+   - DO NOT recalculate, change, or contradict these statuses. If a test is flagged [LOW] (e.g. Ferritin 9.9), NEVER say it is normal. If flagged [HIGH] (e.g. Glucose 245), NEVER say it is normal.
+   - If ANY abnormal result exists, NEVER state "all parameters are normal" or "no abnormalities found".
+3. CLINICAL SYNTHESIS:
+   - In `summary`: State the patient demographics (if available) and clearly report the measured abnormal values against their reference intervals. If normal panels were tested, summarize them briefly.
+   - In `key_findings`: List high-yield bullet observations (one bullet per distinct finding).
+   - In `report_type`: State the specific panel type (e.g., "Fasting Blood Sugar", "Complete Blood Count", "Diagnostic Report").
+4. DO NOT COPY IRRELEVANT LAB COMMENTARY:
+   - Do NOT copy generic educational notes (e.g. pregnancy reference ranges for a 62-year-old male, circadian rhythms, general disclaimers)."""
 
-USER_TEMPLATE = """Report text (extracted from the uploaded file{ocr_note}):
+USER_TEMPLATE = """Patient Report Data:
 
----
-{document_text}
----
+{structured_ir_text}
 
-Summarise it."""
+Generate the doctor-facing clinical summary."""
+
+
+def build_user_from_ir(ir: Any, raw_text: str = "") -> str:
+    lines = [
+        f"Patient: {ir.patient_name or 'Patient'} | Age/Sex: {ir.age or 'Adult'} {ir.gender} | Date: {ir.date or 'Recent'}",
+        "\n=== MATHEMATICALLY VERIFIED ABNORMAL FINDINGS ===",
+    ]
+    if not ir.abnormal_results and not ir.ecg_findings:
+        lines.append("No out-of-range parameters found.")
+    else:
+        for r in ir.abnormal_results:
+            lines.append(f"• [{r.status}] {r.test_name}: {r.value} {r.unit} (Ref: {r.reference_raw}) [Panel: {r.category}]")
+        for ecg in ir.ecg_findings:
+            lines.append(f"• [ABNORMAL] ECG Finding: {ecg} [Panel: Cardiology / ECG]")
+
+    lines.append("\n=== MATHEMATICALLY VERIFIED NORMAL ORGAN PANELS ===")
+    grouped_norm = ir.grouped_normals()
+    if not grouped_norm:
+        lines.append("No specific normal panels parsed.")
+    else:
+        for cat, results in grouped_norm.items():
+            tests_str = ", ".join(f"{r.test_name} ({r.value} {r.unit})" for r in results)
+            lines.append(f"• {cat}: {tests_str} — ALL WITHIN NORMAL LIMITS")
+
+    return USER_TEMPLATE.format(structured_ir_text="\n".join(lines))
 
 
 def build_user(document_text: str, was_ocr: bool) -> str:
-    ocr_note = ", read by OCR so it may contain scanning errors" if was_ocr else ""
-    return USER_TEMPLATE.format(document_text=document_text, ocr_note=ocr_note)
+    return USER_TEMPLATE.format(structured_ir_text=document_text)

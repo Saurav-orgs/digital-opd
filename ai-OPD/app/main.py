@@ -129,17 +129,38 @@ async def summarize_report(file: UploadFile = File(...)) -> SummarizeReportRespo
             "or an unsupported format.",
         )
 
-    try:
-        raw = await llm.generate_json(
-            system=report_prompt.SYSTEM,
-            user=report_prompt.build_user(text, was_ocr=(method == "ocr")),
-            schema=REPORT_SUMMARY_JSON_SCHEMA,
-        )
-    except llm.LlmError as err:
-        raise HTTPException(503, str(err)) from err
+    from . import lab_parser, contradiction_guard
+
+    # 1. Deterministic extraction and reference range validation
+    ir = lab_parser.parse_lab_report_text(text)
+    user_prompt = report_prompt.build_user_from_ir(ir, raw_text=text)
+
+    raw = None
+    if settings.gemini_enabled and settings.gemini_api_key:
+        try:
+            raw = await gemini_llm.generate_json(
+                system=report_prompt.SYSTEM,
+                user=user_prompt,
+                schema=REPORT_SUMMARY_JSON_SCHEMA,
+            )
+        except Exception as gemini_err:
+            log.warning("Gemini report summarization failed (%s), falling back to local LLM.", gemini_err)
+
+    if raw is None:
+        try:
+            raw = await llm.generate_json(
+                system=report_prompt.SYSTEM,
+                user=user_prompt,
+                schema=REPORT_SUMMARY_JSON_SCHEMA,
+            )
+        except llm.LlmError as err:
+            raise HTTPException(503, str(err)) from err
+
+    # 2. Contradiction Guard & Consistency Enforcement
+    sanitized = contradiction_guard.validate_and_sanitize_summary(raw, ir)
 
     return SummarizeReportResponse(
-        summary=ReportSummary.model_validate(raw),
+        summary=ReportSummary.model_validate(sanitized),
         extracted_chars=len(text),
         extraction_method=method,
         model_version=settings.model_version,
@@ -162,14 +183,39 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
         }
         for r in reports
     ]
-    try:
-        raw = await llm.generate_json(
-            system=consolidate_prompt.SYSTEM,
-            user=consolidate_prompt.build_user(payload),
-            schema=REPORT_SUMMARY_JSON_SCHEMA,
-        )
-    except llm.LlmError as err:
-        raise HTTPException(503, str(err)) from err
+
+    raw = None
+    if settings.gemini_enabled and settings.gemini_api_key:
+        try:
+            raw = await gemini_llm.generate_json(
+                system=consolidate_prompt.SYSTEM,
+                user=consolidate_prompt.build_user(payload),
+                schema=REPORT_SUMMARY_JSON_SCHEMA,
+            )
+        except Exception as gemini_err:
+            log.warning("Gemini consolidate summaries failed (%s), falling back to local LLM.", gemini_err)
+
+    if raw is None:
+        try:
+            raw = await llm.generate_json(
+                system=consolidate_prompt.SYSTEM,
+                user=consolidate_prompt.build_user(payload),
+                schema=REPORT_SUMMARY_JSON_SCHEMA,
+            )
+        except llm.LlmError as err:
+            raise HTTPException(503, str(err)) from err
+
+    # Preserve all authoritative abnormal values across all source reports
+    collected_abnormals = []
+    seen_abn_keys = set()
+    for r in reports:
+        for a in r.abnormal_values:
+            key = f"{a.label.lower()}:{a.value}"
+            if key not in seen_abn_keys:
+                seen_abn_keys.add(key)
+                collected_abnormals.append(a.model_dump())
+    if collected_abnormals:
+        raw["abnormal_values"] = collected_abnormals
 
     return ConsolidateResponse(
         summary=ReportSummary.model_validate(raw),
@@ -195,18 +241,61 @@ async def extract_prescription(
         medicine_catalog=body.medicine_catalog,
     )
 
-    try:
-        if settings.gemini_enabled:
+    raw = None
+    if settings.gemini_enabled and settings.gemini_api_key:
+        try:
             raw = await gemini_llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA)
-        else:
+        except Exception as gemini_err:
+            log.warning("Gemini extraction failed (%s), falling back to local Ollama LLM.", gemini_err)
+
+    if raw is None:
+        try:
             raw = await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA)
-    except (llm.LlmError, gemini_llm.GeminiError) as err:
-        raise HTTPException(503, str(err)) from err
+        except llm.LlmError as err:
+            raise HTTPException(503, str(err)) from err
 
     draft = DraftPrescription.model_validate(raw)
-    # Correct the spelling of each medicine name against a real dictionary so a
-    # mis-heard name doesn't reach the doctor mangled. Strength/dosage untouched.
+    import re
+
+    transcript_lower = body.transcript.lower()
+    has_subah_shaam = bool(re.search(r"\b(subah\s+shaam|subah\s+aur\s+shaam|din\s+me\s+do\s+baar|twice\s+a\s+day|bd)\b", transcript_lower))
+    has_subah_dopahar_raat = bool(re.search(r"\b(subah\s+dopahar\s+raat|din\s+me\s+teen\s+baar|thrice\s+a\s+day|tds)\b", transcript_lower))
+    has_after_food = bool(re.search(r"\b(khana\s+khane\s+ke\s+baad|khane\s+ke\s+baad|after\s+food|after\s+meals)\b", transcript_lower))
+    has_before_food = bool(re.search(r"\b(khali\s+pet|khana\s+khane\s+se\s+pehle|khane\s+se\s+pehle|before\s+food|before\s+meals)\b", transcript_lower))
+
+    # Correct the spelling of each medicine name and normalize strength & dosage numbers
     for med in draft.medicines:
+        # If name has trailing strength (e.g. "Dolo 500" or "Paracetamol 200mg" or "Dolo 600mg"):
+        match = re.search(r"^(.*?)\s*(\d+\s*(?:mg|mcg|ml|g|iu)?\.?)$", med.name.strip(), re.IGNORECASE)
+        if match:
+            clean_name, extracted_str = match.group(1).strip(), match.group(2).strip()
+            if clean_name:
+                med.name = clean_name
+            if not med.strength:
+                if re.match(r"^\d+$", extracted_str):
+                    med.strength = f"{extracted_str} mg"
+                else:
+                    med.strength = extracted_str
+
+        # If strength is a bare number like "500", format as "500 mg"
+        if med.strength and re.match(r"^\d+$", med.strength.strip()):
+            med.strength = f"{med.strength.strip()} mg"
+
+        # If dosage was defaulted to 1-0-0 or empty, but transcript mentions subah shaam:
+        if has_subah_shaam and (not med.dosage or med.dosage == "1-0-0" or "subah shaam" in med.instructions.lower()):
+            med.dosage = "1-0-1"
+        elif has_subah_dopahar_raat and (not med.dosage or med.dosage == "1-0-0"):
+            med.dosage = "1-1-1"
+
+        # If timing was defaulted or missing:
+        if has_after_food and (not med.timing or med.timing in ("before meals", "")):
+            med.timing = "after food"
+        elif has_before_food and not med.timing:
+            med.timing = "before food"
+
+        if not med.form:
+            med.form = "tablet"
+
         med.name = speller.correct(med.name, extra=body.medicine_catalog)
 
     return ExtractPrescriptionResponse(

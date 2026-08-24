@@ -7,7 +7,7 @@ JSON, so the backend never has to defend against a half-written object.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ── Transcription ────────────────────────────────────────────
 
@@ -26,14 +26,31 @@ class AbnormalValue(BaseModel):
     label: str = Field(description="Test name, e.g. 'Haemoglobin'")
     value: str = Field(description="Measured value with unit, e.g. '9.1 g/dL'")
     reference: str = Field(default="", description="Normal range if printed")
-    direction: Literal["high", "low", "abnormal"] = "abnormal"
+    direction: Literal["high", "low", "abnormal", "normal"] = "abnormal"
+    status: str = ""
+    category: str = ""
 
 
 class ReportSummary(BaseModel):
-    summary: str = Field(description="Two or three sentences a doctor can scan")
+    summary: str = Field(default="", description="Two or three sentences a doctor can scan")
     key_findings: list[str] = Field(default_factory=list)
     abnormal_values: list[AbnormalValue] = Field(default_factory=list)
     report_type: str = Field(default="", description="e.g. 'CBC', 'Lipid profile'")
+    title: str = ""
+
+    @field_validator("report_type", mode="before")
+    @classmethod
+    def populate_report_type(cls, v: Any) -> str:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        return "Medical Report"
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def coerce_summary(cls, v: Any) -> str:
+        if isinstance(v, list):
+            return " ".join(str(item) for item in v)
+        return str(v or "")
 
 
 class SummarizeReportResponse(BaseModel):
@@ -47,6 +64,7 @@ REPORT_SUMMARY_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "report_type": {"type": "string"},
+        "title": {"type": "string"},
         "summary": {"type": "string"},
         "key_findings": {"type": "array", "items": {"type": "string"}},
         "abnormal_values": {
@@ -63,7 +81,7 @@ REPORT_SUMMARY_JSON_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["summary", "key_findings", "abnormal_values", "report_type"],
+    "required": ["summary", "key_findings", "abnormal_values"],
 }
 
 
@@ -113,12 +131,40 @@ class DraftMedicine(BaseModel):
     duration_days: int | None = None
     instructions: str = ""
 
+    @field_validator("strength", "form", "dosage", "timing", "instructions", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v).strip()
+
 
 class DraftPrescription(BaseModel):
     diagnosis: str = ""
     medicines: list[DraftMedicine] = Field(default_factory=list)
     advice: list[str] = Field(default_factory=list)
     follow_up_days: int | None = None
+
+    @field_validator("diagnosis", mode="before")
+    @classmethod
+    def _coerce_diagnosis(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, list):
+            return ", ".join(str(x).strip() for x in v if str(x).strip())
+        return str(v).strip()
+
+    @field_validator("advice", mode="before")
+    @classmethod
+    def _coerce_advice(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            clean = v.strip()
+            return [clean] if clean else []
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        return []
 
 
 class ExtractPrescriptionResponse(BaseModel):
@@ -143,13 +189,21 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
                     "duration_days": {"type": ["integer", "null"]},
                     "instructions": {"type": "string"},
                 },
-                "required": ["name", "dosage"],
+                "required": [
+                    "name",
+                    "strength",
+                    "form",
+                    "dosage",
+                    "timing",
+                    "duration_days",
+                    "instructions",
+                ],
             },
         },
         "advice": {"type": "array", "items": {"type": "string"}},
         "follow_up_days": {"type": ["integer", "null"]},
     },
-    "required": ["diagnosis", "medicines", "advice"],
+    "required": ["diagnosis", "medicines", "advice", "follow_up_days"],
 }
 
 

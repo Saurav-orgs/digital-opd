@@ -23,7 +23,7 @@ ExtractionMethod = Literal["pdf_text", "ocr", "none"]
 
 # A PDF page with only a scanned image still yields a few stray characters, so
 # require a meaningful amount of text before trusting the text layer.
-_MIN_PDF_TEXT_CHARS = 120
+_MIN_PDF_TEXT_CHARS = 10
 
 
 def ocr_available() -> bool:
@@ -35,9 +35,11 @@ def _extract_pdf_text(path: str) -> str:
 
     parts: list[str] = []
     with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            parts.append(page.extract_text() or "")
-    return "\n".join(parts).strip()
+        for idx, page in enumerate(pdf.pages, 1):
+            page_text = page.extract_text(layout=True) or page.extract_text() or ""
+            if page_text.strip():
+                parts.append(f"--- Page {idx} ---\n{page_text.strip()}")
+    return "\n\n".join(parts).strip()
 
 
 def _ocr_pdf(path: str) -> str:
@@ -65,6 +67,14 @@ def _ocr_image(path: str) -> str:
 def extract_text(path: str, content_type: str) -> tuple[str, ExtractionMethod]:
     """Return (text, method). Never raises — an unreadable file yields ("", "none")."""
     is_pdf = content_type == "application/pdf" or path.lower().endswith(".pdf")
+    is_text = content_type.startswith("text/") or path.lower().endswith((".txt", ".csv", ".tsv", ".json"))
+
+    if is_text:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()[: settings.max_document_chars], "pdf_text"
+        except Exception:
+            pass
 
     if is_pdf:
         try:

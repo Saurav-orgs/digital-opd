@@ -134,7 +134,12 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
           t.cancel();
           // The draft lands with the finished session.
           final prescription = await _api.getPrescription(widget.appointmentId);
-          if (mounted && !_dirty) setState(() => _adopt(prescription));
+          if (mounted) {
+            setState(() {
+              _dirty = false;
+              _adopt(prescription);
+            });
+          }
         }
       } catch (_) {
         // Transient failure while polling is not worth surfacing.
@@ -155,7 +160,17 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     final path =
         '${dir.path}/consultation_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
-    await _recorder.start(const RecordConfig(), path: path);
+    await _recorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: 128000,
+        sampleRate: 44100,
+        echoCancel: true,
+        noiseSuppress: true,
+        autoGain: true,
+      ),
+      path: path,
+    );
     if (!mounted) return;
     setState(() {
       _recording = true;

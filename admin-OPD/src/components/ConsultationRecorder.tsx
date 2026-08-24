@@ -39,10 +39,10 @@ export function ConsultationRecorder({
   const sessionQ = useQuery({
     queryKey: ['consultation', appointmentId],
     queryFn: () => consultationApi.session(appointmentId),
-    // Poll only while work is in flight.
+    // Poll while work is in flight (every 2 seconds).
     refetchInterval: (q) => {
       const s = q.state.data as ConsultationSession | null | undefined;
-      return s?.status === 'transcribing' || s?.status === 'drafting' ? 4000 : false;
+      return s?.status === 'transcribing' || s?.status === 'drafting' ? 2000 : false;
     },
   });
 
@@ -54,6 +54,13 @@ export function ConsultationRecorder({
     },
     onError: (e) => toast.error(e),
   });
+
+  // Invalidate prescription query immediately when draft is ready
+  useEffect(() => {
+    if (sessionQ.data?.status === 'draft_ready') {
+      qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
+    }
+  }, [sessionQ.data?.status, appointmentId, qc]);
 
   // Release the microphone if the modal closes mid-recording.
   useEffect(() => {
@@ -70,11 +77,19 @@ export function ConsultationRecorder({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        // Consultation rooms are noisy and the mic is usually across a desk.
-        audio: { echoCancellation: true, noiseSuppression: true },
+        // High clarity recording with noise suppression and auto gain
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000,
+        },
       });
       const mimeType = pickMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 },
+      );
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -88,7 +103,7 @@ export function ConsultationRecorder({
         if (blob.size > 0) upload.mutate(blob);
       };
 
-      recorder.start();
+      recorder.start(1000);
       recorderRef.current = recorder;
       setRecording(true);
       setElapsed(0);
