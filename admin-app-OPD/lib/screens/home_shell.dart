@@ -30,7 +30,7 @@ class _HomeShellState extends State<HomeShell> {
   List<_Destination> _destinations(AuthController auth) {
     final all = <_Destination>[
       const _Destination(
-          'Dashboard', Icons.dashboard_outlined, 'dashboard', DashboardScreen()),
+          'Appointments', Icons.event_note_outlined, 'dashboard', DashboardScreen()),
       const _Destination(
           'Pathlabs', Icons.biotech_outlined, 'pathlabs', PathlabsScreen()),
       const _Destination(

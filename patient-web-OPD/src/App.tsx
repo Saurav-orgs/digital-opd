@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { PhoneCall } from 'lucide-react';
 import { queryClient } from './queryClient';
 import { PatientAuthProvider } from './auth/PatientAuthContext';
 import { DoctorProvider } from './context/DoctorContext';
@@ -37,14 +36,13 @@ export default function App() {
               <div className="web-navbar-inner">
                 <Link to="/" className="web-brand">
                   <span className="brand-icon">+</span>
-                  <span>OPD Patient Portal</span>
+                  <span className="brand-lockup">
+                    <span className="brand-name">Digital OPD</span>
+                    <span className="brand-by">by Ittitude</span>
+                  </span>
                 </Link>
 
                 <div className="web-nav-links">
-                  <div className="web-contact-pill">
-                    <PhoneCall size={14} />
-                    <span>24/7 OPD Helpline</span>
-                  </div>
                   <AccountNav />
                 </div>
               </div>

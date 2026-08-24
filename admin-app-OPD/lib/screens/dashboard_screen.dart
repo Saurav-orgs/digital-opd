@@ -7,8 +7,14 @@ import '../widgets/common.dart';
 import 'appointments_screen.dart' show AppointmentDetailScreen;
 import 'walkin_form_screen.dart';
 
-/// Single-doctor hub: summary cards + Today / Upcoming / Previous appointments,
-/// searchable, with a walk-in action. Replaces the standalone Appointments tab.
+String _addDaysStr(DateTime base, int n) =>
+    base.add(Duration(days: n)).toIso8601String().substring(0, 10);
+final String _kToday = _addDaysStr(DateTime.now(), 0);
+final String _kYesterday = _addDaysStr(DateTime.now(), -1);
+final String _kTomorrow = _addDaysStr(DateTime.now(), 1);
+
+/// Single-doctor hub: summary cards + Previous / Today / Upcoming appointments,
+/// searchable and filterable by status, with a walk-in action.
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -16,15 +22,34 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
   final _searchController = TextEditingController();
   Timer? _debounce;
   String? _search;
+  String? _date;
+  // pending | done | all — pending is the default so staff see what still
+  // needs attention first.
+  String _status = 'pending';
+
+  late final TabController _tabController;
+  static const _ranges = ['previous', 'today', 'upcoming'];
 
   // Bumped to force the tab lists to reload (after a change, walk-in, etc.).
   int _reloadToken = 0;
   DashboardSummary? _summary;
   bool _summaryStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this, initialIndex: 1);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      // A picked date only makes sense within the tab it was picked for.
+      setState(() => _date = null);
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -46,6 +71,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _debounce?.cancel();
     _searchController.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -73,104 +99,196 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (booked == true) _reloadAll();
   }
 
+  Future<void> _pickDate() async {
+    final range = _ranges[_tabController.index];
+    final isPrevious = range == 'previous';
+    final first = isPrevious ? DateTime(2020, 1, 1) : DateTime.parse(_kTomorrow);
+    final last = isPrevious
+        ? DateTime.parse(_kYesterday)
+        : DateTime(2100, 12, 31);
+    final initial = _date != null
+        ? DateTime.parse(_date!)
+        : (isPrevious ? DateTime.parse(_kYesterday) : DateTime.parse(_kTomorrow));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: first,
+      lastDate: last,
+    );
+    if (picked != null) {
+      setState(() => _date = picked.toIso8601String().substring(0, 10));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final canCreate = auth.can('appointments', 'create');
+    final currentRange = _ranges[_tabController.index];
 
-    return DefaultTabController(
-      length: 3,
-      initialIndex: 1, // Today (middle) selected by default.
-      child: Scaffold(
-        backgroundColor: AppColors.page,
-        floatingActionButton: canCreate
-            ? FloatingActionButton.extended(
-                onPressed: _addWalkIn,
-                icon: const Icon(Icons.add),
-                label: const Text('Walk-in'),
-              )
-            : null,
-        body: Column(
-          children: [
-            Container(
-              color: AppColors.card,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Dashboard',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w600),
-                        ),
+    return Scaffold(
+      backgroundColor: AppColors.page,
+      floatingActionButton: canCreate
+          ? FloatingActionButton.extended(
+              onPressed: _addWalkIn,
+              icon: const Icon(Icons.add),
+              label: const Text('Walk-in'),
+            )
+          : null,
+      body: Column(
+        children: [
+          Container(
+            color: AppColors.card,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Appointments',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600),
                       ),
-                      IconButton(
-                        tooltip: 'Refresh',
-                        icon: const Icon(Icons.refresh),
-                        onPressed: _reloadAll,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  _summaryCards(),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _searchController,
-                    onChanged: _onSearchChanged,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search name or phone…',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      isDense: true,
-                      suffixIcon: _searchController.text.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.close, size: 18),
-                              onPressed: () {
-                                _debounce?.cancel();
-                                _searchController.clear();
-                                setState(() => _search = null);
-                              },
-                            ),
                     ),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _reloadAll,
+                    ),
+                  ],
+                ),
+                _summaryCards(),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search name or phone…',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    isDense: true,
+                    suffixIcon: _searchController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              _debounce?.cancel();
+                              _searchController.clear();
+                              setState(() => _search = null);
+                            },
+                          ),
                   ),
-                  const SizedBox(height: 4),
-                  TabBar(
-                    tabs: [
-                      _tab('Previous', _summary?.pendingPrevious),
-                      _tab('Today', _summary?.pendingToday),
-                      _tab('Upcoming', _summary?.pendingUpcoming),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: _dateFilterChip(currentRange)),
+                    const SizedBox(width: 8),
+                    _statusFilter(),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                TabBar(
+                  controller: _tabController,
+                  onTap: (_) => setState(() {}),
+                  tabs: [
+                    _tab('Previous', _summary?.pendingPrevious),
+                    _tab('Today', _summary?.pendingToday),
+                    _tab('Upcoming', _summary?.pendingUpcoming),
+                  ],
+                ),
+              ],
             ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _RangeAppointments(
-                      range: 'previous',
-                      search: _search,
-                      reloadToken: _reloadToken,
-                      onChanged: _reloadAll),
-                  _RangeAppointments(
-                      range: 'today',
-                      search: _search,
-                      reloadToken: _reloadToken,
-                      onChanged: _reloadAll),
-                  _RangeAppointments(
-                      range: 'upcoming',
-                      search: _search,
-                      reloadToken: _reloadToken,
-                      onChanged: _reloadAll),
-                ],
-              ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _RangeAppointments(
+                    range: 'previous',
+                    search: _search,
+                    date: currentRange == 'previous' ? _date : null,
+                    status: _status,
+                    reloadToken: _reloadToken,
+                    onChanged: _reloadAll),
+                _RangeAppointments(
+                    range: 'today',
+                    search: _search,
+                    date: null,
+                    status: _status,
+                    reloadToken: _reloadToken,
+                    onChanged: _reloadAll),
+                _RangeAppointments(
+                    range: 'upcoming',
+                    search: _search,
+                    date: currentRange == 'upcoming' ? _date : null,
+                    status: _status,
+                    reloadToken: _reloadToken,
+                    onChanged: _reloadAll),
+              ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Always visible: fixed to today's date on the Today tab, otherwise narrows
+  /// that tab's list to one specific day (bounded to past/future).
+  Widget _dateFilterChip(String range) {
+    final isToday = range == 'today';
+    final label = isToday
+        ? _kToday
+        : (_date ?? (range == 'previous' ? 'Pick a past date' : 'Pick a date'));
+    final color = isToday ? AppColors.textSecondary : AppColors.text;
+    return InkWell(
+      onTap: isToday ? null : _pickDate,
+      borderRadius: BorderRadius.circular(AppRadius.control),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(AppRadius.control),
+          color: isToday ? AppColors.page : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.event_outlined, size: 16, color: AppColors.textSecondary),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: color)),
+            ),
+            if (!isToday && _date != null) ...[
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: () => setState(() => _date = null),
+                child: const Icon(Icons.close, size: 15, color: AppColors.textSecondary),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _statusFilter() {
+    return SegmentedButton<String>(
+      segments: const [
+        ButtonSegment(value: 'pending', label: Text('Pending')),
+        ButtonSegment(value: 'done', label: Text('Done')),
+        ButtonSegment(value: 'all', label: Text('All')),
+      ],
+      selected: {_status},
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+      ),
+      onSelectionChanged: (s) => setState(() => _status = s.first),
     );
   }
 
@@ -201,7 +319,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// A grid of count cards — Today, Upcoming, and Previous.
+  /// A compact row of count cards — Today, Upcoming, and Previous.
   Widget _summaryCards() {
     final d = _summary;
     final cards = <Widget>[
@@ -226,9 +344,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.45,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      childAspectRatio: 1.9,
       children: cards,
     );
   }
@@ -249,7 +367,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.page,
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -261,17 +379,16 @@ class _StatCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 15, color: accent),
+              Icon(icon, size: 14, color: accent),
               const Spacer(),
               Text(value == null ? '—' : '$value',
                   style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w700)),
+                      fontSize: 18, fontWeight: FontWeight.w700)),
             ],
           ),
-          const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 12),
+                  color: AppColors.textSecondary, fontSize: 11),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
         ],
@@ -284,6 +401,9 @@ class _StatCard extends StatelessWidget {
 class _RangeAppointments extends StatefulWidget {
   final String range;
   final String? search;
+  final String? date;
+  final String status; // pending | done | all
+
   final int reloadToken;
 
   /// Called after a change bubbles up from a detail screen so the parent can
@@ -293,6 +413,8 @@ class _RangeAppointments extends StatefulWidget {
   const _RangeAppointments({
     required this.range,
     required this.search,
+    required this.date,
+    required this.status,
     required this.reloadToken,
     required this.onChanged,
   });
@@ -318,6 +440,7 @@ class _RangeAppointmentsState extends State<_RangeAppointments>
   void didUpdateWidget(covariant _RangeAppointments old) {
     super.didUpdateWidget(old);
     if (old.search != widget.search ||
+        old.date != widget.date ||
         old.reloadToken != widget.reloadToken) {
       _reload();
     }
@@ -326,6 +449,7 @@ class _RangeAppointmentsState extends State<_RangeAppointments>
   Future<List<Appointment>> _load() => AuthScope.of(context).api.listAppointments(
         range: widget.range,
         search: widget.search,
+        date: widget.date,
       );
 
   void _reload() => setState(() {
@@ -335,6 +459,14 @@ class _RangeAppointmentsState extends State<_RangeAppointments>
   Future<void> _refresh() async {
     _reload();
     await _future;
+  }
+
+  List<Appointment> _applyStatus(List<Appointment> rows) {
+    if (widget.status == 'all') return rows;
+    if (widget.status == 'done') {
+      return rows.where((a) => a.consultationStatus == 'done').toList();
+    }
+    return rows.where((a) => a.consultationStatus != 'done').toList();
   }
 
   @override
@@ -350,14 +482,18 @@ class _RangeAppointmentsState extends State<_RangeAppointments>
           return StateView(
               error: 'Could not load appointments.', onRetry: _refresh);
         }
-        final list = snap.data ?? [];
+        final all = snap.data ?? [];
+        final list = _applyStatus(all);
         if (list.isEmpty) {
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
-              children: const [
-                SizedBox(height: 120),
-                StateView(empty: 'No appointments here.'),
+              children: [
+                const SizedBox(height: 120),
+                StateView(
+                    empty: all.isEmpty
+                        ? 'No appointments here.'
+                        : 'No ${widget.status} appointments here.'),
               ],
             ),
           );
@@ -365,9 +501,9 @@ class _RangeAppointmentsState extends State<_RangeAppointments>
         return RefreshIndicator(
           onRefresh: _refresh,
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 88),
             itemCount: list.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, i) =>
                 _ApptCard(list[i], onChanged: widget.onChanged),
           ),
@@ -384,6 +520,11 @@ class _ApptCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ageGender = [
+      if (a.patientAge != null) '${a.patientAge}y',
+      if (a.patientGender != null && a.patientGender!.isNotEmpty) a.patientGender,
+    ].join(' · ');
+
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () async {
@@ -394,6 +535,7 @@ class _ApptCard extends StatelessWidget {
         if (changed == true) onChanged();
       },
       child: SectionCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -401,22 +543,37 @@ class _ApptCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(a.patientName,
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
                 ),
                 Text('${a.appointmentDate} · ${a.startTime}',
                     style: const TextStyle(
                         color: AppColors.textSecondary, fontSize: 12)),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(a.patientMobile,
-                style: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 13)),
+            const SizedBox(height: 3),
+            Row(
+              children: [
+                const Icon(Icons.call_outlined, size: 13, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Text(a.patientMobile,
+                    style: const TextStyle(
+                        color: AppColors.textSecondary, fontSize: 13)),
+                if (ageGender.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  const Icon(Icons.person_outline, size: 13, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(ageGender,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontSize: 13)),
+                ],
+              ],
+            ),
             if (a.onLeave) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               const _OnLeaveBanner(),
             ],
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 6,

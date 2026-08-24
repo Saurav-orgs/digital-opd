@@ -164,30 +164,22 @@ export default function AppointmentPage() {
       <div className="grid cols-2-1" style={{ gap: 16, alignItems: 'start' }}>
         {/* Left / Primary Workspace: Summary then Prescription */}
         <div className="stack" style={{ gap: 16 }}>
-          {/* AI Summary Report */}
+          {/* Reports the patient uploaded for this visit */}
           {a && a.reports.length > 0 && (
             <div className="card">
-              <div className="card-title" style={{ marginBottom: 12 }}>AI summary report</div>
-              <div className="stack" style={{ gap: 12 }}>
-                <VisitReportSummary
-                  appointmentId={id}
-                  summary={a.reports_summary}
-                  status={a.reports_summary_status}
-                  error={a.reports_summary_error}
-                  count={a.reports_summary_count}
-                  reportCount={a.reports.length}
-                  onRetried={invalidate}
-                />
-                <details>
-                  <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
-                    Individual reports ({a.reports.length})
-                  </summary>
-                  <div className="stack" style={{ gap: 12, marginTop: 10 }}>
-                    {a.reports.map((r) => (
-                      <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
-                    ))}
-                  </div>
-                </details>
+              <div className="card-title" style={{ marginBottom: 12 }}>
+                Reports ({a.reports.length})
+              </div>
+              {/*
+                The combined across-reports summary is deliberately not rendered
+                for now — the client asked to hide it, not drop it.
+                `VisitReportSummary` is kept (and exported) so bringing it back
+                is a one-line change.
+              */}
+              <div className="stack" style={{ gap: 10 }}>
+                {a.reports.map((r) => (
+                  <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
+                ))}
               </div>
             </div>
           )}
@@ -380,7 +372,14 @@ function Field({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function VisitReportSummary({
+/**
+ * The combined AI summary across every report on this visit.
+ *
+ * Currently hidden at the call site (see the Reports card above): the client
+ * asked for it off for now, with the option to bring it back. Exported so it
+ * stays compiled and ready rather than rotting behind a comment.
+ */
+export function VisitReportSummary({
   appointmentId, summary, status, error, count, reportCount, onRetried,
 }: {
   appointmentId: string;
@@ -438,31 +437,63 @@ function ReportWithSummary({ report, onRetried }: { report: PatientReport; onRet
     onError: (e) => toast.error(e),
   });
 
+  const [open, setOpen] = useState(false);
   const { ai_summary_status: status, ai_summary: summary } = report;
+  const ready = status === 'ready' && !!summary;
+
   return (
-    <div style={{ borderBottom: 'var(--hairline)', paddingBottom: 10 }}>
-      <a href={report.url} target="_blank" rel="noreferrer">📄 {report.title}</a>
-      {status === 'processing' ? (
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Summarising…</div>
-      ) : status === 'pending' ? (
-        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
-          <span className="muted" style={{ fontSize: 12.5 }}>Waiting to be summarised.</span>
-          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
-            {retry.isPending ? 'Trying…' : 'Summarise now'}
-          </button>
+    <div style={{ border: 'var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+      <div className="row" style={{ justifyContent: 'space-between', gap: 10 }}>
+        <a href={report.url} target="_blank" rel="noreferrer" style={{ fontSize: 13.5 }}>
+          📄 {report.title}
+        </a>
+        <button
+          className={`btn btn-sm ${open && ready ? 'btn-primary' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          style={{ padding: '4px 10px', fontSize: 12, borderRadius: 999 }}
+          aria-expanded={open}
+        >
+          ✨ AI report
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {ready ? (
+            <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--page)' }}>
+              <SummaryBody summary={summary} />
+            </div>
+          ) : status === 'processing' ? (
+            <span className="muted" style={{ fontSize: 12.5 }}>Summarising…</span>
+          ) : status === 'pending' ? (
+            // Queued but not running — usually the AI service isn't up yet.
+            // Saying "summarising" would promise work that isn't happening.
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <span className="muted" style={{ fontSize: 12.5 }}>Waiting to be summarised.</span>
+              <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+                {retry.isPending ? 'Trying…' : 'Summarise now'}
+              </button>
+            </div>
+          ) : status === 'failed' ? (
+            <div className="stack" style={{ gap: 6 }}>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>Couldn't summarise this report.</span>
+                <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
+                  {retry.isPending ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+              {/* The actual reason, so a fixable cause isn't hidden behind a retry. */}
+              {report.ai_summary_error && (
+                <span className="muted" style={{ fontSize: 11.5 }}>{report.ai_summary_error}</span>
+              )}
+            </div>
+          ) : (
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              No AI summary for this report.
+            </span>
+          )}
         </div>
-      ) : status === 'failed' ? (
-        <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
-          <span className="muted" style={{ fontSize: 12.5 }}>Couldn't summarise this report.</span>
-          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
-            {retry.isPending ? 'Retrying…' : 'Retry'}
-          </button>
-        </div>
-      ) : summary ? (
-        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'var(--page)' }}>
-          <SummaryBody summary={summary} />
-        </div>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -32,8 +32,14 @@ export default function Login() {
     <div className="auth-screen">
       <div className="card login-card">
         <div className="login-logo">+</div>
-        <h1 style={{ fontSize: 20 }}>OPD Admin</h1>
-        <p className="muted" style={{ marginTop: 6, marginBottom: 24 }}>
+        <h1 style={{ fontSize: 20, marginBottom: 2 }}>Digital OPD Admin</h1>
+        <div
+          className="muted"
+          style={{ fontSize: 10.5, fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase' }}
+        >
+          by Ittitude
+        </div>
+        <p className="muted" style={{ marginTop: 10, marginBottom: 24 }}>
           Sign in to manage doctors, schedules and appointments.
         </p>
         <form onSubmit={onSubmit}>

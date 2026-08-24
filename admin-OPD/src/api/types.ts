@@ -131,6 +131,8 @@ export interface Appointment {
   on_leave: boolean;
   prescriptions: PrescriptionImage[];
   reports: PatientReport[];
+  /** Count only — sent by the list endpoint, which omits the reports themselves. */
+  reports_count?: number;
   // Combined AI summary across all of this visit's reports.
   reports_summary?: ReportAiSummary | null;
   reports_summary_status?: AiJobStatus | null;

@@ -9,7 +9,7 @@ import { AuthUser } from '../common/decorators/current-user.decorator';
 import { AuthPatient } from '../patient-auth/current-patient.decorator';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
-import { ConsultationStatus, NotificationType } from '../common/enums';
+import { AiJobStatus, ConsultationStatus, NotificationType } from '../common/enums';
 import { ReportSummaryService } from './report-summary.service';
 
 @Injectable()
@@ -106,6 +106,99 @@ export class ReportsService {
       status === ConsultationStatus.PENDING ||
       status === ConsultationStatus.ON_HOLD
     );
+  }
+
+  /**
+   * Load one of the patient's own reports and confirm it may still be changed.
+   *
+   * Two separate gates, deliberately: the report must belong to this patient
+   * (never trust an id from the client), and its visit must still be open. A
+   * report that isn't attached to any visit is a clinic/pathlab upload — the
+   * patient may read it but never edit it.
+   */
+  private async ownEditableReport(
+    patient: AuthPatient,
+    reportId: string,
+  ): Promise<PatientReport> {
+    const report = await this.reportModel.findByPk(reportId);
+    if (!report || report.patient_mobile !== patient.mobile) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Report not found.',
+      });
+    }
+    if (!report.appointment_id) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'This report was uploaded by the clinic and cannot be changed.',
+      });
+    }
+    const appointment = await this.appointmentModel.findByPk(
+      report.appointment_id,
+    );
+    if (!appointment || !this.acceptsReports(appointment.consultation_status)) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'This appointment is closed — its reports can no longer be changed.',
+      });
+    }
+    return report;
+  }
+
+  /**
+   * Patient edits their own report: rename it, replace the file, or both.
+   * Replacing the file invalidates the AI summary, so it is reset and queued
+   * again — leaving the old summary attached to a new file would be worse than
+   * showing none.
+   */
+  async updateByPatient(
+    patient: AuthPatient,
+    reportId: string,
+    title: string | undefined,
+    file: Express.Multer.File | undefined,
+  ): Promise<PatientReport> {
+    const report = await this.ownEditableReport(patient, reportId);
+
+    if (title?.trim()) report.title = title.trim();
+
+    let replaced: { oldKey: string } | null = null;
+    if (file) {
+      this.storage.validateDocument(file);
+      const { key } = await this.storage.uploadDocument(
+        file,
+        `reports/${patient.mobile}`,
+      );
+      replaced = { oldKey: report.file_key };
+      report.file_key = key;
+      // The old summary describes a file that is no longer attached.
+      report.ai_summary = null;
+      report.ai_summary_status = AiJobStatus.PENDING;
+      report.ai_summary_error = null;
+      report.ai_summarized_at = null;
+    }
+
+    await report.save();
+
+    if (replaced) {
+      // Drop the superseded object only after the row points at the new one,
+      // so a failure here can never leave the report pointing at nothing.
+      await this.storage.delete(replaced.oldKey).catch(() => undefined);
+      void this.summaries.summarizeInBackground(report.id, file!);
+    } else if (report.appointment_id) {
+      // Title-only edit still changes what the combined summary is built from.
+      void this.summaries.consolidateForAppointment(report.appointment_id);
+    }
+
+    return report;
+  }
+
+  /** Patient deletes their own report, while the visit is still open. */
+  async removeByPatient(patient: AuthPatient, reportId: string): Promise<void> {
+    const report = await this.ownEditableReport(patient, reportId);
+    const appointmentId = report.appointment_id;
+    await this.storage.delete(report.file_key).catch(() => undefined);
+    await report.destroy();
+    if (appointmentId) {
+      void this.summaries.consolidateForAppointment(appointmentId);
+    }
   }
 
   async listForMobile(mobile: string, doctorId?: string | null) {

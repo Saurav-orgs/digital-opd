@@ -97,6 +97,22 @@ export const patientApi = {
     );
   },
 
+  // Rename a report and/or replace its file. Both optional; the server enforces
+  // ownership and the same "visit still open" cutoff as upload.
+  updateVisitReport: (reportId: string, title?: string, file?: File) => {
+    const fd = new FormData();
+    if (title) fd.append('title', title);
+    if (file) fd.append('file', file);
+    return unwrap<PatientReport>(
+      client.patch(`/patient/reports/${reportId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    );
+  },
+
+  deleteVisitReport: (reportId: string) =>
+    unwrap<{ ok: boolean }>(client.delete(`/patient/reports/${reportId}`)),
+
   notifications: (doctorId?: string | null) =>
     unwrap<PatientNotification[]>(client.get('/patient/notifications', {
       params: doctorId ? { doctor_id: doctorId } : undefined,

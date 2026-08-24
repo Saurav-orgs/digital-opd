@@ -76,7 +76,11 @@ export default function Layout() {
       )}
       <aside className={`sidebar ${drawerOpen ? 'open' : ''}`}>
         <div className="brand">
-          <span className="brand-mark">+</span> OPD Admin
+          <span className="brand-mark">+</span>
+          <span className="brand-lockup">
+            <span className="brand-name">Digital OPD</span>
+            <span className="brand-by">by Ittitude</span>
+          </span>
         </div>
         {items.map((n) => (
           <NavLink

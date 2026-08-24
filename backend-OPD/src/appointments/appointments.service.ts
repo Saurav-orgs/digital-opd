@@ -166,9 +166,11 @@ export class AppointmentsService {
     } else {
       return []; // super admin has no clinical scope
     }
-    if (query.date) where.appointment_date = query.date;
-    // Relative window (clinic timezone) for the dashboard tabs.
-    if (query.range) {
+    // An explicit date narrows to that single day; otherwise fall back to the
+    // relative window (clinic timezone) for the dashboard tabs.
+    if (query.date) {
+      where.appointment_date = query.date;
+    } else if (query.range) {
       const today = nowInClinic(
         this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
       ).date;
@@ -219,10 +221,36 @@ export class AppointmentsService {
     const leaveKeys = await this.slots.leaveDayKeys(
       rows.map((r) => ({ doctorId: r.doctor_id, date: r.appointment_date })),
     );
+    // How many reports each visit carries, for the list's Reports column. A
+    // count only — presigning a URL per report here would mean an S3 signing
+    // call per row, and the list never renders the files themselves.
+    const reportCounts = await this.reportCountsFor(rows.map((r) => r.id));
     return rows.map((r) => ({
       ...r.toJSON(),
       on_leave: leaveKeys.has(`${r.doctor_id}|${r.appointment_date}`),
+      reports_count: reportCounts.get(r.id) ?? 0,
     }));
+  }
+
+  /** report count per appointment id, in one grouped query. */
+  private async reportCountsFor(
+    appointmentIds: string[],
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (appointmentIds.length === 0) return counts;
+
+    const rows = (await this.reportModel.findAll({
+      attributes: [
+        'appointment_id',
+        [literal('COUNT(*)::int'), 'count'],
+      ],
+      where: { appointment_id: { [Op.in]: appointmentIds } },
+      group: ['appointment_id'],
+      raw: true,
+    })) as unknown as { appointment_id: string; count: number }[];
+
+    for (const row of rows) counts.set(row.appointment_id, Number(row.count));
+    return counts;
   }
 
   async findOne(id: string, user: AuthUser) {

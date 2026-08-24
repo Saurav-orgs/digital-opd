@@ -57,7 +57,7 @@ export const PrivacyPolicy: React.FC = () => {
           </div>
           <div className="privacy-card-body">
             <p>
-              At OPD Patient Portal, we prioritize the protection and security of your personal data and health information. This Privacy Policy details how we collect, process, store, and safeguard your information when you browse doctors, schedule outpatient department (OPD) appointments, or interact with our services.
+              At Digital OPD, we prioritize the protection and security of your personal data and health information. This Privacy Policy details how we collect, process, store, and safeguard your information when you browse doctors, schedule outpatient department (OPD) appointments, or interact with our services.
             </p>
             <div className="privacy-highlight-box">
               <CheckCircle2 size={18} color="#0F6E56" />
@@ -182,8 +182,8 @@ export const PrivacyPolicy: React.FC = () => {
               <h3>Have Privacy Concerns?</h3>
               <p>For privacy queries, data requests, or compliance inquiries, reach out to our dedicated Patient Data Desk:</p>
               <div className="privacy-contact-details">
+                {/* TODO: replace with Ittitude's real privacy contact address. */}
                 <span>📧 Email: <strong>privacy@opdpatient.com</strong></span>
-                <span>📞 Phone: <strong>+91 98765 43210</strong> (Ext. Privacy Desk)</span>
               </div>
             </div>
           </div>

@@ -3,7 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Stethoscope, FileText, Bell, Upload, Pill, Download } from 'lucide-react';
 import { patientApi } from '../../patientApi';
 import { useDoctorCtx } from '../../context/DoctorContext';
-import { ApiException, type PatientVisit, type IssuedPrescription } from '../../types';
+import {
+  ApiException,
+  type PatientVisit,
+  type PatientReport,
+  type IssuedPrescription,
+} from '../../types';
 import { StateView } from '../../components/StateView';
 
 export const MyVisits: React.FC = () => {
@@ -137,9 +142,7 @@ const VisitCard: React.FC<{ visit: PatientVisit }> = ({ visit: v }) => {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {v.reports.map((r) => (
-                  <a key={r.id} href={r.url ?? undefined} target="_blank" rel="noreferrer" style={{ fontSize: '13px' }}>
-                    📄 {r.title}
-                  </a>
+                  <ReportRow key={r.id} report={r} editable={v.accepts_reports} />
                 ))}
               </div>
             </div>
@@ -237,6 +240,135 @@ const PrescriptionCard: React.FC<{ prescription: IssuedPrescription }> = ({
     )}
   </div>
 );
+
+/**
+ * One uploaded report. While the visit is still open the patient may rename it,
+ * swap the file, or remove it; once the doctor marks the visit done it becomes a
+ * plain read-only link (the server enforces the same cutoff).
+ */
+const ReportRow: React.FC<{ report: PatientReport; editable: boolean }> = ({
+  report: r,
+  editable,
+}) => {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [title, setTitle] = useState(r.title);
+  const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['patient-visits'] });
+    qc.invalidateQueries({ queryKey: ['patient-reports'] });
+  };
+  const fail = (err: unknown, fallback: string) =>
+    setError(err instanceof ApiException ? err.message : fallback);
+
+  const save = useMutation({
+    mutationFn: () =>
+      patientApi.updateVisitReport(
+        r.id,
+        title.trim() === r.title ? undefined : title.trim(),
+        fileRef.current?.files?.[0],
+      ),
+    onSuccess: () => {
+      setEditing(false);
+      setError(null);
+      if (fileRef.current) fileRef.current.value = '';
+      refresh();
+    },
+    onError: (err) => fail(err, 'Could not update the report. Please try again.'),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => patientApi.deleteVisitReport(r.id),
+    onSuccess: () => { setConfirmingDelete(false); setError(null); refresh(); },
+    onError: (err) => fail(err, 'Could not delete the report. Please try again.'),
+  });
+
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  if (editing) {
+    return (
+      <div
+        onClick={stop}
+        style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '12px' }}
+      >
+        <div className="form-field">
+          <input
+            type="text"
+            className="form-input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Report title"
+          />
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,application/pdf"
+          style={{ marginBottom: 10, fontSize: 13 }}
+        />
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+          Choose a file only if you want to replace the current one.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn-primary"
+            disabled={save.isPending || !title.trim()}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={save.isPending}
+            onClick={() => { setEditing(false); setTitle(r.title); setError(null); }}
+          >
+            Cancel
+          </button>
+        </div>
+        {error && <div className="error-text" style={{ marginTop: 10 }}>{error}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={stop}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '13px' }}
+    >
+      <a href={r.url ?? undefined} target="_blank" rel="noreferrer" style={{ flex: 1 }}>
+        📄 {r.title}
+      </a>
+
+      {editable && !confirmingDelete && (
+        <>
+          <button className="link-btn" onClick={() => setEditing(true)}>Edit</button>
+          <button className="link-btn link-btn-danger" onClick={() => setConfirmingDelete(true)}>
+            Delete
+          </button>
+        </>
+      )}
+
+      {editable && confirmingDelete && (
+        <>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12.5 }}>Delete this?</span>
+          <button
+            className="link-btn link-btn-danger"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending ? 'Deleting…' : 'Yes'}
+          </button>
+          <button className="link-btn" onClick={() => setConfirmingDelete(false)}>No</button>
+        </>
+      )}
+
+      {error && <span className="error-text" style={{ fontSize: 12 }}>{error}</span>}
+    </div>
+  );
+};
 
 /** Upload a report against this specific visit; disabled once the doctor closes it. */
 const ReportUploader: React.FC<{ appointmentId: string }> = ({ appointmentId }) => {

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -24,6 +25,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReportsService } from '../reports/reports.service';
 import { CreateOwnReportDto } from '../reports/dto/create-own-report.dto';
+import { UpdateOwnReportDto } from '../reports/dto/update-own-report.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { PatientAuthGuard } from '../patient-auth/patient-auth.guard';
 import { CurrentPatient, AuthPatient } from '../patient-auth/current-patient.decorator';
@@ -92,6 +94,49 @@ export class PatientPortalController {
     @CurrentPatient() patient: AuthPatient,
   ) {
     return this.reports.createByPatient(patient, appointmentId, dto.title, file);
+  }
+
+  @Patch('reports/:id')
+  @ApiOperation({
+    summary:
+      'Patient edits their own report — rename it and/or replace the file (allowed until the visit is marked done)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', example: 'Blood Test — CBC (repeat)' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 6 * 1024 * 1024 },
+    }),
+  )
+  updateOwnReport(
+    @Param('id', ParseUUIDPipe) reportId: string,
+    @Body() dto: UpdateOwnReportDto,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentPatient() patient: AuthPatient,
+  ) {
+    return this.reports.updateByPatient(patient, reportId, dto.title, file);
+  }
+
+  @Delete('reports/:id')
+  @ApiOperation({
+    summary:
+      'Patient deletes their own report (allowed until the visit is marked done)',
+  })
+  async deleteOwnReport(
+    @Param('id', ParseUUIDPipe) reportId: string,
+    @CurrentPatient() patient: AuthPatient,
+  ) {
+    await this.reports.removeByPatient(patient, reportId);
+    return { ok: true };
   }
 
   @Get('notifications')

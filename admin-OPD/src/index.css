@@ -106,15 +106,35 @@ img {
   gap: 8px;
 }
 .brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: var(--primary);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* Two-line brand lockup: product name over the company that makes it. */
+.brand-lockup {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.brand-name {
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.brand-by {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 .nav-item {
   display: flex;
@@ -533,18 +553,49 @@ tr.clickable-row:hover {
   background: var(--primary-tint);
 }
 
-/* ── Badge (semantic) ──────────────────────────────────────── */
-.badge {
+/* ── Range tabs (Previous / Today / Upcoming) ───────────────
+   Always one row. On a phone they shrink rather than wrap: three short,
+   related choices read as a single control, and a wrapped third button
+   looks like it belongs to something else. */
+.range-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+}
+.range-tab {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.range-tab-count {
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 500;
-  border: 0.5px solid transparent;
-  white-space: nowrap;
-  text-transform: capitalize;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+@media (max-width: 520px) {
+  .range-tabs {
+    gap: 6px;
+  }
+  .range-tab {
+    flex: 1 1 0;
+    padding: 8px 6px;
+    font-size: 13px;
+    gap: 5px;
+  }
+  .range-tab-count {
+    padding: 1px 6px;
+    font-size: 11px;
+  }
 }
 .badge::before {
   content: '';

@@ -32,7 +32,7 @@ class OpdAdminApp extends StatelessWidget {
     return AuthScope(
       controller: controller,
       child: MaterialApp(
-        title: 'OPD Admin',
+        title: 'Digital OPD Admin',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         home: const _Root(),

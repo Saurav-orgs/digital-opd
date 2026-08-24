@@ -45,7 +45,7 @@ class _OpdAppState extends State<OpdApp> {
       child: PatientAuthScope(
         controller: _auth,
         child: MaterialApp(
-          title: 'OPD Appointments',
+          title: 'Digital OPD',
           debugShowCheckedModeBanner: false,
           theme: buildTheme(),
           home: const HomeShell(),

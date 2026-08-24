@@ -10,10 +10,13 @@ export const Confirmation: React.FC = () => {
   const state = location.state as {
     result?: BookingResult;
     doctor?: Doctor;
+    /** Set when the booking succeeded but some staged reports did not upload. */
+    reportsWarning?: string | null;
   } | null;
 
   const result = state?.result;
   const doctor = state?.doctor;
+  const reportsWarning = state?.reportsWarning;
 
   if (!result) {
     return (
@@ -63,6 +66,24 @@ export const Confirmation: React.FC = () => {
         <p style={{ fontSize: '14.5px', color: 'var(--text-secondary)', margin: '0 0 28px 0', lineHeight: 1.5 }}>
           Your OPD consultation with <strong style={{ color: 'var(--text)' }}>{doctorName}</strong> has been successfully booked.
         </p>
+
+        {/* The booking itself succeeded — this only reports the reports. */}
+        {reportsWarning && (
+          <div
+            style={{
+              background: '#FEF3C7',
+              border: '1px solid #FCD34D',
+              color: '#92400E',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              fontSize: '13.5px',
+              textAlign: 'left',
+              marginBottom: '20px',
+            }}
+          >
+            {reportsWarning}
+          </div>
+        )}
 
         <div
           style={{
