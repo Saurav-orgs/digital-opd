@@ -16,6 +16,31 @@ import {
 import { ReportAiSummary } from './patient-report.model';
 import { Doctor } from './doctor.model';
 import { AppointmentPrescription } from './prescription.model';
+import { PatientProfile } from './patient-profile.model';
+
+/** One label's movement between the previous visit and this one. */
+export interface ProgressTrend {
+  label: string;
+  previous_value: string;
+  current_value: string;
+  direction: 'up' | 'down' | 'same';
+  interpretation: 'better' | 'worse' | 'unclear';
+}
+
+/**
+ * The across-visits picture: what changed since last time and where the
+ * patient stands now. Produced by the AI service's `/summarize-progress`.
+ */
+export interface ProgressSummary {
+  status: 'improving' | 'stable' | 'worsening' | 'unclear';
+  summary: string;
+  improvements: string[];
+  deteriorations: string[];
+  unchanged: string[];
+  trends: ProgressTrend[];
+  current_status: string;
+  watch_points: string[];
+}
 
 @Table({
   tableName: 'appointments',
@@ -43,6 +68,18 @@ export class Appointment extends Model<Appointment> {
   @Column({ type: DataType.TIME, allowNull: false })
   end_time: string;
 
+  /**
+   * Which person this visit is for. The name/mobile/age below stay as a
+   * point-in-time snapshot of what was entered; this is the clinical identity
+   * that history and summaries are scoped by.
+   */
+  @ForeignKey(() => PatientProfile)
+  @Column({ type: DataType.UUID, allowNull: true })
+  patient_profile_id: string | null;
+
+  @BelongsTo(() => PatientProfile)
+  patientProfile: PatientProfile;
+
   @Column({ type: DataType.STRING, allowNull: false })
   patient_name: string;
 
@@ -56,8 +93,18 @@ export class Appointment extends Model<Appointment> {
   @Column({ type: DataType.SMALLINT, allowNull: true })
   patient_age: number | null;
 
+  /** Address line (house / street). City, state and PIN follow. */
   @Column({ type: DataType.TEXT, allowNull: true })
   patient_address: string | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  patient_city: string | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  patient_state: string | null;
+
+  @Column({ type: DataType.STRING(6), allowNull: true })
+  patient_pincode: string | null;
 
   @Column({ type: DataType.TEXT, allowNull: true })
   description: string | null;
@@ -109,6 +156,28 @@ export class Appointment extends Model<Appointment> {
 
   @Column({ type: DataType.DATE, allowNull: true })
   reports_summarized_at: Date | null;
+
+  // ── Combined summary carried across visits ─────────────────
+  // Built from the previous visit's summary plus this visit's reports, so the
+  // doctor reads one trajectory rather than comparing cards by eye. Null status
+  // means there was no earlier visit to compare against — the UI then falls
+  // back to `reports_summary`.
+
+  @Column({ type: DataType.JSONB, allowNull: true })
+  progress_summary: ProgressSummary | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  progress_summary_status: AiJobStatus | null;
+
+  @Column({ type: DataType.TEXT, allowNull: true })
+  progress_summary_error: string | null;
+
+  /** How many visits the trajectory covers, this one included. */
+  @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
+  progress_summary_visit_count: number;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  progress_summarized_at: Date | null;
 
   @BelongsTo(() => Doctor)
   doctor: Doctor;

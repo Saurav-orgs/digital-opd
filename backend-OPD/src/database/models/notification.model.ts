@@ -1,5 +1,6 @@
 import { BelongsTo, Column, DataType, ForeignKey, Model, Table } from 'sequelize-typescript';
 import { Doctor } from './doctor.model';
+import { PatientProfile } from './patient-profile.model';
 import { NotificationType } from '../../common/enums';
 
 /** In-app notification for a patient, keyed by mobile. */
@@ -15,6 +16,14 @@ export class Notification extends Model<Notification> {
     primaryKey: true,
   })
   id: string;
+
+  /** Which family member this concerns; null = the account as a whole. */
+  @ForeignKey(() => PatientProfile)
+  @Column({ type: DataType.UUID, allowNull: true })
+  patient_profile_id: string | null;
+
+  @BelongsTo(() => PatientProfile)
+  patientProfile: PatientProfile;
 
   @Column({ type: DataType.STRING, allowNull: false })
   patient_mobile: string;

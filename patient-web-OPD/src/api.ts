@@ -97,11 +97,16 @@ export const api = {
     doctorId: string;
     date: string;
     startTime: string;
+    /** Omit to register a new patient from the details below. */
+    patientProfileId?: string | null;
     patientName: string;
     patientMobile: string;
     patientGender: string;
     patientAge: number;
-    patientAddress?: string;
+    patientAddress: string;
+    patientCity: string;
+    patientState: string;
+    patientPincode: string;
     description?: string;
   }): Promise<BookingResult> {
     try {
@@ -115,9 +120,15 @@ export const api = {
         patient_mobile: params.patientMobile,
         patient_gender: params.patientGender,
         patient_age: params.patientAge,
-        ...(params.patientAddress?.trim()
-          ? { patient_address: params.patientAddress.trim() }
+        // Present = "this existing patient"; absent = "a new patient", even if
+        // the name matches one already on the number.
+        ...(params.patientProfileId
+          ? { patient_profile_id: params.patientProfileId }
           : {}),
+        patient_address: params.patientAddress.trim(),
+        patient_city: params.patientCity.trim(),
+        patient_state: params.patientState.trim(),
+        patient_pincode: params.patientPincode.trim(),
         ...(params.description?.trim()
           ? { description: params.description.trim() }
           : {}),

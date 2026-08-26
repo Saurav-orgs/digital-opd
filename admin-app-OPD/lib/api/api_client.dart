@@ -288,10 +288,13 @@ class ApiClient {
   Future<Appointment> getAppointment(String id) async => Appointment.fromJson(
       await _get('/appointments/$id') as Map<String, dynamic>);
 
-  /// Prior visits for a patient (matched by mobile), for the history view.
-  Future<List<Appointment>> appointmentHistory(String mobile,
+  /// Prior visits for **one patient**, for the history view.
+  ///
+  /// Scoped to the patient, not the number — a family member's visits must
+  /// never appear under someone else's appointment.
+  Future<List<Appointment>> appointmentHistory(String profileId,
       {String? excludeId}) async {
-    final q = <String, dynamic>{'mobile': mobile};
+    final q = <String, dynamic>{'profileId': profileId};
     if (excludeId != null) q['excludeId'] = excludeId;
     return (await _get('/appointments/history', q) as List)
         .map((e) => Appointment.fromJson(e))
@@ -391,6 +394,19 @@ class ApiClient {
   Future<void> retryVisitSummary(String appointmentId) => _guard(
       () async => _post('/reports/appointment/$appointmentId/summary/retry'));
 
+  /// Rebuild the across-visits comparison for one visit.
+  Future<void> retryProgressSummary(String appointmentId) => _guard(
+      () async => _post('/reports/appointment/$appointmentId/progress/retry'));
+
+  /// Patients registered on a mobile number — the front desk's picker.
+  Future<List<PatientProfile>> patientsByMobile(String mobile) async =>
+      (await _get('/patient-profiles/by-mobile', {'mobile': mobile}) as List)
+          .map((p) => PatientProfile.fromJson(p as Map<String, dynamic>))
+          .toList();
+
+  /// Withdraw a booking. Refused once the doctor has started on the visit.
+  Future<void> cancelAppointment(String id) => _delete('/appointments/$id');
+
   Future<Appointment> setNotes(String id, String notes) async =>
       Appointment.fromJson(await _patch('/appointments/$id/notes',
           {'notes': notes}) as Map<String, dynamic>);
@@ -420,18 +436,23 @@ class ApiClient {
   Future<void> removePathlab(String id) => _delete('/pathlabs/$id');
 
   // ── Reports ────────────────────────────────────────────────
-  Future<List<PatientReport>> listReports(String mobile) async =>
-      (await _get('/reports', {'mobile': mobile}) as List)
+  /// One patient's reports — scoped by patient, not by number.
+  Future<List<PatientReport>> listReports(String profileId) async =>
+      (await _get('/reports', {'profileId': profileId}) as List)
           .map((e) => PatientReport.fromJson(e))
           .toList();
 
-  Future<void> uploadReport(String mobile, String title, File file) =>
+  Future<void> uploadReport(
+          String mobile, String profileId, String title, File file) =>
       _guard(() async {
         final req = http.MultipartRequest('POST', _uri('/reports'));
         if (tokens.token != null) {
           req.headers['Authorization'] = 'Bearer ${tokens.token}';
         }
         req.fields['mobile'] = mobile;
+        // Required: one number may cover a whole family, and a report filed
+        // against the wrong member cannot be detected later.
+        req.fields['patient_profile_id'] = profileId;
         req.fields['title'] = title;
         req.files.add(await http.MultipartFile.fromPath('file', file.path,
             contentType: _imageMediaType(file.path)));

@@ -23,6 +23,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from app.prompts.prescription import SYSTEM  # noqa: E402
+from app.prompts import progress as progress_prompt  # noqa: E402
 
 
 def dosage_of(medicine: dict) -> str:
@@ -54,9 +55,47 @@ def to_target(doctor_output: dict) -> dict:
     }
 
 
+def progress_sample(input_payload: dict, doctor_output: dict) -> dict | None:
+    """One across-visits correction, rendered as a training pair.
+
+    The user turn is rebuilt with the same prompt builder the live endpoint
+    uses, so what the model trains on is exactly what it will be asked at
+    inference — including the COMPARABLE / NEW THIS VISIT split that keeps it
+    from claiming a trend it cannot support.
+    """
+    previous = (input_payload or {}).get("previous")
+    current = (input_payload or {}).get("current")
+    if not previous or not current:
+        return None
+    if not (current.get("reports") and previous.get("reports")):
+        return None
+
+    user = progress_prompt.build_user(
+        (input_payload or {}).get("patient") or {},
+        previous,
+        current,
+    )
+    return {
+        "messages": [
+            {"role": "system", "content": progress_prompt.SYSTEM},
+            {"role": "user", "content": user},
+            {
+                "role": "assistant",
+                "content": json.dumps(doctor_output or {}, ensure_ascii=False),
+            },
+        ]
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="data_real")
+    parser.add_argument(
+        "--kind",
+        default="prescription",
+        choices=["prescription", "progress_summary"],
+        help="Which corrections to export.",
+    )
     parser.add_argument(
         "--database-url",
         default=os.environ.get("DATABASE_URL", ""),
@@ -82,15 +121,22 @@ def main() -> None:
             """
             SELECT input_payload, doctor_output, edited
             FROM ai_training_samples
-            WHERE kind = 'prescription'
+            WHERE kind = %s
             ORDER BY created_at ASC
-            """
+            """,
+            (args.kind,),
         )
         rows = cur.fetchall()
     conn.close()
 
     samples = []
     for input_payload, doctor_output, _edited in rows:
+        if args.kind == "progress_summary":
+            sample = progress_sample(input_payload or {}, doctor_output or {})
+            if sample:
+                samples.append(sample)
+            continue
+
         transcript = (input_payload or {}).get("transcript", "").strip()
         if not transcript:
             continue
@@ -109,7 +155,8 @@ def main() -> None:
             }
         )
 
-    print(f"Found {len(samples)} usable consultation(s).")
+    label = "consultation" if args.kind == "prescription" else "visit comparison"
+    print(f"Found {len(samples)} usable {label}(s).")
     if len(samples) < args.min_samples:
         print(
             f"That is below --min-samples ({args.min_samples}). Fine-tuning on "

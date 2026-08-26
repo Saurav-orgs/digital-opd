@@ -8,9 +8,15 @@ import '../auth/patient_scope.dart';
 import '../doctor_context.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/patient_switcher.dart';
+import 'patients_screen.dart';
 
 /// Consultation history — doctor's notes, next-visit reminders and
-/// prescriptions from each visit, matched by the patient's mobile number.
+/// prescriptions from each visit, for **one patient**.
+///
+/// Scoped to the chosen person, not the number: a father's visits must never
+/// appear under his son's history even though both were booked from the same
+/// phone.
 class MyVisitsScreen extends StatefulWidget {
   const MyVisitsScreen({super.key});
 
@@ -20,19 +26,59 @@ class MyVisitsScreen extends StatefulWidget {
 
 class _MyVisitsScreenState extends State<MyVisitsScreen> {
   Future<List<PatientVisit>>? _future;
+  String? _loadedFor;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final id = PatientAuthScope.of(context).selectedProfileId;
+    // Switching patient must refetch, not reuse the previous person's visits.
+    if (id != null && id != _loadedFor) {
+      _loadedFor = id;
+      _future = _load(id);
+    }
+  }
+
+  Future<List<PatientVisit>> _load(String profileId) {
     final doctorId = DoctorContextScope.of(context).doctor?.id;
-    _future ??= PatientAuthScope.of(context).api.myVisits(doctorId: doctorId);
+    return PatientAuthScope.of(context).api.myVisits(profileId, doctorId: doctorId);
   }
 
   Future<void> _refresh() async {
-    final doctorId = DoctorContextScope.of(context).doctor?.id;
-    setState(() => _future =
-        PatientAuthScope.of(context).api.myVisits(doctorId: doctorId));
+    final id = PatientAuthScope.of(context).selectedProfileId;
+    if (id == null) return;
+    setState(() => _future = _load(id));
     await _future;
+  }
+
+  /// Withdraw a booking — the fix for booking under the wrong family member.
+  /// Nothing merges records here, so an unwanted booking is cancelled instead.
+  Future<void> _cancel(PatientVisit v) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel this appointment?'),
+        content: Text(
+          'The ${v.appointmentDate} · ${v.startTime} slot will be released, and '
+          'any reports you uploaded for this visit will be removed.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep it')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cancel booking')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await PatientAuthScope.of(context).api.cancelVisit(v.id);
+      await _refresh();
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    }
   }
 
   @override
@@ -42,13 +88,33 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
         title: const Text('My Visits'),
         actions: [
           IconButton(
+            tooltip: 'Patients on this number',
+            icon: const Icon(Icons.people_outline),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PatientsScreen()),
+            ),
+          ),
+          IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
             onPressed: () => confirmSignOut(context, () => PatientAuthScope.of(context).logout()),
           ),
         ],
       ),
-      body: FutureBuilder<List<PatientVisit>>(
+      body: RequirePatient(
+        builder: (context, patient) => Column(
+          children: [
+            const PatientSwitcher(),
+            Expanded(child: _visits(patient)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _visits(PatientProfile patient) {
+    return FutureBuilder<List<PatientVisit>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -61,11 +127,11 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
           if (visits.isEmpty) {
             return RefreshIndicator(
               onRefresh: _refresh,
-              child: ListView(children: const [
-                SizedBox(height: 140),
+              child: ListView(children: [
+                const SizedBox(height: 140),
                 StateView(
                     empty:
-                        'No visits yet. Once you book an OPD appointment, it will show up here.'),
+                        'No visits yet for ${patient.name}. Once an OPD appointment is booked, it will show up here.'),
               ]),
             );
           }
@@ -75,20 +141,22 @@ class _MyVisitsScreenState extends State<MyVisitsScreen> {
               padding: const EdgeInsets.all(16),
               itemCount: visits.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) =>
-                  _VisitTile(visits[i], onChanged: _refresh),
+              itemBuilder: (context, i) => _VisitTile(
+                visits[i],
+                onChanged: _refresh,
+                onCancel: () => _cancel(visits[i]),
+              ),
             ),
           );
-        },
-      ),
-    );
+        });
   }
 }
 
 class _VisitTile extends StatefulWidget {
   final PatientVisit v;
   final Future<void> Function() onChanged;
-  const _VisitTile(this.v, {required this.onChanged});
+  final Future<void> Function() onCancel;
+  const _VisitTile(this.v, {required this.onChanged, required this.onCancel});
 
   @override
   State<_VisitTile> createState() => _VisitTileState();
@@ -97,6 +165,11 @@ class _VisitTile extends StatefulWidget {
 class _VisitTileState extends State<_VisitTile> {
   bool _open = false;
   bool _uploading = false;
+
+  /// Only an untouched booking may be withdrawn — once the doctor has engaged
+  /// with the visit it is a clinical record. The server enforces this too.
+  bool get _cancellable =>
+      widget.v.status == 'confirmed' && widget.v.consultationStatus == 'pending';
 
   Future<void> _uploadReport() async {
     final picked = await ImagePicker()
@@ -133,7 +206,8 @@ class _VisitTileState extends State<_VisitTile> {
         v.ePrescription != null ||
         v.prescriptions.isNotEmpty ||
         v.reports.isNotEmpty ||
-        v.acceptsReports;
+        v.acceptsReports ||
+        _cancellable;
 
     return SectionCard(
       child: Column(
@@ -255,6 +329,24 @@ class _VisitTileState extends State<_VisitTile> {
               const SizedBox(height: 4),
               const Text(
                   'You can add reports until the doctor marks this visit done.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+            ],
+            if (_cancellable) ...[
+              const Divider(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => widget.onCancel(),
+                  icon: const Icon(Icons.event_busy, size: 16),
+                  label: const Text('Cancel this appointment'),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                  'Booked under the wrong patient? Cancel here and book again '
+                  'for the right one.',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
             ],
           ],

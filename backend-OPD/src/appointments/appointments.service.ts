@@ -6,10 +6,12 @@ import { Appointment } from '../database/models/appointment.model';
 import { AppointmentPrescription } from '../database/models/prescription.model';
 import { PatientReport } from '../database/models/patient-report.model';
 import { Doctor } from '../database/models/doctor.model';
+import { PatientProfile } from '../database/models/patient-profile.model';
 import { SlotsService } from '../slots/slots.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
+import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { WalkInAppointmentDto } from './dto/walkin-appointment.dto';
 import { RescheduleDto } from './dto/reschedule.dto';
@@ -42,6 +44,7 @@ export class AppointmentsService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly prescriptions: PrescriptionsService,
+    private readonly profiles: PatientProfilesService,
     private readonly config: ConfigService,
   ) {}
 
@@ -69,17 +72,23 @@ export class AppointmentsService {
     // Fail fast on an obviously-taken slot before attempting the insert.
     await this.assertSlotFree(dto.doctor_id, dto.appointment_date, dto.start_time);
 
+    const profileId = await this.resolveProfile(dto);
+
     try {
       const appointment = await this.appointmentModel.create({
         doctor_id: dto.doctor_id,
         appointment_date: dto.appointment_date,
         start_time: dto.start_time,
         end_time: endTime,
+        patient_profile_id: profileId,
         patient_name: dto.patient_name,
         patient_mobile: dto.patient_mobile,
         patient_gender: dto.patient_gender,
         patient_age: dto.patient_age,
-        patient_address: dto.patient_address ?? null,
+        patient_address: dto.patient_address,
+        patient_city: dto.patient_city,
+        patient_state: dto.patient_state,
+        patient_pincode: dto.patient_pincode,
         description: dto.description ?? null,
         status: AppointmentStatus.CONFIRMED,
         consultation_status: ConsultationStatus.PENDING,
@@ -126,6 +135,11 @@ export class AppointmentsService {
     );
     await this.assertSlotFree(doctorId, dto.appointment_date, dto.start_time);
 
+    // A walk-in is a full registration: it creates the account and the patient
+    // exactly as a self-booking would, so the patient can log in with this
+    // number afterwards and find the visit waiting.
+    const profileId = await this.resolveProfile(dto);
+
     try {
       const appointment = await this.appointmentModel.create(
         {
@@ -133,11 +147,15 @@ export class AppointmentsService {
           appointment_date: dto.appointment_date,
           start_time: dto.start_time,
           end_time: endTime,
+          patient_profile_id: profileId,
           patient_name: dto.patient_name,
           patient_mobile: dto.patient_mobile,
           patient_gender: dto.patient_gender,
           patient_age: dto.patient_age,
-          patient_address: dto.patient_address ?? null,
+          patient_address: dto.patient_address,
+          patient_city: dto.patient_city,
+          patient_state: dto.patient_state,
+          patient_pincode: dto.patient_pincode,
           description: dto.description ?? null,
           status: AppointmentStatus.CONFIRMED,
           consultation_status: ConsultationStatus.PENDING,
@@ -151,6 +169,132 @@ export class AppointmentsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Decide which patient this booking is for.
+   *
+   * Two paths, and only two: the caller picked someone from the number's
+   * pick-list (`patient_profile_id`), or they filled the form and get a brand
+   * new patient. There is deliberately no third path that looks up an existing
+   * patient by name — an identical name on the same number is a different
+   * person until the caller says otherwise by picking their card.
+   */
+  private async resolveProfile(dto: {
+    patient_profile_id?: string;
+    patient_mobile: string;
+    patient_name: string;
+    patient_gender?: string;
+    patient_address: string;
+    patient_city: string;
+    patient_state: string;
+    patient_pincode: string;
+  }): Promise<string> {
+    const account = await this.profiles.findOrCreateAccount(dto.patient_mobile);
+
+    if (dto.patient_profile_id) {
+      // Never trust a profile id from the client: it must belong to the
+      // account for the number being booked under.
+      const profile = await this.profiles.assertOwned(
+        account.id,
+        dto.patient_profile_id,
+      );
+      // Keep the stored address current so the next booking prefills right.
+      await this.profiles.refreshAddressFromBooking(profile.id, {
+        address_line: dto.patient_address,
+        city: dto.patient_city,
+        state: dto.patient_state,
+        pincode: dto.patient_pincode,
+        gender: dto.patient_gender ?? null,
+      });
+      return profile.id;
+    }
+
+    const created = await this.profiles.createForAccount(account.id, {
+      name: dto.patient_name,
+      gender: dto.patient_gender,
+      address_line: dto.patient_address,
+      city: dto.patient_city,
+      state: dto.patient_state,
+      pincode: dto.patient_pincode,
+    });
+    return created.id;
+  }
+
+  /**
+   * Withdraw a booking — the recovery path when someone books under the wrong
+   * family member. Allowed only until the doctor engages with the visit; after
+   * that it is a clinical record, not a mistake to undo.
+   *
+   * Cancelling rather than deleting: only `confirmed` holds a slot (partial
+   * unique index), so the slot frees immediately while the clinic keeps its
+   * record of what happened.
+   */
+  async cancel(
+    appointmentId: string,
+    opts: { profileIds?: string[]; doctorId?: string },
+  ): Promise<Appointment> {
+    const appointment = await this.findRaw(appointmentId);
+
+    // Scope: a patient may only cancel their own account's bookings; a doctor
+    // only their own clinic's.
+    if (
+      opts.profileIds &&
+      (!appointment.patient_profile_id ||
+        !opts.profileIds.includes(appointment.patient_profile_id))
+    ) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Appointment not found.',
+      });
+    }
+    if (opts.doctorId && appointment.doctor_id !== opts.doctorId) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Appointment not found.',
+      });
+    }
+
+    if (appointment.status === AppointmentStatus.CANCELLED) {
+      return appointment; // already withdrawn; cancelling twice is not an error
+    }
+    if (
+      appointment.status !== AppointmentStatus.CONFIRMED ||
+      appointment.consultation_status !== ConsultationStatus.PENDING
+    ) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'This appointment can no longer be cancelled — the doctor has already started on it.',
+      });
+    }
+
+    appointment.status = AppointmentStatus.CANCELLED;
+    await appointment.save();
+
+    // Reports the patient uploaded for this visit go with it. Anything the
+    // clinic uploaded is detached instead — a patient's cancellation must not
+    // destroy the pathlab's work.
+    const own = await this.reportModel.findAll({
+      where: { appointment_id: appointment.id, uploaded_by_user_id: null },
+    });
+    for (const report of own) {
+      await this.storage.delete(report.file_key).catch(() => undefined);
+      await report.destroy();
+    }
+    await this.reportModel.update(
+      { appointment_id: null } as any,
+      { where: { appointment_id: appointment.id } },
+    );
+
+    await this.notifications.create(
+      appointment.patient_mobile,
+      NotificationType.APPOINTMENT_CANCELLED,
+      'Appointment cancelled',
+      `The booking for ${appointment.patient_name} on ${appointment.appointment_date} has been cancelled.`,
+      { appointmentId: appointment.id },
+      appointment.doctor_id,
+      appointment.patient_profile_id,
+    );
+
+    return appointment;
   }
 
   async list(
@@ -370,11 +514,13 @@ export class AppointmentsService {
   }
 
   /**
-   * Prior visits for a patient (matched by mobile, doctor-scoped), each with
-   * the doctor's note + presigned prescription images. Referred to on the
-   * patient's next OPD.
+   * Prior visits for **one patient** — the profile, not the phone number. A
+   * father's visits must never appear under his son's appointment, even though
+   * both were booked from the same mobile.
+   *
+   * Doctor-scoped as well: each doctor is a closed environment.
    */
-  async history(mobile: string, user: AuthUser, excludeId?: string) {
+  async history(profileId: string, user: AuthUser, excludeId?: string) {
     const doctorId = user.doctorId ?? undefined;
     if (!doctorId) return []; // super admin has no clinical scope
 
@@ -388,25 +534,22 @@ export class AppointmentsService {
         before = { date: ref.appointment_date, startTime: ref.start_time };
       }
     }
-    return this.visitsForMobile(mobile, {
-      doctorId: doctorId ?? undefined,
-      before,
-    });
+    return this.visitsForProfile(profileId, { doctorId, before });
   }
 
-  /** All visits for a patient's mobile, unscoped — used by the patient portal. */
-  async patientVisits(mobile: string, doctorId?: string | null) {
-    return this.visitsForMobile(mobile, doctorId ? { doctorId } : {});
+  /** One patient's visits, for the patient portal. */
+  async patientVisits(profileId: string, doctorId?: string | null) {
+    return this.visitsForProfile(profileId, doctorId ? { doctorId } : {});
   }
 
-  private async visitsForMobile(
-    mobile: string,
+  private async visitsForProfile(
+    profileId: string,
     opts: {
       doctorId?: string;
       before?: { date: string; startTime: string };
     } = {},
   ) {
-    const where: any = { patient_mobile: mobile };
+    const where: any = { patient_profile_id: profileId };
     if (opts.doctorId) where.doctor_id = opts.doctorId;
     // Strictly earlier than the reference visit: an earlier date, or the same
     // date at an earlier start time. This also excludes the reference visit
@@ -572,6 +715,9 @@ export class AppointmentsService {
           model: Doctor,
           attributes: ['id', 'name', 'specialization', 'consultation_fee'],
         },
+        // The doctor's header shows the patient code, so two same-named
+        // patients on one number are distinguishable at a glance.
+        { model: PatientProfile },
         ...(withPrescriptions ? [{ model: AppointmentPrescription }] : []),
       ],
     })) as Appointment;

@@ -37,10 +37,72 @@ export interface BookingResult {
   doctorName?: string | null;
 }
 
+export type ProgressStatus = 'improving' | 'stable' | 'worsening' | 'unclear';
+
+export interface ProgressTrend {
+  label: string;
+  previous_value: string;
+  current_value: string;
+  direction: 'up' | 'down' | 'same';
+  interpretation: 'better' | 'worse' | 'unclear';
+}
+
+/** The across-visits picture the doctor reads; also shown to the patient. */
+export interface ProgressSummary {
+  status: ProgressStatus;
+  summary: string;
+  improvements: string[];
+  deteriorations: string[];
+  unchanged: string[];
+  trends: ProgressTrend[];
+  current_status: string;
+  watch_points: string[];
+}
+
+/** The logged-in *account* — a phone number. The people on it are `PatientProfile`s. */
 export interface PatientAuthUser {
   id: string;
   mobile: string;
+}
+
+/**
+ * One person registered on a number. Two of these may share a name and still be
+ * different patients — `id` is the identity, never the name.
+ */
+export interface PatientProfile {
+  id: string;
+  patient_code: string;
   name: string;
+  relation: string | null;
+  gender: string | null;
+  address_line: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  last_age: number | null;
+  last_visit_date: string | null;
+  visit_count: number;
+  /** False once an OPD has been completed — the record is permanent then. */
+  can_delete: boolean;
+}
+
+/** What Step 1 of booking returns for a number. */
+export interface IdentifyResult {
+  accessToken: string;
+  mobile: string;
+  patients: PatientProfile[];
+}
+
+/** The details captured when registering a patient, on any path. */
+export interface PatientDetailsInput {
+  name: string;
+  gender?: string;
+  age?: number;
+  relation?: string;
+  address_line: string;
+  city: string;
+  state: string;
+  pincode: string;
 }
 
 export interface PatientPrescription {
@@ -54,7 +116,7 @@ export interface PatientVisit {
   appointment_date: string;
   start_time: string;
   end_time: string;
-  status: 'confirmed' | 'rejected';
+  status: 'confirmed' | 'rejected' | 'cancelled';
   consultation_status: 'pending' | 'done' | 'on_hold' | 'rejected';
   /** Whether the patient may still upload reports to this visit. */
   accepts_reports: boolean;
@@ -99,7 +161,13 @@ export interface IssuedPrescription {
 
 export interface PatientNotification {
   id: string;
-  type: 'report_available' | 'appointment_reminder' | 'prescription_ready';
+  /** Which patient on the account this concerns; null = the account itself. */
+  patient_profile_id: string | null;
+  type:
+    | 'report_available'
+    | 'appointment_reminder'
+    | 'prescription_ready'
+    | 'appointment_cancelled';
   title: string;
   body: string | null;
   data: Record<string, unknown> | null;

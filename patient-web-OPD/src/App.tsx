@@ -11,6 +11,7 @@ import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { Login } from './pages/patient/Login';
 import { MyVisits } from './pages/patient/MyVisits';
 import { Reports } from './pages/patient/Reports';
+import { Patients } from './pages/patient/Patients';
 import { Notifications } from './pages/patient/Notifications';
 import { Footer } from './components/Footer';
 import { AccountNav } from './components/AccountNav';
@@ -78,6 +79,14 @@ export default function App() {
                   element={
                     <RequirePatientAuth>
                       <Notifications />
+                    </RequirePatientAuth>
+                  }
+                />
+                <Route
+                  path="/patients"
+                  element={
+                    <RequirePatientAuth>
+                      <Patients />
                     </RequirePatientAuth>
                   }
                 />

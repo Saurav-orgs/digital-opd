@@ -142,7 +142,13 @@ class ApiClient {
     required String patientMobile,
     required String patientGender,
     required int patientAge,
-    String? patientAddress,
+    required String patientAddress,
+    required String patientCity,
+    required String patientState,
+    required String patientPincode,
+    /// Which patient on the number. Null registers a new one — an identical
+    /// name is never treated as a match.
+    String? patientProfileId,
     String? description,
   }) =>
       _guard(() async {
@@ -157,8 +163,11 @@ class ApiClient {
             'patient_mobile': patientMobile,
             'patient_gender': patientGender,
             'patient_age': patientAge,
-            if (patientAddress != null && patientAddress.isNotEmpty)
-              'patient_address': patientAddress,
+            if (patientProfileId != null) 'patient_profile_id': patientProfileId,
+            'patient_address': patientAddress,
+            'patient_city': patientCity,
+            'patient_state': patientState,
+            'patient_pincode': patientPincode,
             if (description != null && description.isNotEmpty)
               'description': description,
           }),
@@ -167,14 +176,59 @@ class ApiClient {
       });
 
   // ── Patient auth (phone-only, no OTP) ───────────────────────
-  Future<PatientSession> registerPatient(String mobile, String name,
+
+  /// Booking step 1: the number, which doubles as register-or-login. A number
+  /// nobody has used becomes an account here; no patient is created yet.
+  Future<IdentifyResult> identify(String mobile) => _guard(() async {
+        final res = await http.post(_uri('/patient/auth/identify'),
+            headers: _authHeaders(), body: jsonEncode({'mobile': mobile}));
+        return IdentifyResult.fromJson(_decode(res) as Map<String, dynamic>);
+      });
+
+  /// Register: the number becomes the account, the details become exactly one
+  /// patient on it — the same outcome as booking or a walk-in.
+  Future<PatientSession> registerPatient(String mobile, PatientDetails patient,
           {String? doctorId}) =>
       _guard(() async {
-        final body = {'mobile': mobile, 'name': name};
+        final body = <String, dynamic>{
+          'mobile': mobile,
+          'patient': patient.toJson(),
+        };
         if (doctorId != null) body['doctor_id'] = doctorId;
         final res = await http.post(_uri('/patient/auth/register'),
             headers: _authHeaders(), body: jsonEncode(body));
         return PatientSession.fromJson(_decode(res) as Map<String, dynamic>);
+      });
+
+  // ── Patients on this account ────────────────────────────────
+  Future<List<PatientProfile>> patientProfiles() => _guard(() async {
+        final res =
+            await http.get(_uri('/patient/profiles'), headers: _authHeaders());
+        return (_decode(res) as List)
+            .map((p) => PatientProfile.fromJson(p as Map<String, dynamic>))
+            .toList();
+      });
+
+  Future<PatientProfile> addPatientProfile(PatientDetails patient) =>
+      _guard(() async {
+        final res = await http.post(_uri('/patient/profiles'),
+            headers: _authHeaders(), body: jsonEncode(patient.toJson()));
+        return PatientProfile.fromJson(_decode(res) as Map<String, dynamic>);
+      });
+
+  /// Refused once the patient has a completed OPD — the record is permanent.
+  Future<void> deletePatientProfile(String id) => _guard(() async {
+        final res = await http.delete(_uri('/patient/profiles/$id'),
+            headers: _authHeaders());
+        _decode(res);
+      });
+
+  /// Withdraw a booking — the fix for booking under the wrong family member.
+  Future<void> cancelVisit(String appointmentId) => _guard(() async {
+        final res = await http.delete(
+            _uri('/patient/appointments/$appointmentId'),
+            headers: _authHeaders());
+        _decode(res);
       });
 
   Future<PatientSession> loginPatient(String mobile, {String? doctorId}) =>
@@ -186,26 +240,41 @@ class ApiClient {
         return PatientSession.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
-  Future<AuthPatient> patientMe() => _guard(() async {
-        final res = await http.get(_uri('/patient/auth/me'), headers: _authHeaders());
-        return AuthPatient.fromJson(_decode(res) as Map<String, dynamic>);
+  /// The account plus everyone registered on it.
+  Future<PatientSession> patientMe() => _guard(() async {
+        final res =
+            await http.get(_uri('/patient/auth/me'), headers: _authHeaders());
+        final j = _decode(res) as Map<String, dynamic>;
+        return PatientSession(
+          accessToken: tokens.token ?? '',
+          patient: AuthPatient.fromJson(j),
+          patients: ((j['patients'] ?? []) as List)
+              .map((p) => PatientProfile.fromJson(p as Map<String, dynamic>))
+              .toList(),
+        );
       });
 
   // ── Patient portal ───────────────────────────────────────────
-  Future<List<PatientVisit>> myVisits({String? doctorId}) => _guard(() async {
+  Future<List<PatientVisit>> myVisits(String profileId, {String? doctorId}) =>
+      _guard(() async {
         final res = await http.get(
-            _uri('/patient/appointments',
-                doctorId != null ? {'doctor_id': doctorId} : null),
+            _uri('/patient/appointments', {
+              'profile_id': profileId,
+              if (doctorId != null) 'doctor_id': doctorId,
+            }),
             headers: _authHeaders());
         return (_decode(res) as List)
             .map((v) => PatientVisit.fromJson(v as Map<String, dynamic>))
             .toList();
       });
 
-  Future<List<PatientReport>> myReports({String? doctorId}) => _guard(() async {
+  Future<List<PatientReport>> myReports(String profileId, {String? doctorId}) =>
+      _guard(() async {
         final res = await http.get(
-            _uri('/patient/reports',
-                doctorId != null ? {'doctor_id': doctorId} : null),
+            _uri('/patient/reports', {
+              'profile_id': profileId,
+              if (doctorId != null) 'doctor_id': doctorId,
+            }),
             headers: _authHeaders());
         return (_decode(res) as List)
             .map((r) => PatientReport.fromJson(r as Map<String, dynamic>))

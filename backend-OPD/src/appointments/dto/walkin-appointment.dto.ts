@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -38,6 +39,17 @@ export class WalkInAppointmentDto {
   })
   start_time: string;
 
+  /**
+   * The patient this visit is for, chosen from the pick-list at booking step 2.
+   * Omit it to register a new patient from the details below — an identical
+   * name is never treated as a match, so leaving this out always means "a
+   * different person".
+   */
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  patient_profile_id?: string;
+
   @ApiProperty({ example: 'Ravi Kumar' })
   @IsString()
   @MinLength(2, { message: 'Please enter the patient’s name.' })
@@ -61,11 +73,29 @@ export class WalkInAppointmentDto {
   @Max(120, { message: 'Please enter a valid age.' })
   patient_age: number;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({ example: 'H-42, Nehru Nagar' })
   @IsString()
-  @MaxLength(500)
-  patient_address?: string;
+  @MinLength(3, { message: 'Please enter the address.' })
+  @MaxLength(300)
+  patient_address: string;
+
+  @ApiProperty({ example: 'Indore' })
+  @IsString()
+  @MinLength(2, { message: 'Please enter the city.' })
+  @MaxLength(80)
+  patient_city: string;
+
+  @ApiProperty({ example: 'Madhya Pradesh' })
+  @IsString()
+  @MinLength(2, { message: 'Please enter the state.' })
+  @MaxLength(80)
+  patient_state: string;
+
+  @ApiProperty({ example: '452001' })
+  @Matches(/^[1-9]\d{5}$/, {
+    message: 'Please enter a valid 6-digit PIN code.',
+  })
+  patient_pincode: string;
 
   @ApiPropertyOptional({ description: 'Reason for visit.' })
   @IsOptional()

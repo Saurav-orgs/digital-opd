@@ -41,6 +41,6 @@ export class PatientStrategy extends PassportStrategy(Strategy, 'patient-jwt') {
     if (!patient) {
       throw new AppException(ErrorCode.UNAUTHORIZED);
     }
-    return { id: patient.id, mobile: patient.mobile, name: patient.name };
+    return { id: patient.id, mobile: patient.mobile };
   }
 }

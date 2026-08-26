@@ -5,6 +5,7 @@ import '../auth/patient_scope.dart';
 import '../doctor_context.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/patient_switcher.dart';
 
 /// Lab reports from the clinic, plus anything the patient uploads against a
 /// visit. Uploads happen per-visit under My Visits (allowed until the doctor
@@ -18,18 +19,27 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   Future<List<PatientReport>>? _future;
+  String? _loadedFor;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final id = PatientAuthScope.of(context).selectedProfileId;
+    if (id != null && id != _loadedFor) {
+      _loadedFor = id;
+      _future = _load(id);
+    }
+  }
+
+  Future<List<PatientReport>> _load(String profileId) {
     final doctorId = DoctorContextScope.of(context).doctor?.id;
-    _future ??= PatientAuthScope.of(context).api.myReports(doctorId: doctorId);
+    return PatientAuthScope.of(context).api.myReports(profileId, doctorId: doctorId);
   }
 
   Future<void> _refresh() async {
-    final doctorId = DoctorContextScope.of(context).doctor?.id;
-    setState(() => _future =
-        PatientAuthScope.of(context).api.myReports(doctorId: doctorId));
+    final id = PatientAuthScope.of(context).selectedProfileId;
+    if (id == null) return;
+    setState(() => _future = _load(id));
     await _future;
   }
 
@@ -46,7 +56,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<PatientReport>>(
+      body: RequirePatient(
+        builder: (context, patient) => Column(
+          children: [
+            const PatientSwitcher(),
+            Expanded(child: _reports(patient)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _reports(PatientProfile patient) {
+    return FutureBuilder<List<PatientReport>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -59,11 +81,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
           if (reports.isEmpty) {
             return RefreshIndicator(
               onRefresh: _refresh,
-              child: ListView(children: const [
-                SizedBox(height: 140),
+              child: ListView(children: [
+                const SizedBox(height: 140),
                 StateView(
                     empty:
-                        'No reports yet. Upload one from a visit under My Visits.'),
+                        'No reports yet for ${patient.name}. Upload one from a visit under My Visits.'),
               ]),
             );
           }
@@ -103,8 +125,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
               },
             ),
           );
-        },
-      ),
-    );
+        });
   }
 }

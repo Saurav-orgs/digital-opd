@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { patientApi, patientTokenStore } from '../patientApi';
-import type { Doctor, Slot } from '../types';
+import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
@@ -167,9 +167,19 @@ export const BookingForm: React.FC = () => {
 
   const { patient } = usePatientAuth();
 
-  // Two steps: patient details, then optional reports. The appointment is only
-  // created on the final confirm, since reports must attach to a real visit.
-  const [step, setStep] = useState<1 | 2>(1);
+  /*
+   * Four steps: the number, who the visit is for, their details, then optional
+   * reports. The appointment is only created on the final confirm, since
+   * reports must attach to a real visit.
+   *
+   * Step 2 is skipped whenever the number has nobody on it yet — a first-time
+   * caller should never be shown an empty pick-list.
+   */
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [knownPatients, setKnownPatients] = useState<PatientProfile[] | null>(null);
+  const [identifying, setIdentifying] = useState(false);
+  // null here means "a new patient" — never "look one up by name".
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedReport[]>([]);
   const [reportWarning, setReportWarning] = useState<string | null>(null);
 
@@ -181,10 +191,13 @@ export const BookingForm: React.FC = () => {
   const reportsCardRef = useRef<HTMLDivElement>(null);
 
   const [mobile, setMobile] = useState(patient?.mobile ?? '');
-  const [name, setName] = useState(patient?.name ?? '');
+  const [name, setName] = useState('');
   const [gender, setGender] = useState('');
   const [age, setAge] = useState('');
   const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [stateName, setStateName] = useState('');
+  const [pincode, setPincode] = useState('');
   const [description, setDescription] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -193,6 +206,10 @@ export const BookingForm: React.FC = () => {
   const [nameError, setNameError] = useState<string | null>(null);
   const [genderError, setGenderError] = useState<string | null>(null);
   const [ageError, setAgeError] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [cityError, setCityError] = useState<string | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
+  const [pincodeError, setPincodeError] = useState<string | null>(null);
 
   if (!doctor || !date || !slot) {
     return (
@@ -240,44 +257,106 @@ export const BookingForm: React.FC = () => {
     if (error) setReportWarning(error);
   };
 
-  const validate = () => {
-    let valid = true;
+  const validateMobile = () => {
     const m = mobile.trim();
-    const n = name.trim();
-
     if (!m) {
       setMobileError('Mobile number is required.');
-      valid = false;
-    } else if (!/^[6-9]\d{9}$/.test(m)) {
+      return false;
+    }
+    if (!/^[6-9]\d{9}$/.test(m)) {
       setMobileError('Enter a valid 10-digit mobile number.');
-      valid = false;
-    } else {
-      setMobileError(null);
+      return false;
     }
+    setMobileError(null);
+    return true;
+  };
 
-    if (!n || n.length < 2) {
-      setNameError('Please enter your full name.');
-      valid = false;
-    } else {
-      setNameError(null);
-    }
+  const validateDetails = () => {
+    let valid = true;
+    const check = (
+      ok: boolean,
+      set: (v: string | null) => void,
+      message: string,
+    ) => {
+      set(ok ? null : message);
+      if (!ok) valid = false;
+    };
 
-    if (!gender) {
-      setGenderError('Please select a gender.');
-      valid = false;
-    } else {
-      setGenderError(null);
-    }
+    check(name.trim().length >= 2, setNameError, 'Please enter the patient’s full name.');
+    check(!!gender, setGenderError, 'Please select a gender.');
 
     const ageNum = Number(age);
-    if (!age.trim() || !Number.isInteger(ageNum) || ageNum < 0 || ageNum > 120) {
-      setAgeError('Enter a valid age.');
-      valid = false;
-    } else {
-      setAgeError(null);
-    }
+    check(
+      !!age.trim() && Number.isInteger(ageNum) && ageNum >= 0 && ageNum <= 120,
+      setAgeError,
+      'Enter a valid age.',
+    );
+
+    check(address.trim().length >= 3, setAddressError, 'Please enter the address.');
+    check(city.trim().length >= 2, setCityError, 'Please enter the city.');
+    check(stateName.trim().length >= 2, setStateError, 'Please enter the state.');
+    check(
+      /^[1-9]\d{5}$/.test(pincode.trim()),
+      setPincodeError,
+      'Enter a valid 6-digit PIN code.',
+    );
 
     return valid;
+  };
+
+  /**
+   * Step 1 → find out who is already registered on this number.
+   *
+   * A number nobody has used before is created here as an empty account and
+   * goes straight to the details form; there is nothing to pick from.
+   */
+  const identify = async () => {
+    if (!validateMobile()) return;
+    setIdentifying(true);
+    setFormError(null);
+    try {
+      const res = await patientApi.identify(mobile.trim());
+      setKnownPatients(res.patients);
+      setStep(res.patients.length > 0 ? 2 : 3);
+    } catch (err) {
+      setFormError(
+        err instanceof ApiException
+          ? err.message
+          : 'Could not check this number. Please try again.',
+      );
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
+  /** Chose an existing patient — carry their details forward, still editable. */
+  const choosePatient = (p: PatientProfile) => {
+    setProfileId(p.id);
+    setName(p.name);
+    setGender(p.gender ?? '');
+    setAge(p.last_age != null ? String(p.last_age) : '');
+    setAddress(p.address_line ?? '');
+    setCity(p.city ?? '');
+    setStateName(p.state ?? '');
+    setPincode(p.pincode ?? '');
+    setStep(3);
+  };
+
+  /**
+   * Chose "new patient" — deliberately leaves `profileId` null and the form
+   * blank. Filling in a name that matches an existing patient still creates a
+   * separate record; that is the rule, not an oversight.
+   */
+  const chooseNewPatient = () => {
+    setProfileId(null);
+    setName('');
+    setGender('');
+    setAge('');
+    setAddress('');
+    setCity('');
+    setStateName('');
+    setPincode('');
+    setStep(3);
   };
 
   /**
@@ -354,11 +433,15 @@ export const BookingForm: React.FC = () => {
     e.preventDefault();
     setFormError(null);
 
-    if (!validate()) return;
+    // Step 1 is the number; step 2 is a pick, handled by its own buttons.
+    if (step === 1) return identify();
+    if (step === 2) return;
+
+    if (!validateDetails()) return;
 
     // Details are valid but the patient hasn't seen the reports step yet.
-    if (step === 1) {
-      setStep(2);
+    if (step === 3) {
+      setStep(4);
       return;
     }
 
@@ -381,11 +464,15 @@ export const BookingForm: React.FC = () => {
         doctorId: doctor.id,
         date,
         startTime: slot.startTime,
+        patientProfileId: profileId,
         patientName: name.trim(),
         patientMobile: mobile.trim(),
         patientGender: gender,
         patientAge: Number(age),
         patientAddress: address.trim(),
+        patientCity: city.trim(),
+        patientState: stateName.trim(),
+        patientPincode: pincode.trim(),
         description: description.trim(),
       });
 
@@ -403,11 +490,11 @@ export const BookingForm: React.FC = () => {
           navigate(-1);
         } else {
           setFormError(err.message);
-          setStep(1); // the problem is with the details, so send them back
+          setStep(3); // the problem is with the details, so send them back
         }
       } else {
         setFormError('Something went wrong. Please try again.');
-        setStep(1);
+        setStep(3);
       }
     }
   };
@@ -417,7 +504,14 @@ export const BookingForm: React.FC = () => {
       <div className="booking-header-row">
         <div>
           <div className="step-badge-text">
-            Step {step} of 2 · {step === 1 ? 'Patient Details' : 'Reports (optional)'}
+            Step {step} of 4 ·{' '}
+            {step === 1
+              ? 'Mobile Number'
+              : step === 2
+                ? 'Who is this visit for?'
+                : step === 3
+                  ? 'Patient Details'
+                  : 'Reports (optional)'}
           </div>
           <h2 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
             Complete Your Booking
@@ -428,6 +522,10 @@ export const BookingForm: React.FC = () => {
           type="button"
           className="btn-outlined"
           onClick={() => {
+            // Step 2 only exists when the number had patients on it, so going
+            // back from the details form must skip it otherwise.
+            if (step === 4) return setStep(3);
+            if (step === 3) return setStep(knownPatients?.length ? 2 : 1);
             if (step === 2) return setStep(1);
             window.history.length > 1 ? navigate(-1) : navigate('/');
           }}
@@ -440,27 +538,137 @@ export const BookingForm: React.FC = () => {
 
       <form onSubmit={handleSubmit}>
         <div className="booking-grid">
-          {/* Kept mounted while on step 2 so the typed details survive a Back. */}
-          <div className="section-card" style={{ display: step === 1 ? undefined : 'none' }}>
+          {/* Step 1 — the number. This is also register/login: an unknown
+              number quietly becomes an account, and a known one tells us who
+              is already registered on it. */}
+          {step === 1 && (
+            <div className="section-card">
+              <h3 className="card-section-title">
+                <Phone size={18} color="var(--primary)" />
+                <span>Mobile Number</span>
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -4 }}>
+                We use this to find your existing records, and to reach you about
+                the visit.
+              </p>
+              <div className="form-field">
+                <label className="form-label icon-label">
+                  <Phone size={14} color="var(--text-secondary)" />
+                  <span>Mobile Number *</span>
+                </label>
+                <input
+                  type="tel"
+                  autoFocus
+                  className={'form-input' + (mobileError ? ' error' : '')}
+                  placeholder="10-digit mobile number"
+                  maxLength={10}
+                  value={mobile}
+                  onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void identify();
+                    }
+                  }}
+                />
+                {mobileError && <span className="error-text">{mobileError}</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Step 2 — who the visit is for. Picking a card reuses that
+              patient's record; "New patient" always creates a separate one,
+              even when the name typed next matches an existing patient. */}
+          {step === 2 && (
+            <div className="section-card">
+              <h3 className="card-section-title">
+                <User size={18} color="var(--primary)" />
+                <span>Who is this visit for?</span>
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -4 }}>
+                Choose an existing patient to add this visit to their history, or
+                add a new patient on this number.
+              </p>
+
+              <div style={{ display: 'grid', gap: 10 }}>
+                {(knownPatients ?? []).map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="patient-pick-card"
+                    onClick={() => choosePatient(p)}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{p.name}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                        {[
+                          p.last_age != null ? `${p.last_age} yrs` : null,
+                          p.gender,
+                          p.patient_code,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {p.last_visit_date
+                          ? `Last visit ${p.last_visit_date}`
+                          : 'No visits yet'}
+                      </div>
+                    </div>
+                    <ArrowLeft
+                      size={16}
+                      style={{ transform: 'rotate(180deg)', flexShrink: 0 }}
+                    />
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className="patient-pick-card patient-pick-new"
+                  onClick={chooseNewPatient}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>+ New patient</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      Someone not listed above — a family member on this number
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Kept mounted on the reports step so typed details survive a Back. */}
+          <div
+            className="section-card"
+            style={{ display: step === 3 ? undefined : 'none' }}
+          >
             <h3 className="card-section-title">
               <User size={18} color="var(--primary)" />
               <span>Patient Information</span>
             </h3>
 
-            <div className="form-field">
-              <label className="form-label icon-label">
-                <Phone size={14} color="var(--text-secondary)" />
-                <span>Mobile Number *</span>
-              </label>
-              <input
-                type="tel"
-                className={'form-input' + (mobileError ? ' error' : '')}
-                placeholder="10-digit mobile number"
-                maxLength={10}
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
-              />
-              {mobileError && <span className="error-text">{mobileError}</span>}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                marginBottom: 14,
+              }}
+            >
+              <span>
+                {profileId ? 'Existing patient' : 'New patient'} · {mobile}
+              </span>
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => setStep(knownPatients?.length ? 2 : 1)}
+                style={{ fontSize: 13 }}
+              >
+                Change
+              </button>
             </div>
 
             <div className="form-field">
@@ -518,15 +726,56 @@ export const BookingForm: React.FC = () => {
             <div className="form-field">
               <label className="form-label icon-label">
                 <MapPin size={14} color="var(--text-secondary)" />
-                <span>Residential Address (optional)</span>
+                <span>Address *</span>
               </label>
               <textarea
-                className="form-input"
+                className={'form-input' + (addressError ? ' error' : '')}
                 rows={2}
-                placeholder="Enter city / street address"
+                placeholder="House / street"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
               />
+              {addressError && <span className="error-text">{addressError}</span>}
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px' }}>
+              <div className="form-field" style={{ flex: 1 }}>
+                <label className="form-label">City *</label>
+                <input
+                  type="text"
+                  className={'form-input' + (cityError ? ' error' : '')}
+                  placeholder="City"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                />
+                {cityError && <span className="error-text">{cityError}</span>}
+              </div>
+
+              <div className="form-field" style={{ flex: 1 }}>
+                <label className="form-label">State *</label>
+                <input
+                  type="text"
+                  className={'form-input' + (stateError ? ' error' : '')}
+                  placeholder="State"
+                  value={stateName}
+                  onChange={(e) => setStateName(e.target.value)}
+                />
+                {stateError && <span className="error-text">{stateError}</span>}
+              </div>
+
+              <div className="form-field" style={{ flex: 1 }}>
+                <label className="form-label">PIN Code *</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  className={'form-input' + (pincodeError ? ' error' : '')}
+                  placeholder="452001"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                />
+                {pincodeError && <span className="error-text">{pincodeError}</span>}
+              </div>
             </div>
 
             <div className="form-field" style={{ marginBottom: 0 }}>
@@ -544,7 +793,7 @@ export const BookingForm: React.FC = () => {
             </div>
           </div>
 
-          {step === 2 && (
+          {step === 4 && (
             <div ref={reportsCardRef}>
               <ReportsStep
                 staged={staged}
@@ -598,23 +847,30 @@ export const BookingForm: React.FC = () => {
             )}
 
             <div>
-              <button type="submit" className="btn-primary" disabled={submitting}>
-                {submitting ? (
-                  <div className="spinner" style={{ width: '22px', height: '22px', borderWidth: '2.5px', borderColor: 'rgba(255,255,255,0.4)', borderTopColor: '#fff' }} />
-                ) : step === 1 ? (
-                  <>
-                    <span>Continue</span>
-                    <ArrowRight size={20} />
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 size={20} />
-                    <span>Confirm OPD Appointment</span>
-                  </>
-                )}
-              </button>
+              {/* Step 2 is chosen by tapping a card, so it has no submit. */}
+              {step !== 2 && (
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={submitting || identifying}
+                >
+                  {submitting || identifying ? (
+                    <div className="spinner" style={{ width: '22px', height: '22px', borderWidth: '2.5px', borderColor: 'rgba(255,255,255,0.4)', borderTopColor: '#fff' }} />
+                  ) : step === 4 ? (
+                    <>
+                      <CheckCircle2 size={20} />
+                      <span>Confirm OPD Appointment</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Continue</span>
+                      <ArrowRight size={20} />
+                    </>
+                  )}
+                </button>
+              )}
 
-              {step === 2 && (
+              {step === 4 && (
                 <p
                   style={{
                     margin: '10px 0 0',

@@ -2,8 +2,11 @@ import axios, { AxiosError } from 'axios';
 import { AppConfig } from './config';
 import { ApiException } from './types';
 import type {
+  IdentifyResult,
   PatientAuthUser,
+  PatientDetailsInput,
   PatientNotification,
+  PatientProfile,
   PatientReport,
   PatientVisit,
 } from './types';
@@ -74,27 +77,52 @@ async function unwrap<T>(promise: Promise<{ data: any }>): Promise<T> {
 export interface PatientSession {
   accessToken: string;
   patient: PatientAuthUser;
+  patients?: PatientProfile[];
+}
+
+/** The account plus everyone registered on it. */
+export interface PatientMe extends PatientAuthUser {
+  patients: PatientProfile[];
 }
 
 export const patientApi = {
-  register: (mobile: string, name: string, doctorId?: string | null) =>
+  /**
+   * Booking step 1. The number alone opens the account and tells us who is
+   * already registered on it; no patient is created here.
+   */
+  identify: (mobile: string) =>
+    unwrap<IdentifyResult>(client.post('/patient/auth/identify', { mobile })),
+
+  register: (mobile: string, patient: PatientDetailsInput, doctorId?: string | null) =>
     unwrap<PatientSession>(client.post('/patient/auth/register', {
-      mobile, name, ...(doctorId ? { doctor_id: doctorId } : {}),
+      mobile, patient, ...(doctorId ? { doctor_id: doctorId } : {}),
     })),
   login: (mobile: string, doctorId?: string | null) =>
     unwrap<PatientSession>(client.post('/patient/auth/login', {
       mobile, ...(doctorId ? { doctor_id: doctorId } : {}),
     })),
-  me: () => unwrap<PatientAuthUser>(client.get('/patient/auth/me')),
+  me: () => unwrap<PatientMe>(client.get('/patient/auth/me')),
 
-  myVisits: (doctorId?: string | null) =>
+  // ── The patients on this account ──
+  profiles: () => unwrap<PatientProfile[]>(client.get('/patient/profiles')),
+  addProfile: (patient: PatientDetailsInput) =>
+    unwrap<PatientProfile>(client.post('/patient/profiles', patient)),
+  updateProfile: (id: string, patch: Partial<PatientDetailsInput>) =>
+    unwrap<PatientProfile>(client.patch(`/patient/profiles/${id}`, patch)),
+  deleteProfile: (id: string) =>
+    unwrap<{ ok: boolean }>(client.delete(`/patient/profiles/${id}`)),
+
+  // Every clinical read names the patient — an account may cover a family.
+  myVisits: (profileId: string, doctorId?: string | null) =>
     unwrap<PatientVisit[]>(client.get('/patient/appointments', {
-      params: doctorId ? { doctor_id: doctorId } : undefined,
+      params: { profile_id: profileId, ...(doctorId ? { doctor_id: doctorId } : {}) },
     })),
-  myReports: (doctorId?: string | null) =>
+  myReports: (profileId: string, doctorId?: string | null) =>
     unwrap<PatientReport[]>(client.get('/patient/reports', {
-      params: doctorId ? { doctor_id: doctorId } : undefined,
+      params: { profile_id: profileId, ...(doctorId ? { doctor_id: doctorId } : {}) },
     })),
+  cancelVisit: (appointmentId: string) =>
+    unwrap<{ ok: boolean }>(client.delete(`/patient/appointments/${appointmentId}`)),
   // Upload a report against a specific appointment (allowed until the doctor
   // marks that visit done — the server enforces the cutoff).
   uploadVisitReport: (appointmentId: string, title: string, file: File) => {
@@ -124,9 +152,12 @@ export const patientApi = {
   deleteVisitReport: (reportId: string) =>
     unwrap<{ ok: boolean }>(client.delete(`/patient/reports/${reportId}`)),
 
-  notifications: (doctorId?: string | null) =>
+  notifications: (doctorId?: string | null, profileId?: string | null) =>
     unwrap<PatientNotification[]>(client.get('/patient/notifications', {
-      params: doctorId ? { doctor_id: doctorId } : undefined,
+      params: {
+        ...(doctorId ? { doctor_id: doctorId } : {}),
+        ...(profileId ? { profile_id: profileId } : {}),
+      },
     })),
   unreadCount: () =>
     unwrap<{ count: number }>(client.get('/patient/notifications/unread-count')),

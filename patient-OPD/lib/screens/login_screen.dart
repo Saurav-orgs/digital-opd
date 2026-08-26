@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api/api_client.dart';
+import '../api/models.dart';
 import '../auth/patient_scope.dart';
 import '../doctor_context.dart';
 import '../theme.dart';
@@ -15,7 +16,15 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _mobile = TextEditingController();
+  // Registering creates one patient, so it asks for a patient's full details —
+  // the same set booking and the front desk collect.
   final _name = TextEditingController();
+  final _age = TextEditingController();
+  final _address = TextEditingController();
+  final _city = TextEditingController();
+  final _state = TextEditingController();
+  final _pincode = TextEditingController();
+  String? _gender;
   bool _registerMode = false;
   bool _submitting = false;
   String? _error;
@@ -26,6 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _mobile.dispose();
     _name.dispose();
+    _age.dispose();
+    _address.dispose();
+    _city.dispose();
+    _state.dispose();
+    _pincode.dispose();
     super.dispose();
   }
 
@@ -35,16 +49,31 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = 'Enter a valid 10-digit mobile number.');
       return;
     }
-    if (_registerMode && _name.text.trim().length < 2) {
-      setState(() => _error = 'Please enter your name.');
-      return;
+    if (_registerMode) {
+      final problem = _detailsProblem();
+      if (problem != null) {
+        setState(() => _error = problem);
+        return;
+      }
     }
     setState(() => _submitting = true);
     final auth = PatientAuthScope.of(context);
     final doctorId = DoctorContextScope.of(context).doctor?.id;
     try {
       if (_registerMode) {
-        await auth.register(_mobile.text.trim(), _name.text.trim(), doctorId: doctorId);
+        await auth.register(
+          _mobile.text.trim(),
+          PatientDetails(
+            name: _name.text.trim(),
+            gender: _gender,
+            age: int.tryParse(_age.text.trim()),
+            addressLine: _address.text.trim(),
+            city: _city.text.trim(),
+            state: _state.text.trim(),
+            pincode: _pincode.text.trim(),
+          ),
+          doctorId: doctorId,
+        );
       } else {
         await auth.login(_mobile.text.trim(), doctorId: doctorId);
       }
@@ -53,7 +82,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (e.code == 'PATIENT_NOT_FOUND') {
         setState(() {
           _registerMode = true;
-          _error = 'No account found. Please enter your name to register.';
+          _error =
+              'No patient registered on this number. Add their details to register.';
         });
       } else {
         setState(() => _error = e.message);
@@ -65,10 +95,25 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// The registration form is one patient's details; returns the first problem.
+  String? _detailsProblem() {
+    if (_name.text.trim().length < 2) return 'Please enter the patient\u2019s name.';
+    if (_gender == null) return 'Please select a gender.';
+    final age = int.tryParse(_age.text.trim());
+    if (age == null || age < 0 || age > 120) return 'Enter a valid age.';
+    if (_address.text.trim().length < 3) return 'Please enter the address.';
+    if (_city.text.trim().length < 2) return 'Please enter the city.';
+    if (_state.text.trim().length < 2) return 'Please enter the state.';
+    if (!RegExp(r'^[1-9]\d{5}$').hasMatch(_pincode.text.trim())) {
+      return 'Enter a valid 6-digit PIN code.';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_registerMode ? 'Create account' : 'Login')),
+      appBar: AppBar(title: Text(_registerMode ? 'Register patient' : 'Login')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -79,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(height: 6),
           Text(
             _registerMode
-                ? "We didn't find an account for this number — enter your name to register."
+                ? "We didn't find this number — add the patient's details to register."
                 : 'Use the mobile number you booked your OPD appointment with.',
             style: const TextStyle(color: AppColors.textSecondary),
           ),
@@ -97,7 +142,55 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 14),
             TextField(
               controller: _name,
-              decoration: const InputDecoration(labelText: 'Full name'),
+              decoration:
+                  const InputDecoration(labelText: 'Patient\u2019s full name'),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: _gender,
+              decoration: const InputDecoration(labelText: 'Gender'),
+              items: const [
+                DropdownMenuItem(value: 'male', child: Text('Male')),
+                DropdownMenuItem(value: 'female', child: Text('Female')),
+                DropdownMenuItem(value: 'other', child: Text('Other')),
+              ],
+              onChanged: (v) => setState(() => _gender = v),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _age,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(3),
+              ],
+              decoration: const InputDecoration(labelText: 'Age'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _address,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: 'Address'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _city,
+              decoration: const InputDecoration(labelText: 'City'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _state,
+              decoration: const InputDecoration(labelText: 'State'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _pincode,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(6),
+              ],
+              decoration: const InputDecoration(labelText: 'PIN code'),
             ),
           ],
           if (_error != null) ...[

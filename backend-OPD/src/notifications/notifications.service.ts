@@ -16,9 +16,11 @@ export class NotificationsService {
     body?: string,
     data?: Record<string, unknown>,
     doctorId?: string | null,
+    profileId?: string | null,
   ): Promise<Notification> {
     return this.notificationModel.create({
       patient_mobile: mobile,
+      patient_profile_id: profileId ?? null,
       type,
       title,
       body: body ?? null,
@@ -28,8 +30,17 @@ export class NotificationsService {
     } as any);
   }
 
-  async listForPatient(mobile: string, doctorId?: string | null): Promise<Notification[]> {
+  /**
+   * `profileId` narrows to one family member; omit it for the account-wide
+   * feed, which is what the bell icon shows.
+   */
+  async listForPatient(
+    mobile: string,
+    doctorId?: string | null,
+    profileId?: string | null,
+  ): Promise<Notification[]> {
     const where: any = { patient_mobile: mobile };
+    if (profileId) where.patient_profile_id = profileId;
     if (doctorId) where.doctor_id = doctorId;
     return this.notificationModel.findAll({ where, order: [['created_at', 'DESC']] });
   }

@@ -32,6 +32,7 @@ export class ReportsService {
 
     const report = await this.reportModel.create({
       patient_mobile: dto.mobile,
+      patient_profile_id: dto.patient_profile_id,
       title: dto.title,
       file_key: key,
       uploaded_by_user_id: user.id,
@@ -45,6 +46,7 @@ export class ReportsService {
       `"${dto.title}" has been uploaded and is ready to view.`,
       { reportId: report.id },
       user.doctorId ?? null,
+      dto.patient_profile_id,
     );
 
     // Summarising takes tens of seconds — let the upload return now and fill the
@@ -87,6 +89,8 @@ export class ReportsService {
 
     const report = await this.reportModel.create({
       patient_mobile: patient.mobile,
+      // The visit already knows whose it is; inherit rather than ask.
+      patient_profile_id: appointment.patient_profile_id,
       title,
       file_key: key,
       uploaded_by_user_id: null,
@@ -201,8 +205,13 @@ export class ReportsService {
     }
   }
 
-  async listForMobile(mobile: string, doctorId?: string | null) {
-    const where: any = { patient_mobile: mobile };
+  /**
+   * One patient's reports. Scoped by profile, so a wife's bloodwork never
+   * appears under her husband's record even though both were uploaded against
+   * the same phone number.
+   */
+  async listForProfile(profileId: string, doctorId?: string | null) {
+    const where: any = { patient_profile_id: profileId };
     if (doctorId) where.doctor_id = doctorId;
     const rows = await this.reportModel.findAll({
       where,

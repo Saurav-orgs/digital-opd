@@ -1,10 +1,13 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
-/** The authenticated patient principal attached to the request by the patient-jwt strategy. */
+/**
+ * The authenticated principal — an *account* (a mobile number), not a person.
+ * The people on it are `PatientProfile` rows, so there is deliberately no name
+ * here: every clinical call carries the chosen `profile_id` instead.
+ */
 export interface AuthPatient {
   id: string;
   mobile: string;
-  name: string;
 }
 
 export const CurrentPatient = createParamDecorator(

@@ -9,6 +9,7 @@ export default function DoctorsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editDoctor, setEditDoctor] = useState<Doctor | null>(null);
   const [createdResult, setCreatedResult] = useState<CreateDoctorResult | null>(null);
+  const [resetDoctor, setResetDoctor] = useState<Doctor | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['doctors'],
@@ -57,6 +58,7 @@ export default function DoctorsPage() {
               onRotateQr={() => slugMut.mutate(d.id)}
               rotating={slugMut.isPending && slugMut.variables === d.id}
               onEdit={() => setEditDoctor(d)}
+              onResetPassword={() => setResetDoctor(d)}
               onDelete={() => {
                 if (window.confirm(`Remove Dr. ${d.name}? This cannot be undone.`)) {
                   deleteMut.mutate(d.id);
@@ -90,6 +92,13 @@ export default function DoctorsPage() {
         />
       )}
 
+      {resetDoctor && (
+        <ResetPasswordModal
+          doctor={resetDoctor}
+          onClose={() => setResetDoctor(null)}
+        />
+      )}
+
       {createdResult && (
         <CredentialsModal result={createdResult} onClose={() => setCreatedResult(null)} />
       )}
@@ -103,12 +112,14 @@ function DoctorCard({
   onRotateQr,
   rotating,
   onEdit,
+  onResetPassword,
   onDelete,
   deleting,
 }: {
   doctor: Doctor;
   onToggle: (enable: boolean) => void;
   onRotateQr: () => void;
+  onResetPassword: () => void;
   rotating: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -170,6 +181,13 @@ function DoctorCard({
           onClick={() => navigator.clipboard.writeText(qrUrl)}
         >
           Copy link
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={onResetPassword}
+          title="Set a new login password for this doctor"
+        >
+          Reset password
         </button>
         <button
           className="btn btn-sm"
@@ -421,6 +439,115 @@ function CreateDoctorModal({
             {mut.isPending ? 'Creating…' : 'Create'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldError({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: 4 }}>
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Super admin sets a new password for a doctor's own login.
+ *
+ * Shown once, like the credentials at creation: there is no email delivery in
+ * this deployment, so a locked-out doctor gets back in by the super admin
+ * reading the new password out to them. The doctor can then change it from
+ * their own profile.
+ */
+function ResetPasswordModal({
+  doctor,
+  onClose,
+}: {
+  doctor: Doctor;
+  onClose: () => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [done, setDone] = useState<{ email: string; password: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: () => doctorsApi.resetPassword(doctor.id, password),
+    onSuccess: (res) => setDone(res),
+    onError: (e: unknown) =>
+      setError(
+        (e as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? 'Could not reset the password.',
+      ),
+  });
+
+  const tooShort = password.length > 0 && password.length < 8;
+  const mismatch = confirm.length > 0 && confirm !== password;
+  const canSubmit = password.length >= 8 && confirm === password && !mut.isPending;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        {done ? (
+          <>
+            <h2 style={{ marginBottom: 4 }}>Password reset ✓</h2>
+            <p className="muted" style={{ marginBottom: 16 }}>
+              Give these to {doctor.name} — the password is shown only once.
+            </p>
+            <InfoRow label="Login email" value={done.email} copyable />
+            <InfoRow label="New password" value={done.password} copyable />
+            <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+              Ask them to change it from <strong>My profile</strong> after they
+              sign in.
+            </p>
+            <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+              <button className="btn btn-primary" onClick={onClose}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 style={{ marginBottom: 4 }}>Reset password</h2>
+            <p className="muted" style={{ marginBottom: 16 }}>
+              Sets a new login password for <strong>{doctor.name}</strong>. Their
+              current password stops working immediately.
+            </p>
+
+            <label className="form-label">New password *</label>
+            <input
+              className="input"
+              type="password"
+              autoFocus
+              placeholder="min 8 characters"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(null); }}
+            />
+            {tooShort && <FieldError>Password must be at least 8 characters.</FieldError>}
+
+            <label className="form-label" style={{ marginTop: 12 }}>
+              Confirm password *
+            </label>
+            <input
+              className="input"
+              type="password"
+              value={confirm}
+              onChange={(e) => { setConfirm(e.target.value); setError(null); }}
+            />
+            {mismatch && <FieldError>Passwords do not match.</FieldError>}
+            {error && <FieldError>{error}</FieldError>}
+
+            <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={onClose}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                disabled={!canSubmit}
+                onClick={() => mut.mutate()}
+              >
+                {mut.isPending ? 'Resetting…' : 'Reset password'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

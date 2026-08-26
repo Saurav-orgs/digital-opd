@@ -1,6 +1,13 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsUUID, Matches, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { PatientDetailsDto } from '../../patient-profiles/dto/patient-profile.dto';
 
+/**
+ * Registration is: a number, plus one patient's details. The number becomes the
+ * account and the details become that account's first patient — the same thing
+ * a booking or a walk-in does, so all three paths agree.
+ */
 export class PatientRegisterDto {
   @ApiProperty({ example: '9876543210' })
   @Matches(/^[6-9]\d{9}$/, {
@@ -8,13 +15,13 @@ export class PatientRegisterDto {
   })
   mobile: string;
 
-  @ApiProperty({ example: 'Ravi Kumar' })
-  @MinLength(2, { message: 'Please enter your name.' })
-  @MaxLength(120)
-  name: string;
+  @ApiProperty({ type: PatientDetailsDto })
+  @ValidateNested()
+  @Type(() => PatientDetailsDto)
+  patient: PatientDetailsDto;
 
-  // Tenant context from the doctor's QR/portal. Patients are keyed globally by
-  // mobile, so this is accepted but not required for the account itself.
+  // Tenant context from the doctor's QR/portal. Accounts are keyed globally by
+  // mobile, so this is accepted but not required.
   @ApiPropertyOptional({ example: 'a1b2c3d4-...' })
   @IsOptional()
   @IsUUID()

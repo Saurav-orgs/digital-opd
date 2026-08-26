@@ -23,6 +23,7 @@ export enum NotificationType {
   REPORT_AVAILABLE = 'report_available',
   APPOINTMENT_REMINDER = 'appointment_reminder',
   PRESCRIPTION_READY = 'prescription_ready',
+  APPOINTMENT_CANCELLED = 'appointment_cancelled',
 }
 
 /**
@@ -48,6 +49,12 @@ export enum PermissionAction {
 export enum AppointmentStatus {
   CONFIRMED = 'confirmed',
   REJECTED = 'rejected',
+  /**
+   * Booking withdrawn before the doctor saw it — the patient booked under the
+   * wrong family member, or simply cannot come. Only `confirmed` holds a slot
+   * (partial unique index), so cancelling frees it while keeping the record.
+   */
+  CANCELLED = 'cancelled',
 }
 
 /** Doctor's post-checkup marking. */
@@ -103,4 +110,6 @@ export enum MedicineSource {
 export enum TrainingSampleKind {
   PRESCRIPTION = 'prescription',
   REPORT_SUMMARY = 'report_summary',
+  /** Doctor's correction to the across-visits combined summary. */
+  PROGRESS_SUMMARY = 'progress_summary',
 }

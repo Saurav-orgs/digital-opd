@@ -121,6 +121,12 @@ export interface Appointment {
   patient_gender: string | null;
   patient_age: number | null;
   patient_address: string | null;
+  patient_city: string | null;
+  patient_state: string | null;
+  patient_pincode: string | null;
+  /** Which person on the number this visit is for — the clinical identity. */
+  patient_profile_id: string | null;
+  patientProfile?: PatientProfile | null;
   description: string | null;
   doctor_notes: string | null;
   next_visit_note: string | null;
@@ -138,9 +144,56 @@ export interface Appointment {
   reports_summary_status?: AiJobStatus | null;
   reports_summary_error?: string | null;
   reports_summary_count?: number;
+  // The across-visits picture: how this patient has moved since last time.
+  progress_summary?: ProgressSummary | null;
+  progress_summary_status?: AiJobStatus | null;
+  progress_summary_error?: string | null;
+  progress_summary_visit_count?: number;
   e_prescription?: EPrescription | null;
   createdAt?: string;
   doctor?: Pick<Doctor, 'id' | 'name' | 'specialization' | 'consultation_fee'>;
+}
+
+/** One person registered on a mobile number. Identity is `id`, never the name. */
+export interface PatientProfile {
+  id: string;
+  patient_code: string;
+  name: string;
+  relation: string | null;
+  gender: string | null;
+  address_line: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  last_age: number | null;
+  last_visit_date: string | null;
+  visit_count: number;
+  can_delete: boolean;
+}
+
+export type ProgressStatus = 'improving' | 'stable' | 'worsening' | 'unclear';
+
+export interface ProgressTrend {
+  label: string;
+  previous_value: string;
+  current_value: string;
+  direction: 'up' | 'down' | 'same';
+  interpretation: 'better' | 'worse' | 'unclear';
+}
+
+/**
+ * What changed since the patient's last visit, and where they stand now.
+ * Built by the AI service from the previous visit's summary plus this one's.
+ */
+export interface ProgressSummary {
+  status: ProgressStatus;
+  summary: string;
+  improvements: string[];
+  deteriorations: string[];
+  unchanged: string[];
+  trends: ProgressTrend[];
+  current_status: string;
+  watch_points: string[];
 }
 
 export interface DashboardSummary {

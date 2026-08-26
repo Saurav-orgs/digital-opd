@@ -106,6 +106,90 @@ class ConsolidateResponse(BaseModel):
     model_version: str
 
 
+# ── Across-visit progress ────────────────────────────────────
+
+
+class VisitInput(BaseModel):
+    """One visit's already-computed report summaries."""
+
+    visit_date: str = ""
+    reports: list[ReportSummaryInput] = Field(default_factory=list)
+
+
+class ProgressRequest(BaseModel):
+    patient: "PatientContext | None" = None
+    previous: VisitInput
+    current: VisitInput
+
+
+class ProgressTrend(BaseModel):
+    label: str
+    previous_value: str = ""
+    current_value: str = ""
+    direction: Literal["up", "down", "same"] = "same"
+    # What the movement means clinically — not the same as its direction.
+    interpretation: Literal["better", "worse", "unclear"] = "unclear"
+
+
+class ProgressSummary(BaseModel):
+    status: Literal["improving", "stable", "worsening", "unclear"] = "unclear"
+    summary: str = ""
+    improvements: list[str] = Field(default_factory=list)
+    deteriorations: list[str] = Field(default_factory=list)
+    unchanged: list[str] = Field(default_factory=list)
+    trends: list[ProgressTrend] = Field(default_factory=list)
+    current_status: str = ""
+    watch_points: list[str] = Field(default_factory=list)
+
+    @field_validator("summary", "current_status", mode="before")
+    @classmethod
+    def coerce_text(cls, v: Any) -> str:
+        if isinstance(v, list):
+            return " ".join(str(item) for item in v)
+        return str(v or "")
+
+
+class ProgressResponse(BaseModel):
+    summary: ProgressSummary
+    visit_count: int
+    model_version: str
+
+
+PROGRESS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "status": {
+            "type": "string",
+            "enum": ["improving", "stable", "worsening", "unclear"],
+        },
+        "summary": {"type": "string"},
+        "improvements": {"type": "array", "items": {"type": "string"}},
+        "deteriorations": {"type": "array", "items": {"type": "string"}},
+        "unchanged": {"type": "array", "items": {"type": "string"}},
+        "trends": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "previous_value": {"type": "string"},
+                    "current_value": {"type": "string"},
+                    "direction": {"type": "string", "enum": ["up", "down", "same"]},
+                    "interpretation": {
+                        "type": "string",
+                        "enum": ["better", "worse", "unclear"],
+                    },
+                },
+                "required": ["label", "previous_value", "current_value", "direction"],
+            },
+        },
+        "current_status": {"type": "string"},
+        "watch_points": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["status", "summary", "trends"],
+}
+
+
 # ── Prescription extraction ──────────────────────────────────
 
 

@@ -88,6 +88,18 @@ export class UsersService {
     return this.findOne(id);
   }
 
+  /**
+   * Set a user's password directly. The single place a hash is written outside
+   * create/update, used by the self-service change and the super admin's reset
+   * of a doctor's login.
+   */
+  async setPassword(id: string, password: string): Promise<void> {
+    const user = await this.findOne(id);
+    await user.update({
+      password_hash: await bcrypt.hash(password, 10),
+    } as any);
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findOne(id);
     if (user.type === UserType.SUPER_ADMIN) {

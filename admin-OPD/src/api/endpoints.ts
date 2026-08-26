@@ -15,6 +15,8 @@ import type {
   Role,
   ScheduleEntry,
   User,
+  ProgressSummary,
+  PatientProfile,
 } from './types';
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -22,6 +24,14 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post<LoginResponse>('/auth/login', { email, password }).then((r) => r.data),
   me: () => api.get<AuthUser>('/auth/me').then((r) => r.data),
+  /** Rotate your own password — the current one is required. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api
+      .post<{ ok: boolean }>('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      })
+      .then((r) => r.data),
 };
 
 // ── Users ────────────────────────────────────────────────────
@@ -61,6 +71,17 @@ export const doctorsApi = {
     bio?: string;
     consultation_fee?: number;
   }) => api.post<CreateDoctorResult>('/doctors', body).then((r) => r.data),
+  /**
+   * Super-admin: set a new password on a doctor's own login. Returns it so the
+   * super admin can read it out — there is no email delivery here, so a
+   * locked-out doctor has no other way back in.
+   */
+  resetPassword: (id: string, password: string) =>
+    api
+      .post<{ email: string; password: string }>(`/doctors/${id}/reset-password`, {
+        password,
+      })
+      .then((r) => r.data),
   regenerateSlug: (id: string) =>
     api.post<Doctor & { qrUrl: string }>(`/doctors/${id}/regenerate-slug`).then((r) => r.data),
   update: (id: string, body: Record<string, unknown>) =>
@@ -125,10 +146,13 @@ export const appointmentsApi = {
     range?: 'today' | 'upcoming' | 'previous';
   }) => api.get<Appointment[]>('/appointments', { params }).then((r) => r.data),
   get: (id: string) => api.get<Appointment>(`/appointments/${id}`).then((r) => r.data),
-  history: (mobile: string, excludeId?: string) =>
+  // Scoped to the patient, not the number — a family member's visits must
+  // never appear under someone else's appointment.
+  history: (profileId: string, excludeId?: string) =>
     api
-      .get<Appointment[]>('/appointments/history', { params: { mobile, excludeId } })
+      .get<Appointment[]>('/appointments/history', { params: { profileId, excludeId } })
       .then((r) => r.data),
+  cancel: (id: string) => api.delete(`/appointments/${id}`).then((r) => r.data),
   bookWalkIn: (body: Record<string, unknown>) =>
     api.post<Appointment>('/appointments/walk-in', body).then((r) => r.data),
   reschedule: (id: string, date: string, startTime: string) =>
@@ -225,11 +249,14 @@ export const pathlabsApi = {
 
 // ── Reports ──────────────────────────────────────────────────
 export const reportsApi = {
-  list: (mobile: string) =>
-    api.get<PatientReport[]>('/reports', { params: { mobile } }).then((r) => r.data),
-  upload: (mobile: string, title: string, file: File) => {
+  list: (profileId: string) =>
+    api.get<PatientReport[]>('/reports', { params: { profileId } }).then((r) => r.data),
+  // The patient must be named: one number may cover a whole family, and a
+  // report filed against the wrong member cannot be detected later.
+  upload: (mobile: string, profileId: string, title: string, file: File) => {
     const fd = new FormData();
     fd.append('mobile', mobile);
+    fd.append('patient_profile_id', profileId);
     fd.append('title', title);
     fd.append('file', file);
     return api
@@ -241,4 +268,19 @@ export const reportsApi = {
     api.post(`/reports/${id}/summary/retry`).then((r) => r.data),
   retryVisitSummary: (appointmentId: string) =>
     api.post(`/reports/appointment/${appointmentId}/summary/retry`).then((r) => r.data),
+  retryProgress: (appointmentId: string) =>
+    api.post(`/reports/appointment/${appointmentId}/progress/retry`).then((r) => r.data),
+  /** Save the doctor's corrected trajectory — also captured as training data. */
+  saveProgress: (appointmentId: string, summary: ProgressSummary) =>
+    api
+      .patch<Appointment>(`/reports/appointment/${appointmentId}/progress`, summary)
+      .then((r) => r.data),
+};
+
+// ── Patients on a mobile number ──────────────────────────────
+export const patientProfilesApi = {
+  byMobile: (mobile: string) =>
+    api
+      .get<PatientProfile[]>('/patient-profiles/by-mobile', { params: { mobile } })
+      .then((r) => r.data),
 };

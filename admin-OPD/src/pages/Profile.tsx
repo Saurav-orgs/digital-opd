@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { doctorsApi } from '../api/endpoints';
+import { authApi, doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
@@ -75,7 +75,20 @@ export default function Profile() {
     onError: (e) => toast.error(e),
   });
 
-  if (!isDoctor) return <Empty>This page is for the doctor’s account.</Empty>;
+  if (!isDoctor) {
+    // Staff and the super admin have no doctor profile, but they still need
+    // somewhere to change their own password.
+    return (
+      <>
+        <div className="page-head">
+          <h1>My account</h1>
+        </div>
+        <div style={{ maxWidth: 420 }}>
+          <ChangePasswordCard />
+        </div>
+      </>
+    );
+  }
   if (meQ.isLoading) return <Loading />;
   if (meQ.error) return <Empty>Could not load your profile.</Empty>;
 
@@ -122,6 +135,8 @@ export default function Profile() {
         </div>
 
         <div className="stack">
+          <ChangePasswordCard />
+
           <div className="card">
             <div className="card-title">Profile photo</div>
             {meQ.data?.profile_photo_url ? (
@@ -353,6 +368,85 @@ function LetterheadPreview({
         <div style={{ fontFamily: 'Times, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 22, color: brand }}>Rx</div>
         <div style={{ marginTop: 8 }}>Patient details, medicines and advice appear here.</div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Rotate your own password.
+ *
+ * The current password is required even though you are already signed in — a
+ * session left open on a shared clinic machine should not be enough to lock the
+ * real owner out. A user who has forgotten their password entirely needs the
+ * super admin to reset it from the Doctors screen (or their doctor, from Users).
+ */
+function ChangePasswordCard() {
+  const toast = useToast();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+
+  const change = useMutation({
+    mutationFn: () => authApi.changePassword(current, next),
+    onSuccess: () => {
+      toast.success('Password changed');
+      setCurrent('');
+      setNext('');
+      setConfirm('');
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  const tooShort = next.length > 0 && next.length < 8;
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const canSubmit =
+    current.length > 0 && next.length >= 8 && confirm === next && !change.isPending;
+
+  return (
+    <div className="card">
+      <div className="card-title">Change password</div>
+      <Field label="Current password">
+        <input
+          className="input"
+          type="password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+        />
+      </Field>
+      <Field label="New password">
+        <input
+          className="input"
+          type="password"
+          placeholder="min 8 characters"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+        />
+      </Field>
+      {tooShort && (
+        <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: -6 }}>
+          Password must be at least 8 characters.
+        </p>
+      )}
+      <Field label="Confirm new password">
+        <input
+          className="input"
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+        />
+      </Field>
+      {mismatch && (
+        <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: -6 }}>
+          Passwords do not match.
+        </p>
+      )}
+      <button
+        className="btn btn-primary"
+        disabled={!canSubmit}
+        onClick={() => change.mutate()}
+      >
+        {change.isPending ? 'Changing…' : 'Change password'}
+      </button>
     </div>
   );
 }

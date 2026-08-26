@@ -4,7 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { Patient } from '../database/models/patient.model';
-import { Appointment } from '../database/models/appointment.model';
+import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
 import { PatientAuthService } from './patient-auth.service';
 import { PatientAuthController } from './patient-auth.controller';
 import { PatientStrategy } from './patient.strategy';
@@ -12,7 +12,8 @@ import { PatientAuthGuard } from './patient-auth.guard';
 
 @Module({
   imports: [
-    SequelizeModule.forFeature([Patient, Appointment]),
+    SequelizeModule.forFeature([Patient]),
+    PatientProfilesModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

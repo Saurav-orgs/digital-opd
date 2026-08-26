@@ -4,12 +4,23 @@ import { FileText, ExternalLink } from 'lucide-react';
 import { patientApi } from '../../patientApi';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
+import { PatientSwitcher, RequirePatient } from '../../components/PatientSwitcher';
+import { usePatientAuth } from '../../auth/PatientAuthContext';
 
-export const Reports: React.FC = () => {
+export const Reports: React.FC = () => (
+  <RequirePatient>
+    <ReportsForPatient />
+  </RequirePatient>
+);
+
+const ReportsForPatient: React.FC = () => {
   const { doctor } = useDoctorCtx();
+  const { selected } = usePatientAuth();
+  const profileId = selected!.id;
+
   const { data: reports, isLoading, error, refetch } = useQuery({
-    queryKey: ['patient-reports', doctor?.id],
-    queryFn: () => patientApi.myReports(doctor?.id),
+    queryKey: ['patient-reports', profileId, doctor?.id],
+    queryFn: () => patientApi.myReports(profileId, doctor?.id),
   });
 
   return (
@@ -17,10 +28,13 @@ export const Reports: React.FC = () => {
       <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text)', margin: '0 0 4px' }}>
         My Reports
       </h2>
-      <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-        Lab reports from the clinic, plus anything you upload against a visit. To add a
-        report, open the visit under <strong>My Visits</strong> and upload it there.
+      <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+        {selected!.name}'s lab reports from the clinic, plus anything uploaded against a
+        visit. To add a report, open the visit under <strong>My Visits</strong> and
+        upload it there.
       </p>
+
+      <PatientSwitcher />
 
       {isLoading ? (
         <StateView loading />

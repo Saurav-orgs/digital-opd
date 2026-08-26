@@ -115,6 +115,41 @@ export class DoctorsService {
   }
 
   /**
+   * Reset a doctor's own login password.
+   *
+   * The gap this closes: a doctor's password is set once at creation and never
+   * again, so a doctor who forgets theirs is locked out with no way back —
+   * there is no email delivery in this deployment to send a reset link. The
+   * super admin sets a new one and reads it out to them, exactly as they do
+   * with the temporary password at creation.
+   *
+   * Only the doctor's *own* account is touched. Staff the doctor added have
+   * their passwords reset from the Users screen instead.
+   */
+  async resetLoginPassword(
+    doctorId: string,
+    password: string,
+  ): Promise<{ email: string; password: string }> {
+    const doctor = await this.getOrFail(doctorId);
+
+    const login = await this.userModel.findOne({
+      where: { doctor_id: doctor.id, type: UserType.DOCTOR },
+      order: [['created_at', 'ASC']],
+    });
+    if (!login) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'This doctor has no login account to reset.',
+      });
+    }
+
+    // Same cost factor as `createTenant` writes at creation.
+    await login.update({
+      password_hash: await bcrypt.hash(password, 10),
+    } as any);
+    return { email: login.email, password };
+  }
+
+  /**
    * Creates a new doctor tenant in a single transaction:
    *   1. Doctor profile + public QR slug.
    *   2. Two tenant roles: Doctor (all clinical) and Pathlab (reports only).

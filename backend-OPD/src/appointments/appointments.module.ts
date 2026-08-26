@@ -7,10 +7,12 @@ import { Appointment } from '../database/models/appointment.model';
 import { AppointmentPrescription } from '../database/models/prescription.model';
 import { PatientReport } from '../database/models/patient-report.model';
 import { Doctor } from '../database/models/doctor.model';
+import { PatientProfile } from '../database/models/patient-profile.model';
 import { SlotsModule } from '../slots/slots.module';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
+import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
 
 @Module({
   imports: [
@@ -19,6 +21,7 @@ import { ConsultationsModule } from '../consultations/consultations.module';
       AppointmentPrescription,
       PatientReport,
       Doctor,
+      PatientProfile,
     ]),
     SlotsModule,
     DoctorsModule,
@@ -26,6 +29,8 @@ import { ConsultationsModule } from '../consultations/consultations.module';
     // Provides PrescriptionsService so a visit can carry its issued
     // prescription without duplicating the projection logic.
     ConsultationsModule,
+    // Booking resolves which patient on the number the visit is for.
+    PatientProfilesModule,
   ],
   controllers: [AppointmentsController, PublicController],
   providers: [AppointmentsService],

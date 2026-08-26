@@ -393,7 +393,10 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
             }
             // Load this patient's prior visits once (matched by mobile).
             _history ??=
-                _api.appointmentHistory(a.patientMobile, excludeId: a.id);
+                a.patientProfileId == null
+                    ? Future.value(<Appointment>[])
+                    : _api.appointmentHistory(a.patientProfileId!,
+                        excludeId: a.id);
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -816,9 +819,13 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
     );
   }
 
-  /// Combined summary across every report for this visit — the doctor reads
-  /// this first. Hidden when there's nothing combined to show (0-1 reports).
+  /// The summary card the doctor reads first.
+  ///
+  /// When the patient has an earlier visit, the across-visits comparison is the
+  /// more useful read and already folds this visit's reports into it. A first
+  /// visit falls back to the plain across-reports summary.
   Widget _visitSummary(Appointment a) {
+    if (a.progressSummaryStatus != null) return _progressSummary(a);
     final status = a.reportsSummaryStatus;
     if (a.reports.length < 2 && status != 'ready') return const SizedBox.shrink();
 
@@ -878,6 +885,196 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
           ),
           const SizedBox(height: 6),
           body,
+        ],
+      ),
+    );
+  }
+
+
+  /// How this patient has moved since their last visit.
+  ///
+  /// Leads with the one-word verdict and the value-by-value table — only
+  /// measurements recorded at *both* visits appear there, so a comparison the
+  /// reports cannot support never reaches the doctor.
+  Widget _progressSummary(Appointment a) {
+    final status = a.progressSummaryStatus;
+    final p = a.progressSummary;
+
+    Widget body;
+    if (status == 'processing' || status == 'pending') {
+      body = const Text('Comparing against the previous visit…',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5));
+    } else if (status == 'failed') {
+      body = Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Couldn’t compare with the last visit.'
+              '${a.progressSummaryError != null ? ' ${a.progressSummaryError}' : ''}',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12.5),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              try {
+                await _api.retryProgressSummary(widget.id);
+                if (mounted) {
+                  showSuccessSnack(context, 'Comparing again…');
+                  setState(() => _future = _api.getAppointment(widget.id));
+                }
+              } on ApiException catch (e) {
+                if (mounted) showErrorSnack(context, e.message);
+              }
+            },
+            child: const Text('Retry'),
+          ),
+        ],
+      );
+    } else if (p != null) {
+      body = _progressBody(p);
+    } else {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryTint,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('Since the last visit',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+              if (p != null) ...[
+                const SizedBox(width: 8),
+                _statusChip(p.status),
+              ],
+              if (a.progressSummaryVisitCount > 1) ...[
+                const SizedBox(width: 8),
+                Text('across ${a.progressSummaryVisitCount} visits',
+                    style: const TextStyle(
+                        color: AppColors.textSecondary, fontSize: 11.5)),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          body,
+        ],
+      ),
+    );
+  }
+
+  static const _statusColors = {
+    'improving': (Color(0xFFDCFCE7), Color(0xFF166534), 'Improving'),
+    'stable': (Color(0xFFE5EDFF), Color(0xFF1D4ED8), 'Stable'),
+    'worsening': (Color(0xFFFDECEC), Color(0xFFB91C1C), 'Worsening'),
+    'unclear': (Color(0xFFF1F1F1), Color(0xFF525252), 'Not comparable'),
+  };
+
+  Widget _statusChip(String status) {
+    final (bg, fg, label) = _statusColors[status] ?? _statusColors['unclear']!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label,
+          style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _progressBody(ProgressSummary p) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(p.summary, style: const TextStyle(fontSize: 13)),
+        if (p.trends.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          for (final t in p.trends) _trendRow(t),
+        ],
+        for (final entry in [
+          ('Improved', p.improvements, const Color(0xFF166534)),
+          ('Worse', p.deteriorations, const Color(0xFFB91C1C)),
+        ])
+          if (entry.$2.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(entry.$1,
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w700, color: entry.$3)),
+            for (final line in entry.$2)
+              Padding(
+                padding: const EdgeInsets.only(left: 8, top: 2),
+                child: Text('• $line', style: const TextStyle(fontSize: 12.5)),
+              ),
+          ],
+        if (p.currentStatus.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Where they stand: ${p.currentStatus}',
+              style: const TextStyle(fontSize: 12.5)),
+        ],
+        if (p.watchPoints.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Text('Watch',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          for (final w in p.watchPoints)
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 2),
+              child: Text('• $w', style: const TextStyle(fontSize: 12.5)),
+            ),
+        ],
+        const SizedBox(height: 8),
+        const Text(
+          'AI-generated from the report summaries — check the reports before '
+          'acting. Only measurements recorded at both visits are compared.',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  Widget _trendRow(ProgressTrend t) {
+    final arrow = switch (t.direction) {
+      'up' => '↑',
+      'down' => '↓',
+      _ => '→',
+    };
+    final tone = switch (t.interpretation) {
+      'better' => const Color(0xFF166534),
+      'worse' => const Color(0xFFB91C1C),
+      _ => AppColors.textSecondary,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
+        children: [
+          Expanded(flex: 4, child: Text(t.label, style: const TextStyle(fontSize: 12.5))),
+          Expanded(
+            flex: 3,
+            child: Text(t.previousValue,
+                style: const TextStyle(
+                    fontSize: 12.5, color: AppColors.textSecondary)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(t.currentValue,
+                style: const TextStyle(
+                    fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              '$arrow ${t.interpretation == 'unclear' ? '' : t.interpretation}',
+              style: TextStyle(fontSize: 12, color: tone),
+            ),
+          ),
         ],
       ),
     );
@@ -960,8 +1157,24 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
                     SizedBox(width: colWidth, child: _detailItem('Gender & age', _genderAge(a))),
                   SizedBox(width: colWidth, child: _detailItem('Booking', a.isWalkIn ? 'Walk-in' : (a.source == 'app' ? 'Mobile App' : 'Web Booking'))),
                   SizedBox(width: colWidth, child: _detailItem('Schedule', '${a.appointmentDate} (${a.startTime}–${a.endTime})')),
+                  if (a.patientProfile != null)
+                    SizedBox(
+                        width: colWidth,
+                        child: _detailItem('Patient ID',
+                            a.patientProfile!.patientCode)),
                   if (a.patientAddress != null && a.patientAddress!.isNotEmpty)
-                    SizedBox(width: colWidth, child: _detailItem('Address', a.patientAddress!)),
+                    SizedBox(
+                      width: colWidth,
+                      child: _detailItem(
+                        'Address',
+                        [
+                          a.patientAddress,
+                          a.patientCity,
+                          a.patientState,
+                          a.patientPincode,
+                        ].where((x) => x != null && x.isNotEmpty).join(', '),
+                      ),
+                    ),
                   if (a.description != null && a.description!.isNotEmpty)
                     SizedBox(width: colWidth, child: _detailItem('Reason', a.description!)),
                 ],
@@ -1108,6 +1321,20 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
               child: Text('No notes or prescriptions recorded.',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
             ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              // Opens that visit in full — its own reports and its own
+              // summary, which the doctor often wants rather than just the note.
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AppointmentDetailScreen(id: h.id),
+                ),
+              ),
+              child: const Text('Open this visit'),
+            ),
+          ),
         ],
       ),
     );

@@ -9,6 +9,7 @@ import {
 import { User } from './user.model';
 import { Appointment } from './appointment.model';
 import { Doctor } from './doctor.model';
+import { PatientProfile } from './patient-profile.model';
 import { AiJobStatus } from '../../common/enums';
 
 /** Structured summary produced by the local AI service. */
@@ -38,6 +39,15 @@ export class PatientReport extends Model<PatientReport> {
   })
   id: string;
 
+  /** Which person the report belongs to — the scoping key. */
+  @ForeignKey(() => PatientProfile)
+  @Column({ type: DataType.UUID, allowNull: true })
+  patient_profile_id: string | null;
+
+  @BelongsTo(() => PatientProfile)
+  patientProfile: PatientProfile;
+
+  /** Kept for front-desk search; no longer the identity. */
   @Column({ type: DataType.STRING, allowNull: false })
   patient_mobile: string;
 

@@ -86,29 +86,154 @@ class DaySlots {
       };
 }
 
+/// The logged-in *account* — a mobile number, not a person. The people on it
+/// are [PatientProfile]s.
 class AuthPatient {
   final String id;
   final String mobile;
-  final String name;
 
-  AuthPatient({required this.id, required this.mobile, required this.name});
+  AuthPatient({required this.id, required this.mobile});
 
   factory AuthPatient.fromJson(Map<String, dynamic> j) => AuthPatient(
         id: j['id'] as String,
         mobile: j['mobile'] as String,
-        name: j['name'] as String,
       );
+}
+
+/// One person registered on a number.
+///
+/// Identity is [id], never [name]: two profiles on the same account may share a
+/// name and are still different patients. Nothing is matched by name at
+/// runtime — the patient picks a profile, or gets a new one.
+class PatientProfile {
+  final String id;
+  final String patientCode;
+  final String name;
+  final String? relation;
+  final String? gender;
+  final String? addressLine;
+  final String? city;
+  final String? state;
+  final String? pincode;
+  final int? lastAge;
+  final String? lastVisitDate;
+  final int visitCount;
+
+  /// False once an OPD has been completed — the record is permanent then.
+  final bool canDelete;
+
+  PatientProfile({
+    required this.id,
+    required this.patientCode,
+    required this.name,
+    this.relation,
+    this.gender,
+    this.addressLine,
+    this.city,
+    this.state,
+    this.pincode,
+    this.lastAge,
+    this.lastVisitDate,
+    this.visitCount = 0,
+    this.canDelete = true,
+  });
+
+  factory PatientProfile.fromJson(Map<String, dynamic> j) => PatientProfile(
+        id: j['id'] as String,
+        patientCode: (j['patient_code'] ?? '') as String,
+        name: (j['name'] ?? '') as String,
+        relation: j['relation'] as String?,
+        gender: j['gender'] as String?,
+        addressLine: j['address_line'] as String?,
+        city: j['city'] as String?,
+        state: j['state'] as String?,
+        pincode: j['pincode'] as String?,
+        lastAge: j['last_age'] as int?,
+        lastVisitDate: j['last_visit_date'] as String?,
+        visitCount: (j['visit_count'] ?? 0) as int,
+        canDelete: (j['can_delete'] ?? true) as bool,
+      );
+
+  /// "34 yrs · male · PT-7K3M9Q" — what the pick-list shows under the name.
+  String get subtitle => [
+        if (lastAge != null) '$lastAge yrs',
+        if (gender != null && gender!.isNotEmpty) gender,
+        patientCode,
+      ].join(' · ');
+}
+
+/// The details captured when registering a patient, on any path.
+class PatientDetails {
+  final String name;
+  final String? gender;
+  final int? age;
+  final String? relation;
+  final String addressLine;
+  final String city;
+  final String state;
+  final String pincode;
+
+  PatientDetails({
+    required this.name,
+    this.gender,
+    this.age,
+    this.relation,
+    required this.addressLine,
+    required this.city,
+    required this.state,
+    required this.pincode,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        if (gender != null && gender!.isNotEmpty) 'gender': gender,
+        if (age != null) 'age': age,
+        if (relation != null && relation!.isNotEmpty) 'relation': relation,
+        'address_line': addressLine,
+        'city': city,
+        'state': state,
+        'pincode': pincode,
+      };
 }
 
 class PatientSession {
   final String accessToken;
   final AuthPatient patient;
+  final List<PatientProfile> patients;
 
-  PatientSession({required this.accessToken, required this.patient});
+  PatientSession({
+    required this.accessToken,
+    required this.patient,
+    this.patients = const [],
+  });
 
   factory PatientSession.fromJson(Map<String, dynamic> j) => PatientSession(
         accessToken: j['accessToken'] as String,
         patient: AuthPatient.fromJson(j['patient'] as Map<String, dynamic>),
+        patients: ((j['patients'] ?? []) as List)
+            .map((p) => PatientProfile.fromJson(p as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// What booking step 1 returns for a number.
+class IdentifyResult {
+  final String accessToken;
+  final String mobile;
+  final List<PatientProfile> patients;
+
+  IdentifyResult({
+    required this.accessToken,
+    required this.mobile,
+    required this.patients,
+  });
+
+  factory IdentifyResult.fromJson(Map<String, dynamic> j) => IdentifyResult(
+        accessToken: j['accessToken'] as String,
+        mobile: (j['mobile'] ?? '') as String,
+        patients: ((j['patients'] ?? []) as List)
+            .map((p) => PatientProfile.fromJson(p as Map<String, dynamic>))
+            .toList(),
       );
 }
 

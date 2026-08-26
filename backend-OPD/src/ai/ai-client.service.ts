@@ -33,6 +33,42 @@ export interface AiDraftPrescription {
   follow_up_days?: number | null;
 }
 
+export interface AiProgressTrend {
+  label: string;
+  previous_value: string;
+  current_value: string;
+  direction: 'up' | 'down' | 'same';
+  interpretation: 'better' | 'worse' | 'unclear';
+}
+
+export interface AiProgressSummary {
+  status: 'improving' | 'stable' | 'worsening' | 'unclear';
+  summary: string;
+  improvements: string[];
+  deteriorations: string[];
+  unchanged: string[];
+  trends: AiProgressTrend[];
+  current_status: string;
+  watch_points: string[];
+}
+
+export interface AiProgressResult {
+  summary: AiProgressSummary;
+  visit_count: number;
+  model_version: string;
+}
+
+/** One visit's already-computed report summaries, as sent for comparison. */
+export interface AiVisitInput {
+  visit_date: string;
+  reports: {
+    title: string;
+    summary: string;
+    key_findings: string[];
+    abnormal_values: AiAbnormalValue[];
+  }[];
+}
+
 export interface AiConsolidatedSummary {
   summary: AiReportSummary;
   source_count: number;
@@ -140,6 +176,31 @@ export class AiClientService {
     });
 
     return this.parse<AiConsolidatedSummary>(res, '/summarize-reports');
+  }
+
+  /**
+   * Compare the patient's previous visit against this one. Text in, text out —
+   * both visits arrive already summarised, so there is no OCR and this is far
+   * quicker than summarising a report.
+   */
+  async summarizeProgress(body: {
+    patient: { age?: number | null; gender?: string };
+    previous: AiVisitInput;
+    current: AiVisitInput;
+  }): Promise<AiProgressResult> {
+    const res = await this.fetchWithTimeout(
+      `${this.baseUrl}/summarize-progress`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      this.requestTimeoutMs,
+    ).catch((err) => {
+      throw this.unreachable(err);
+    });
+
+    return this.parse<AiProgressResult>(res, '/summarize-progress');
   }
 
   /** Draft a prescription from a consultation transcript. */

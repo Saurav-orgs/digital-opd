@@ -8,6 +8,7 @@ import { ScheduleException } from './schedule-exception.model';
 import { Appointment } from './appointment.model';
 import { AppointmentPrescription } from './prescription.model';
 import { Patient } from './patient.model';
+import { PatientProfile } from './patient-profile.model';
 import { PatientReport } from './patient-report.model';
 import { Notification } from './notification.model';
 import { ConsultationSession } from './consultation-session.model';
@@ -27,6 +28,7 @@ export const models = [
   Appointment,
   AppointmentPrescription,
   Patient,
+  PatientProfile,
   PatientReport,
   Notification,
   ConsultationSession,
@@ -47,6 +49,7 @@ export {
   Appointment,
   AppointmentPrescription,
   Patient,
+  PatientProfile,
   PatientReport,
   Notification,
   ConsultationSession,

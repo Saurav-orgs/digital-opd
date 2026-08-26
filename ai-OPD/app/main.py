@@ -24,9 +24,11 @@ from .spellfix import speller
 from .config import settings
 from .prompts import consolidate as consolidate_prompt
 from .prompts import prescription as prescription_prompt
+from .prompts import progress as progress_prompt
 from .prompts import report_summary as report_prompt
 from .schemas import (
     PRESCRIPTION_JSON_SCHEMA,
+    PROGRESS_JSON_SCHEMA,
     REPORT_SUMMARY_JSON_SCHEMA,
     ConsolidateRequest,
     ConsolidateResponse,
@@ -34,6 +36,10 @@ from .schemas import (
     ExtractPrescriptionRequest,
     ExtractPrescriptionResponse,
     HealthResponse,
+    ProgressRequest,
+    ProgressResponse,
+    ProgressSummary,
+    ProgressTrend,
     ReportSummary,
     SummarizeReportResponse,
     TranscribeResponse,
@@ -301,8 +307,19 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
                 user=consolidate_prompt.build_user(payload),
                 schema=REPORT_SUMMARY_JSON_SCHEMA,
             )
-        except llm.LlmError as err:
-            raise HTTPException(503, str(err)) from err
+        except Exception as err:
+            log.warning("Consolidate LLM failed (%s), falling back to deterministic consolidation.", err)
+            combined_summary_parts = [r.summary.strip() for r in reports if (r.summary or "").strip()]
+            combined_findings = []
+            for r in reports:
+                combined_findings.extend(r.key_findings)
+            raw = {
+                "summary": " ".join(combined_summary_parts),
+                "key_findings": combined_findings[:8],
+                "abnormal_values": [],
+                "report_type": "Consolidated Reports",
+                "title": f"Combined Summary ({len(reports)} reports)",
+            }
 
     # Preserve all authoritative abnormal values across all source reports
     collected_abnormals = []
@@ -320,6 +337,201 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
         summary=ReportSummary.model_validate(raw),
         source_count=len(reports),
         model_version=settings.model_version,
+    )
+
+
+def _numeric(value: str) -> float | None:
+    """Leading number in a value like '11.4 g/dL'. None when there isn't one."""
+    m = re.search(r"-?\d+(?:\.\d+)?", value or "")
+    return float(m.group()) if m else None
+
+
+def _flag_map(visit) -> dict[str, tuple[str, str, str]]:
+    """Measurements of one visit, keyed lowercase for cross-visit matching.
+
+    Value is (printed label, value, high|low|abnormal|normal) — the printed
+    label is kept so the trends table shows the lab's own spelling rather than a
+    lowercased one.
+    """
+    out: dict[str, tuple[str, str, str]] = {}
+    for r in visit.reports:
+        for a in r.abnormal_values:
+            label = (a.label or "").strip()
+            if label:
+                out[label.lower()] = (
+                    label,
+                    a.value or "",
+                    a.direction or "abnormal",
+                )
+    return out
+
+
+def _interpret(
+    before_flag: str, after_flag: str, direction: str, model_said: str | None
+) -> str:
+    """Is this movement good or bad for the patient?
+
+    Derived from the lab's own out-of-range flags rather than asked of the
+    model: a low value rising is moving toward its range, a high value rising is
+    moving away from it. That is arithmetic, not medical knowledge, and models
+    routinely leave this field out — which would strip the trends table of the
+    one thing the doctor actually reads it for.
+
+    The model's answer is used only where the flags cannot decide.
+    """
+    if after_flag == "normal" and before_flag != "normal":
+        return "better"
+    if before_flag == "normal" and after_flag != "normal":
+        return "worse"
+    if direction == "same":
+        return "unclear"
+    if before_flag == "low":
+        return "better" if direction == "up" else "worse"
+    if before_flag == "high":
+        return "better" if direction == "down" else "worse"
+    return model_said or "unclear"
+
+
+def _derive_status(trends: list[ProgressTrend], model_status: str) -> str:
+    """Keep the headline consistent with the table underneath it.
+
+    A chip reading "improving" above a table of worsening values is worse than
+    no chip at all. Unanimous trends decide it outright; a genuinely mixed
+    picture needs weighing that only the model can do, so its verdict stands.
+    """
+    if not trends:
+        return "unclear"
+    better = sum(1 for t in trends if t.interpretation == "better")
+    worse = sum(1 for t in trends if t.interpretation == "worse")
+    if better and not worse:
+        return "improving"
+    if worse and not better:
+        return "worsening"
+    if not better and not worse:
+        return "unclear"
+    return model_status if model_status in ("improving", "worsening", "stable") else "stable"
+
+
+def _ground_trends(summary: ProgressSummary, previous, current) -> ProgressSummary:
+    """Rebuild the trends table from the data rather than trusting the model.
+
+    Which measurements can be compared, and what their two values are, is a fact
+    about the reports — not a judgement. Deriving it here means the table is
+    always complete (models routinely return it empty) and can never contain a
+    comparison that did not happen, which is the one output on this page capable
+    of actively misleading a doctor.
+
+    The model is still the source of `interpretation`: whether a rise is good or
+    bad is medical knowledge, not arithmetic. Anything it did not label is left
+    "unclear" rather than guessed.
+    """
+    prev_flags = _flag_map(previous)
+    curr_flags = _flag_map(current)
+    # Everything measured at both visits, in the current visit's spelling.
+    keys = [k for k in curr_flags if k in prev_flags]
+
+    said = {t.label.strip().lower(): t for t in summary.trends}
+    invented = [
+        t.label for t in summary.trends if t.label.strip().lower() not in keys
+    ]
+    if invented:
+        log.warning("Discarded invented trend(s): %s", ", ".join(invented))
+
+    rebuilt: list[ProgressTrend] = []
+    for key in keys:
+        _, prev_value, prev_flag = prev_flags[key]
+        label, curr_value, curr_flag = curr_flags[key]
+
+        before, after = _numeric(prev_value), _numeric(curr_value)
+        if before is None or after is None or after == before:
+            direction = "same"
+        else:
+            direction = "up" if after > before else "down"
+
+        hit = said.get(key)
+        rebuilt.append(
+            ProgressTrend(
+                label=label,
+                previous_value=prev_value,
+                current_value=curr_value,
+                direction=direction,
+                interpretation=_interpret(
+                    prev_flag,
+                    curr_flag,
+                    direction,
+                    hit.interpretation if hit else None,
+                ),
+            )
+        )
+
+    summary.trends = rebuilt
+    summary.status = _derive_status(rebuilt, summary.status)
+    return summary
+
+
+@app.post("/summarize-progress", response_model=ProgressResponse)
+async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
+    """Compare the previous visit against the current one.
+
+    Both visits arrive as already-computed summaries, so this is text-in,
+    text-out — no OCR, and much faster than /summarize-report.
+    """
+    previous_reports = [r for r in body.previous.reports if (r.summary or "").strip()]
+    current_reports = [r for r in body.current.reports if (r.summary or "").strip()]
+    if not previous_reports or not current_reports:
+        raise HTTPException(
+            422, "Both a previous and a current visit summary are required."
+        )
+
+    def payload(reports):
+        return [
+            {
+                "title": r.title,
+                "summary": r.summary,
+                "key_findings": r.key_findings,
+                "abnormal_values": [a.model_dump() for a in r.abnormal_values],
+            }
+            for r in reports
+        ]
+
+    user = progress_prompt.build_user(
+        (body.patient.model_dump() if body.patient else {}),
+        {"visit_date": body.previous.visit_date, "reports": payload(previous_reports)},
+        {"visit_date": body.current.visit_date, "reports": payload(current_reports)},
+    )
+
+    raw = None
+    if settings.gemini_enabled and settings.gemini_api_key:
+        try:
+            raw = await gemini_llm.generate_json(
+                system=progress_prompt.SYSTEM,
+                user=user,
+                schema=PROGRESS_JSON_SCHEMA,
+            )
+        except Exception as gemini_err:
+            log.warning(
+                "Gemini progress summary failed (%s), falling back to local LLM.",
+                gemini_err,
+            )
+
+    if raw is None:
+        try:
+            raw = await llm.generate_json(
+                system=progress_prompt.SYSTEM,
+                user=user,
+                schema=PROGRESS_JSON_SCHEMA,
+            )
+        except llm.LlmError as err:
+            raise HTTPException(503, str(err)) from err
+
+    summary = _ground_trends(
+        ProgressSummary.model_validate(raw), body.previous, body.current
+    )
+
+    return ProgressResponse(
+        summary=summary,
+        visit_count=2,
+        model_version=f"{settings.model_version}+{progress_prompt.VERSION}",
     )
 
 

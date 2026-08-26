@@ -24,9 +24,12 @@ import {
 import { AppointmentsService } from '../appointments/appointments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReportsService } from '../reports/reports.service';
+import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
 import { CreateOwnReportDto } from '../reports/dto/create-own-report.dto';
 import { UpdateOwnReportDto } from '../reports/dto/update-own-report.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCode } from '../common/errors/error-codes';
 import { PatientAuthGuard } from '../patient-auth/patient-auth.guard';
 import { CurrentPatient, AuthPatient } from '../patient-auth/current-patient.decorator';
 
@@ -45,24 +48,46 @@ export class PatientPortalController {
     private readonly appointments: AppointmentsService,
     private readonly notifications: NotificationsService,
     private readonly reports: ReportsService,
+    private readonly profiles: PatientProfilesService,
   ) {}
 
   @Get('appointments')
-  @ApiOperation({ summary: "Patient's consultation history, optionally scoped to one doctor" })
-  listAppointments(
+  @ApiOperation({
+    summary:
+      "One patient's visits. `profile_id` is required — an account may cover a whole family.",
+  })
+  async listAppointments(
     @CurrentPatient() patient: AuthPatient,
+    @Query('profile_id') profileId: string,
     @Query('doctor_id') doctorId?: string,
   ) {
-    return this.appointments.patientVisits(patient.mobile, doctorId ?? null);
+    await this.assertOwnPatient(patient, profileId);
+    return this.appointments.patientVisits(profileId, doctorId ?? null);
   }
 
   @Get('reports')
-  @ApiOperation({ summary: "Patient's reports, optionally scoped to one doctor" })
-  listReports(
+  @ApiOperation({ summary: "One patient's reports, optionally scoped to one doctor" })
+  async listReports(
     @CurrentPatient() patient: AuthPatient,
+    @Query('profile_id') profileId: string,
     @Query('doctor_id') doctorId?: string,
   ) {
-    return this.reports.listForMobile(patient.mobile, doctorId ?? null);
+    await this.assertOwnPatient(patient, profileId);
+    return this.reports.listForProfile(profileId, doctorId ?? null);
+  }
+
+  @Delete('appointments/:id')
+  @ApiOperation({
+    summary:
+      'Cancel a booking — the fix for booking under the wrong family member. Refused once the doctor has started on the visit.',
+  })
+  async cancelAppointment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentPatient() patient: AuthPatient,
+  ) {
+    const mine = await this.profiles.listForAccount(patient.id);
+    await this.appointments.cancel(id, { profileIds: mine.map((p) => p.id) });
+    return { ok: true };
   }
 
   @Post('appointments/:id/reports')
@@ -140,12 +165,21 @@ export class PatientPortalController {
   }
 
   @Get('notifications')
-  @ApiOperation({ summary: "Patient's notifications, optionally scoped to one doctor" })
-  listNotifications(
+  @ApiOperation({
+    summary:
+      "Account's notifications. Pass `profile_id` to narrow to one patient; omit it for the whole family's feed.",
+  })
+  async listNotifications(
     @CurrentPatient() patient: AuthPatient,
     @Query('doctor_id') doctorId?: string,
+    @Query('profile_id') profileId?: string,
   ) {
-    return this.notifications.listForPatient(patient.mobile, doctorId ?? null);
+    if (profileId) await this.assertOwnPatient(patient, profileId);
+    return this.notifications.listForPatient(
+      patient.mobile,
+      doctorId ?? null,
+      profileId ?? null,
+    );
   }
 
   @Get('notifications/unread-count')
@@ -165,6 +199,20 @@ export class PatientPortalController {
   ) {
     await this.notifications.markRead(patient.mobile, id);
     return { ok: true };
+  }
+
+  /**
+   * Every `profile_id` arriving from the client is checked against the logged-in
+   * account before it reaches a query. Without this, one number could read
+   * another number's patients simply by guessing an id.
+   */
+  private async assertOwnPatient(patient: AuthPatient, profileId: string) {
+    if (!profileId) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'Please choose which patient to view.',
+      });
+    }
+    await this.profiles.assertOwned(patient.id, profileId);
   }
 
   @Patch('notifications/read-all')

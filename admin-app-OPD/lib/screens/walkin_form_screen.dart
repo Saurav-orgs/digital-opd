@@ -21,7 +21,17 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
   final _name = TextEditingController();
   final _mobile = TextEditingController();
   final _age = TextEditingController();
+  final _address = TextEditingController();
+  final _city = TextEditingController();
+  final _state = TextEditingController();
+  final _pincode = TextEditingController();
   final _description = TextEditingController();
+
+  /// Patients already on the number. Null [_profileId] means a new patient —
+  /// never a lookup by name.
+  List<PatientProfile> _patients = const [];
+  String? _profileId;
+  bool _looking = false;
 
   String? _gender;
   String? _date;
@@ -47,6 +57,10 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
   void dispose() {
     _name.dispose();
     _mobile.dispose();
+    _address.dispose();
+    _city.dispose();
+    _state.dispose();
+    _pincode.dispose();
     _age.dispose();
     _description.dispose();
     super.dispose();
@@ -81,6 +95,44 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
     }
   }
 
+  /// A walk-in is a full registration: the same account and patient rows a
+  /// self-booking creates, so the patient can log in with this number
+  /// afterwards and find the visit waiting.
+  Future<void> _lookUpPatients() async {
+    final mobile = _mobile.text.trim();
+    if (!RegExp(r'^[6-9]\d{9}$').hasMatch(mobile)) {
+      setState(() {
+        _patients = const [];
+        _profileId = null;
+      });
+      return;
+    }
+    setState(() => _looking = true);
+    try {
+      final list = await _api.patientsByMobile(mobile);
+      if (mounted) setState(() => _patients = list);
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _looking = false);
+    }
+  }
+
+  /// Picking an existing patient prefills their details; they stay editable,
+  /// since people move and ages change between visits.
+  void _applyPatient(PatientProfile? p) {
+    setState(() {
+      _profileId = p?.id;
+      _name.text = p?.name ?? '';
+      _gender = (p?.gender?.isNotEmpty ?? false) ? p!.gender : null;
+      _age.text = p?.lastAge?.toString() ?? '';
+      _address.text = p?.addressLine ?? '';
+      _city.text = p?.city ?? '';
+      _state.text = p?.state ?? '';
+      _pincode.text = p?.pincode ?? '';
+    });
+  }
+
   Future<void> _submit() async {
     final formOk = _formKey.currentState!.validate();
     final slotOk = _slot != null && _date != null;
@@ -101,6 +153,11 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
         'patient_mobile': _mobile.text.trim(),
         'patient_gender': _gender,
         'patient_age': int.parse(_age.text.trim()),
+        if (_profileId != null) 'patient_profile_id': _profileId,
+        'patient_address': _address.text.trim(),
+        'patient_city': _city.text.trim(),
+        'patient_state': _state.text.trim(),
+        'patient_pincode': _pincode.text.trim(),
         if (_description.text.trim().isNotEmpty)
           'description': _description.text.trim(),
       });
@@ -143,7 +200,9 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
                             LengthLimitingTextInputFormatter(10),
-                          ], validator: (v) {
+                          ],
+                          onChanged: (_) => _lookUpPatients(),
+                          validator: (v) {
                         final s = (v ?? '').trim();
                         if (s.isEmpty) return 'Mobile number is required.';
                         if (!RegExp(r'^[6-9]\d{9}$').hasMatch(s)) {
@@ -151,6 +210,35 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
                         }
                         return null;
                       }),
+                      if (_looking)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 14),
+                          child: LinearProgressIndicator(),
+                        )
+                      else if (_patients.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 14),
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _profileId,
+                            decoration: const InputDecoration(
+                                labelText: 'Patient on this number *'),
+                            items: [
+                              const DropdownMenuItem(
+                                  value: null,
+                                  child: Text('+ New patient on this number')),
+                              for (final p in _patients)
+                                DropdownMenuItem(
+                                  value: p.id,
+                                  child: Text('${p.name} · ${p.subtitle}',
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
+                            onChanged: (v) {
+                              final hit = _patients.where((x) => x.id == v);
+                              _applyPatient(hit.isEmpty ? null : hit.first);
+                            },
+                          ),
+                        ),
                       _genderField(),
                       _field(_age, 'Age *',
                           keyboard: TextInputType.number,
@@ -166,8 +254,48 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
                         }
                         return null;
                       }),
+                      _field(_address, 'Address *', maxLines: 2, validator: (v) {
+                        if ((v ?? '').trim().length < 3) {
+                          return 'Please enter the address.';
+                        }
+                        return null;
+                      }),
+                      _field(_city, 'City *', validator: (v) {
+                        if ((v ?? '').trim().length < 2) {
+                          return 'Please enter the city.';
+                        }
+                        return null;
+                      }),
+                      _field(_state, 'State *', validator: (v) {
+                        if ((v ?? '').trim().length < 2) {
+                          return 'Please enter the state.';
+                        }
+                        return null;
+                      }),
+                      _field(_pincode, 'PIN code *',
+                          keyboard: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(6),
+                          ], validator: (v) {
+                        if (!RegExp(r'^[1-9]\d{5}$')
+                            .hasMatch((v ?? '').trim())) {
+                          return 'Enter a valid 6-digit PIN code.';
+                        }
+                        return null;
+                      }),
                       _field(_description, 'Reason for visit (optional)',
                           maxLines: 2),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'This registers the patient — they can log in with '
+                          'this number afterwards to see the visit, its reports '
+                          'and the prescription.',
+                          style: TextStyle(
+                              color: AppColors.textSecondary, fontSize: 12),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       SectionCard(
                         child: Column(
@@ -267,6 +395,7 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
     int maxLines = 1,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
+    ValueChanged<String>? onChanged,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -276,6 +405,7 @@ class _WalkInFormScreenState extends State<WalkInFormScreen> {
         maxLines: maxLines,
         inputFormatters: inputFormatters,
         validator: validator,
+        onChanged: onChanged,
         decoration: InputDecoration(labelText: label),
       ),
     );

@@ -3,10 +3,20 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { PatientReport } from '../database/models/patient-report.model';
-import { Appointment } from '../database/models/appointment.model';
-import { AiClientService } from '../ai/ai-client.service';
+import {
+  Appointment,
+  ProgressSummary,
+} from '../database/models/appointment.model';
+import { AiTrainingSample } from '../database/models/ai-training-sample.model';
+import { AiClientService, AiVisitInput } from '../ai/ai-client.service';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCode } from '../common/errors/error-codes';
 import { StorageService } from '../uploads/storage.service';
-import { AiJobStatus } from '../common/enums';
+import {
+  AiJobStatus,
+  AppointmentStatus,
+  TrainingSampleKind,
+} from '../common/enums';
 
 /**
  * Generates the AI summary for an uploaded report.
@@ -39,6 +49,8 @@ export class ReportSummaryService implements OnApplicationBootstrap {
   constructor(
     @InjectModel(PatientReport) private readonly reportModel: typeof PatientReport,
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
+    @InjectModel(AiTrainingSample)
+    private readonly trainingModel: typeof AiTrainingSample,
     private readonly ai: AiClientService,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
@@ -114,6 +126,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         } as any,
         { where: { id: appointmentId } },
       );
+      await this.clearProgress(appointmentId);
       return;
     }
 
@@ -128,6 +141,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         } as any,
         { where: { id: appointmentId } },
       );
+      await this.buildProgressForAppointment(appointmentId);
       return;
     }
 
@@ -160,6 +174,8 @@ export class ReportSummaryService implements OnApplicationBootstrap {
       this.logger.log(
         `Consolidated ${ready.length} report summaries for appointment ${appointmentId}.`,
       );
+      // This visit's picture just changed, so its trajectory is now stale.
+      await this.buildProgressForAppointment(appointmentId);
     } catch (err) {
       const message = (err as Error).message || 'Consolidation failed.';
       await this.appointmentModel.update(
@@ -174,6 +190,273 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         `Could not consolidate reports for appointment ${appointmentId}: ${message}`,
       );
     }
+  }
+
+  /**
+   * Build this visit's trajectory: how the patient has moved since their last
+   * visit, and where they stand now.
+   *
+   * Only the single most recent earlier visit is read — but nothing older is
+   * lost. That visit contributes its own `progress_summary` when it has one,
+   * and only falls back to its plain `reports_summary` if it was a first visit.
+   * Because visit 2's trajectory already folded in visit 1, visit 3 inherits
+   * visit 1's picture through it. The history travels forward in condensed
+   * form, so this stays one indexed row read no matter how long the patient has
+   * been coming.
+   *
+   * Scoped to the same patient **and** the same doctor: each doctor is a closed
+   * environment, and a family member's reports must never leak in.
+   */
+  async buildProgressForAppointment(appointmentId: string): Promise<void> {
+    if (!this.enabled) return;
+
+    const appointment = await this.appointmentModel.findByPk(appointmentId);
+    if (!appointment) return;
+
+    // Without a patient there is nothing to build a history from (legacy rows).
+    if (!appointment.patient_profile_id) {
+      await this.clearProgress(appointmentId);
+      return;
+    }
+
+    const current = await this.visitInput(appointment);
+    if (!current) {
+      await this.clearProgress(appointmentId);
+      return;
+    }
+
+    const previous = await this.previousVisit(appointment);
+    if (!previous) {
+      // A first visit has no trajectory — the UI shows the visit summary alone.
+      await this.clearProgress(appointmentId);
+      return;
+    }
+
+    const previousInput = this.visitInputFromStored(previous);
+    if (!previousInput) {
+      await this.clearProgress(appointmentId);
+      return;
+    }
+
+    await this.appointmentModel.update(
+      {
+        progress_summary_status: AiJobStatus.PROCESSING,
+        progress_summary_error: null,
+      } as any,
+      { where: { id: appointmentId } },
+    );
+
+    try {
+      const { summary } = await this.ai.summarizeProgress({
+        patient: {
+          age: appointment.patient_age,
+          gender: appointment.patient_gender ?? undefined,
+        },
+        previous: previousInput,
+        current,
+      });
+      await this.appointmentModel.update(
+        {
+          progress_summary: summary,
+          progress_summary_status: AiJobStatus.READY,
+          progress_summary_error: null,
+          progress_summary_visit_count:
+            (previous.progress_summary_visit_count || 1) + 1,
+          progress_summarized_at: new Date(),
+        } as any,
+        { where: { id: appointmentId } },
+      );
+      this.logger.log(
+        `Built progress summary for appointment ${appointmentId} against ${previous.appointment_date}.`,
+      );
+    } catch (err) {
+      const message = (err as Error).message || 'Progress summary failed.';
+      await this.appointmentModel.update(
+        {
+          progress_summary_status: AiJobStatus.FAILED,
+          progress_summary_error: message,
+        } as any,
+        { where: { id: appointmentId } },
+      );
+      this.logger.warn(
+        `Could not build progress for appointment ${appointmentId}: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Save the doctor's version of the across-visits summary, and keep the pair
+   * (what the model said, what the doctor signed off) as training data.
+   *
+   * The correction loop is the point. Reading a summary teaches the model
+   * nothing; a doctor rewording "creatinine has worsened" into "first reading,
+   * no trend yet" is exactly the supervision this task needs, and it is only
+   * available at the moment the doctor is already looking at the text. Saves
+   * with no change are recorded too — they confirm the model was right.
+   */
+  async saveProgressCorrection(
+    appointmentId: string,
+    corrected: ProgressSummary,
+  ): Promise<Appointment> {
+    const appointment = await this.appointmentModel.findByPk(appointmentId);
+    if (!appointment) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Appointment not found.',
+      });
+    }
+
+    const original = appointment.progress_summary;
+    const edited = JSON.stringify(original) !== JSON.stringify(corrected);
+
+    await this.appointmentModel.update(
+      {
+        progress_summary: corrected,
+        progress_summary_status: AiJobStatus.READY,
+        progress_summary_error: null,
+        progress_summarized_at: new Date(),
+      } as any,
+      { where: { id: appointmentId } },
+    );
+
+    const previous = await this.previousVisit(appointment);
+    const current = await this.visitInput(appointment);
+    await this.trainingModel.create({
+      kind: TrainingSampleKind.PROGRESS_SUMMARY,
+      appointment_id: appointment.id,
+      doctor_id: appointment.doctor_id,
+      input_payload: {
+        patient: {
+          age: appointment.patient_age,
+          gender: appointment.patient_gender,
+        },
+        previous: previous ? this.visitInputFromStored(previous) : null,
+        current,
+      },
+      ai_output: original as unknown as Record<string, unknown> | null,
+      doctor_output: corrected as unknown as Record<string, unknown>,
+      edited,
+      model_version: null,
+    } as any);
+
+    return (await this.appointmentModel.findByPk(appointmentId))!;
+  }
+
+  /** Doctor-triggered rebuild of the across-visits summary. */
+  async retryProgress(appointmentId: string): Promise<Appointment> {
+    await this.enqueue(() => this.buildProgressForAppointment(appointmentId));
+    return (await this.appointmentModel.findByPk(appointmentId))!;
+  }
+
+  /**
+   * The one visit to compare against: same patient, same doctor, strictly
+   * earlier, not cancelled, and carrying a summary worth reading.
+   */
+  private async previousVisit(
+    appointment: Appointment,
+  ): Promise<Appointment | null> {
+    return this.appointmentModel.findOne({
+      where: {
+        patient_profile_id: appointment.patient_profile_id,
+        doctor_id: appointment.doctor_id,
+        id: { [Op.ne]: appointment.id },
+        status: { [Op.ne]: AppointmentStatus.CANCELLED },
+        reports_summary_status: AiJobStatus.READY,
+        [Op.or]: [
+          { appointment_date: { [Op.lt]: appointment.appointment_date } },
+          {
+            appointment_date: appointment.appointment_date,
+            start_time: { [Op.lt]: appointment.start_time },
+          },
+        ],
+      },
+      order: [
+        ['appointment_date', 'DESC'],
+        ['start_time', 'DESC'],
+      ],
+    });
+  }
+
+  /** This visit's own reports, as the comparison input. */
+  private async visitInput(
+    appointment: Appointment,
+  ): Promise<AiVisitInput | null> {
+    const ready = await this.reportModel.findAll({
+      where: {
+        appointment_id: appointment.id,
+        ai_summary_status: AiJobStatus.READY,
+      },
+      order: [['created_at', 'ASC']],
+    });
+    const reports = ready
+      .filter((r) => r.ai_summary)
+      .map((r) => ({
+        title: r.title,
+        summary: r.ai_summary!.summary,
+        key_findings: r.ai_summary!.key_findings ?? [],
+        abnormal_values: r.ai_summary!.abnormal_values ?? [],
+      }));
+    if (reports.length === 0) return null;
+    return { visit_date: appointment.appointment_date, reports };
+  }
+
+  /**
+   * The earlier visit as a single condensed "report". Its trajectory is
+   * preferred over its raw report summary: that is what carries everything
+   * before it forward.
+   */
+  private visitInputFromStored(previous: Appointment): AiVisitInput | null {
+    if (previous.progress_summary) {
+      const p = previous.progress_summary;
+      return {
+        visit_date: previous.appointment_date,
+        reports: [
+          {
+            title: `Visit of ${previous.appointment_date} (including earlier visits)`,
+            summary: [p.summary, p.current_status].filter(Boolean).join(' '),
+            key_findings: [
+              ...p.improvements,
+              ...p.deteriorations,
+              ...p.unchanged,
+            ],
+            // Carry the last known value of each tracked measurement, so the
+            // next comparison still has something concrete to match on.
+            abnormal_values: (p.trends ?? []).map((t) => ({
+              label: t.label,
+              value: t.current_value,
+              direction: 'abnormal' as const,
+            })),
+          },
+        ],
+      };
+    }
+    if (previous.reports_summary) {
+      const r = previous.reports_summary;
+      return {
+        visit_date: previous.appointment_date,
+        reports: [
+          {
+            title: `Visit of ${previous.appointment_date}`,
+            summary: r.summary,
+            key_findings: r.key_findings ?? [],
+            abnormal_values: r.abnormal_values ?? [],
+          },
+        ],
+      };
+    }
+    return null;
+  }
+
+  private async clearProgress(appointmentId: string): Promise<void> {
+    await this.appointmentModel.update(
+      {
+        progress_summary: null,
+        progress_summary_status: null,
+        progress_summary_error: null,
+        progress_summary_visit_count: 0,
+        progress_summarized_at: null,
+      } as any,
+      { where: { id: appointmentId } },
+    );
   }
 
   /** Doctor-triggered rebuild of one visit's combined report summary. */

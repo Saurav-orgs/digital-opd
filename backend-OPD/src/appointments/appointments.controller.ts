@@ -52,19 +52,35 @@ export class AppointmentsController {
   }
 
   @Get('history')
-  @ApiOperation({ summary: "A patient's prior visits (matched by mobile)" })
+  @ApiOperation({
+    summary:
+      "One patient's prior visits. Scoped to the patient, not the mobile — a family member's visits never appear here.",
+  })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
   history(
-    @Query('mobile') mobile: string,
+    @Query('profileId') profileId: string,
     @Query('excludeId') excludeId: string | undefined,
     @CurrentUser() user: AuthUser,
   ) {
-    if (!mobile) {
+    if (!profileId) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: 'A mobile number is required.',
+        message: 'A patient is required.',
       });
     }
-    return this.service.history(mobile, user, excludeId);
+    return this.service.history(profileId, user, excludeId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      'Cancel a booking (front desk). Refused once the doctor has started on the visit.',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.cancel(id, { doctorId: user.doctorId ?? undefined });
   }
 
   @Post('walk-in')

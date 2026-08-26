@@ -9,8 +9,12 @@ import '../auth/auth_scope.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// Upload + view patient reports by mobile number. For a pathlab login
-/// (whose role only holds reports:create/read) this is the entire app.
+/// Upload + view patient reports. For a pathlab login (whose role only holds
+/// reports:create/read) this is the entire app.
+///
+/// The mobile number finds the family; the patient must then be picked. One
+/// number may cover several people, and a report filed against the wrong member
+/// is not something the system can detect later.
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
@@ -25,6 +29,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   File? _file;
   bool _uploading = false;
 
+  List<PatientProfile> _patients = const [];
+  PatientProfile? _patient;
+  bool _looking = false;
+
   Future<List<PatientReport>>? _future;
 
   AuthController get _auth => AuthScope.of(context);
@@ -37,12 +45,34 @@ class _ReportsScreenState extends State<ReportsScreen> {
     super.dispose();
   }
 
-  void _search() {
+  Future<void> _search() async {
     if (!_mobileValid) return;
     setState(() {
+      _looking = true;
       _searched = _mobile.text.trim();
-      _future = _auth.api.listReports(_searched!);
+      _patient = null;
+      _patients = const [];
+      _future = null;
     });
+    try {
+      final list = await _auth.api.patientsByMobile(_searched!);
+      if (!mounted) return;
+      setState(() {
+        _patients = list;
+        // One patient on the number is unambiguous — select it.
+        if (list.length == 1) _selectPatient(list.first, notify: false);
+      });
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _looking = false);
+    }
+  }
+
+  void _selectPatient(PatientProfile p, {bool notify = true}) {
+    _patient = p;
+    _future = _auth.api.listReports(p.id);
+    if (notify) setState(() {});
   }
 
   Future<void> _pickFile() async {
@@ -51,15 +81,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> _upload() async {
-    if (_searched == null || _file == null || _title.text.trim().isEmpty) return;
+    if (_searched == null ||
+        _patient == null ||
+        _file == null ||
+        _title.text.trim().isEmpty) {
+      return;
+    }
     setState(() => _uploading = true);
     try {
-      await _auth.api.uploadReport(_searched!, _title.text.trim(), _file!);
+      await _auth.api
+          .uploadReport(_searched!, _patient!.id, _title.text.trim(), _file!);
       if (mounted) showSuccessSnack(context, 'Report uploaded');
       setState(() {
         _title.clear();
         _file = null;
-        _future = _auth.api.listReports(_searched!);
+        _future = _auth.api.listReports(_patient!.id);
       });
     } on ApiException catch (e) {
       if (mounted) showErrorSnack(context, e.message);
@@ -72,7 +108,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     try {
       await _auth.api.removeReport(r.id);
       if (mounted) showSuccessSnack(context, 'Report deleted');
-      setState(() => _future = _auth.api.listReports(_searched!));
+      setState(() => _future = _auth.api.listReports(_patient!.id));
     } on ApiException catch (e) {
       if (mounted) showErrorSnack(context, e.message);
     }
@@ -111,13 +147,54 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
-          if (_searched != null && canCreate) ...[
+          if (_searched != null) ...[
             const SizedBox(height: 16),
             SectionCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CardTitle('Upload a report for $_searched'),
+                  const CardTitle('Which patient?'),
+                  if (_looking)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(),
+                    )
+                  else if (_patients.isEmpty)
+                    Text(
+                      'No patient is registered on $_searched. They are '
+                      'registered when a booking or walk-in is made.',
+                      style: const TextStyle(color: AppColors.textSecondary),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      initialValue: _patient?.id,
+                      decoration:
+                          const InputDecoration(labelText: 'Patient on this number'),
+                      items: [
+                        for (final p in _patients)
+                          DropdownMenuItem(
+                            value: p.id,
+                            child: Text('${p.name} · ${p.subtitle}',
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        final hit = _patients.where((x) => x.id == v);
+                        if (hit.isNotEmpty) _selectPatient(hit.first);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ],
+          if (_patient != null && canCreate) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CardTitle(
+                      'Upload a report for ${_patient!.name} (${_patient!.patientCode})'),
                   TextField(
                     controller: _title,
                     decoration: const InputDecoration(labelText: 'Report title'),
@@ -156,13 +233,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             ),
           ],
-          if (_searched != null && canRead) ...[
+          if (_patient != null && canRead) ...[
             const SizedBox(height: 16),
             SectionCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CardTitle('Reports for $_searched'),
+                  CardTitle(
+                      'Reports for ${_patient!.name} (${_patient!.patientCode})'),
                   FutureBuilder<List<PatientReport>>(
                     future: _future,
                     builder: (context, snap) {

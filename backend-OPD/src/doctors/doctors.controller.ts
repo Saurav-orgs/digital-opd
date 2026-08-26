@@ -22,6 +22,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
+import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule, UserType } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -123,6 +124,21 @@ export class DoctorsController {
     this.assertSuperAdmin(user);
     const base = this.config.get<string>('patientWebBase') ?? '';
     return this.doctorsService.createTenant(dto, base);
+  }
+
+  @Post(':id/reset-password')
+  @ApiOperation({
+    summary:
+      "Super-admin: set a new password for a doctor's own login (they are locked out otherwise)",
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  resetDoctorPassword(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResetDoctorPasswordDto,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.resetLoginPassword(id, dto.password);
   }
 
   @Post(':id/regenerate-slug')

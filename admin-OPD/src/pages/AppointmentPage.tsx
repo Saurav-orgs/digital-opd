@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, reportsApi } from '../api/endpoints';
 import type { PatientReport, Slot } from '../api/types';
@@ -8,6 +8,7 @@ import { useToast } from '../components/Toast';
 import { Badge, Loading } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
+import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
 import { appointmentRefetchInterval } from '../lib/summaryPolling';
 
 export default function AppointmentPage() {
@@ -64,9 +65,10 @@ export default function AppointmentPage() {
 
   // ── History ───────────────────────────────────────────────
   const historyQ = useQuery({
-    queryKey: ['appointment-history', a?.patient_mobile, id],
-    queryFn: () => appointmentsApi.history(a!.patient_mobile, id!),
-    enabled: !!a?.patient_mobile,
+    queryKey: ['appointment-history', a?.patient_profile_id, id],
+    queryFn: () => appointmentsApi.history(a!.patient_profile_id!, id!),
+    // Legacy visits carry no patient, and there is nothing to scope by then.
+    enabled: !!a?.patient_profile_id,
   });
 
   // ── Reminder ──────────────────────────────────────────────
@@ -149,7 +151,22 @@ export default function AppointmentPage() {
           {a?.appointment_date && (
             <Field label="Schedule" value={`${a.appointment_date} (${a.start_time?.slice(0, 5)}–${a.end_time?.slice(0, 5)})`} />
           )}
-          {a?.patient_address && <Field label="Address" value={a.patient_address} />}
+          {a?.patientProfile && (
+            <Field
+              label="Patient ID"
+              value={`${a.patientProfile.patient_code}${
+                a.patientProfile.relation ? ` · ${a.patientProfile.relation}` : ''
+              }`}
+            />
+          )}
+          {a?.patient_address && (
+            <Field
+              label="Address"
+              value={[a.patient_address, a.patient_city, a.patient_state, a.patient_pincode]
+                .filter(Boolean)
+                .join(', ')}
+            />
+          )}
           {a?.description && <Field label="Reason for Visit" value={a.description} />}
         </div>
 
@@ -174,12 +191,36 @@ export default function AppointmentPage() {
               <div className="card-title" style={{ marginBottom: 12 }}>
                 Reports ({a.reports.length})
               </div>
+
               {/*
-                The combined across-reports summary is deliberately not rendered
-                for now — the client asked to hide it, not drop it.
-                `VisitReportSummary` is kept (and exported) so bringing it back
-                is a one-line change.
+                One combined card, not two. When the patient has an earlier
+                visit, the across-visits comparison is the more useful read and
+                already folds this visit's reports into it; a first visit falls
+                back to the plain across-reports summary.
               */}
+              <div className="stack" style={{ gap: 10, marginBottom: 12 }}>
+                {a.progress_summary_status ? (
+                  <ProgressSummaryCard
+                    appointmentId={a.id}
+                    summary={a.progress_summary}
+                    status={a.progress_summary_status}
+                    error={a.progress_summary_error}
+                    visitCount={a.progress_summary_visit_count}
+                    onChanged={invalidate}
+                  />
+                ) : (
+                  <VisitReportSummary
+                    appointmentId={a.id}
+                    summary={a.reports_summary}
+                    status={a.reports_summary_status}
+                    error={a.reports_summary_error}
+                    count={a.reports_summary_count}
+                    reportCount={a.reports.length}
+                    onRetried={invalidate}
+                  />
+                )}
+              </div>
+
               <div className="stack" style={{ gap: 10 }}>
                 {a.reports.map((r) => (
                   <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
@@ -323,9 +364,15 @@ export default function AppointmentPage() {
                   {historyQ.data.map((h) => (
                     <div key={h.id} style={{ borderBottom: 'var(--hairline)', paddingBottom: 8 }}>
                       <div className="row" style={{ justifyContent: 'space-between' }}>
-                        <strong style={{ fontWeight: 500, fontSize: 13 }}>
+                        {/* Opens that visit in full — its own reports and its
+                            own summary, which the doctor often wants to read
+                            rather than just the note. */}
+                        <Link
+                          to={`/appointments/${h.id}`}
+                          style={{ fontWeight: 500, fontSize: 13 }}
+                        >
                           {h.appointment_date} · {h.start_time?.slice(0, 5)}
-                        </strong>
+                        </Link>
                         <Badge value={h.consultation_status} />
                       </div>
                       {h.description && (

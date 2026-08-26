@@ -352,6 +352,125 @@ class PrescriptionImage {
       PrescriptionImage(id: j['id'] as String, url: j['url'] as String?);
 }
 
+/// One person registered on a mobile number. Identity is [id], never the name.
+class PatientProfile {
+  final String id;
+  final String patientCode;
+  final String name;
+  final String? relation;
+  final String? gender;
+  final String? addressLine;
+  final String? city;
+  final String? state;
+  final String? pincode;
+  final int? lastAge;
+  final String? lastVisitDate;
+  final int visitCount;
+  final bool canDelete;
+
+  PatientProfile({
+    required this.id,
+    required this.patientCode,
+    required this.name,
+    this.relation,
+    this.gender,
+    this.addressLine,
+    this.city,
+    this.state,
+    this.pincode,
+    this.lastAge,
+    this.lastVisitDate,
+    this.visitCount = 0,
+    this.canDelete = true,
+  });
+
+  factory PatientProfile.fromJson(Map<String, dynamic> j) => PatientProfile(
+        id: j['id'] as String,
+        patientCode: (j['patient_code'] ?? '') as String,
+        name: (j['name'] ?? '') as String,
+        relation: j['relation'] as String?,
+        gender: j['gender'] as String?,
+        addressLine: j['address_line'] as String?,
+        city: j['city'] as String?,
+        state: j['state'] as String?,
+        pincode: j['pincode'] as String?,
+        lastAge: (j['last_age'] as num?)?.toInt(),
+        lastVisitDate: j['last_visit_date'] as String?,
+        visitCount: (j['visit_count'] as num?)?.toInt() ?? 0,
+        canDelete: (j['can_delete'] ?? true) as bool,
+      );
+
+  String get subtitle => [
+        if (lastAge != null) '$lastAge yrs',
+        if (gender != null && gender!.isNotEmpty) gender,
+        patientCode,
+      ].join(' · ');
+}
+
+/// One measurement's movement between the previous visit and this one.
+class ProgressTrend {
+  final String label;
+  final String previousValue;
+  final String currentValue;
+  final String direction; // up | down | same
+  final String interpretation; // better | worse | unclear
+
+  ProgressTrend({
+    required this.label,
+    required this.previousValue,
+    required this.currentValue,
+    required this.direction,
+    required this.interpretation,
+  });
+
+  factory ProgressTrend.fromJson(Map<String, dynamic> j) => ProgressTrend(
+        label: (j['label'] ?? '') as String,
+        previousValue: (j['previous_value'] ?? '') as String,
+        currentValue: (j['current_value'] ?? '') as String,
+        direction: (j['direction'] ?? 'same') as String,
+        interpretation: (j['interpretation'] ?? 'unclear') as String,
+      );
+}
+
+/// What changed since the patient's last visit, and where they stand now.
+class ProgressSummary {
+  final String status; // improving | stable | worsening | unclear
+  final String summary;
+  final List<String> improvements;
+  final List<String> deteriorations;
+  final List<String> unchanged;
+  final List<ProgressTrend> trends;
+  final String currentStatus;
+  final List<String> watchPoints;
+
+  ProgressSummary({
+    required this.status,
+    required this.summary,
+    this.improvements = const [],
+    this.deteriorations = const [],
+    this.unchanged = const [],
+    this.trends = const [],
+    this.currentStatus = '',
+    this.watchPoints = const [],
+  });
+
+  static List<String> _strings(dynamic v) =>
+      ((v as List?) ?? []).map((e) => e.toString()).toList();
+
+  factory ProgressSummary.fromJson(Map<String, dynamic> j) => ProgressSummary(
+        status: (j['status'] ?? 'unclear') as String,
+        summary: (j['summary'] ?? '') as String,
+        improvements: _strings(j['improvements']),
+        deteriorations: _strings(j['deteriorations']),
+        unchanged: _strings(j['unchanged']),
+        trends: ((j['trends'] as List?) ?? [])
+            .map((t) => ProgressTrend.fromJson(t as Map<String, dynamic>))
+            .toList(),
+        currentStatus: (j['current_status'] ?? '') as String,
+        watchPoints: _strings(j['watch_points']),
+      );
+}
+
 class Appointment {
   final String id;
   final String doctorId;
@@ -376,6 +495,22 @@ class Appointment {
   final String? reportsSummaryStatus; // pending|processing|ready|failed|null
   final String? reportsSummaryError;
   final int reportsSummaryCount;
+
+  // ── The across-visits picture ──
+  // Null status means there was no earlier visit to compare against, and the
+  // UI falls back to the per-visit combined summary.
+  final ProgressSummary? progressSummary;
+  final String? progressSummaryStatus;
+  final String? progressSummaryError;
+  final int progressSummaryVisitCount;
+
+  final String? patientCity;
+  final String? patientState;
+  final String? patientPincode;
+
+  /// Which person on the number this visit is for — the clinical identity.
+  final String? patientProfileId;
+  final PatientProfile? patientProfile;
   final DoctorRef? doctor;
   final List<PrescriptionImage> prescriptions;
   final List<PatientReport> reports;
@@ -404,6 +539,15 @@ class Appointment {
     this.reportsSummaryStatus,
     this.reportsSummaryError,
     this.reportsSummaryCount = 0,
+    this.progressSummary,
+    this.progressSummaryStatus,
+    this.progressSummaryError,
+    this.progressSummaryVisitCount = 0,
+    this.patientCity,
+    this.patientState,
+    this.patientPincode,
+    this.patientProfileId,
+    this.patientProfile,
     this.doctor,
     this.prescriptions = const [],
     this.reports = const [],
@@ -441,6 +585,22 @@ class Appointment {
         reportsSummaryStatus: j['reports_summary_status'] as String?,
         reportsSummaryError: j['reports_summary_error'] as String?,
         reportsSummaryCount: (j['reports_summary_count'] as num?)?.toInt() ?? 0,
+        progressSummary: j['progress_summary'] == null
+            ? null
+            : ProgressSummary.fromJson(
+                j['progress_summary'] as Map<String, dynamic>),
+        progressSummaryStatus: j['progress_summary_status'] as String?,
+        progressSummaryError: j['progress_summary_error'] as String?,
+        progressSummaryVisitCount:
+            (j['progress_summary_visit_count'] as num?)?.toInt() ?? 0,
+        patientCity: j['patient_city'] as String?,
+        patientState: j['patient_state'] as String?,
+        patientPincode: j['patient_pincode'] as String?,
+        patientProfileId: j['patient_profile_id'] as String?,
+        patientProfile: j['patientProfile'] == null
+            ? null
+            : PatientProfile.fromJson(
+                j['patientProfile'] as Map<String, dynamic>),
         doctor: j['doctor'] == null
             ? null
             : DoctorRef.fromJson(j['doctor'] as Map<String, dynamic>),

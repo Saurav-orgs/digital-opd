@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Query,
@@ -16,6 +17,7 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nes
 import { ReportsService } from './reports.service';
 import { ReportSummaryService } from './report-summary.service';
 import { CreateReportDto } from './dto/create-report.dto';
+import { UpdateProgressSummaryDto } from './dto/update-progress-summary.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -38,9 +40,10 @@ export class ReportsController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['mobile', 'title', 'file'],
+      required: ['mobile', 'patient_profile_id', 'title', 'file'],
       properties: {
         mobile: { type: 'string', example: '9876543210' },
+        patient_profile_id: { type: 'string', format: 'uuid' },
         title: { type: 'string', example: 'Blood Test — CBC' },
         file: { type: 'string', format: 'binary' },
       },
@@ -61,15 +64,15 @@ export class ReportsController {
   }
 
   @Get()
-  @ApiOperation({ summary: "A patient's reports, for admin/doctor viewing" })
+  @ApiOperation({ summary: "One patient's reports, for admin/doctor viewing" })
   @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
-  list(@Query('mobile') mobile: string, @CurrentUser() user: AuthUser) {
-    if (!mobile) {
+  list(@Query('profileId') profileId: string, @CurrentUser() user: AuthUser) {
+    if (!profileId) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: 'A mobile number is required.',
+        message: 'A patient is required.',
       });
     }
-    return this.service.listForMobile(mobile, user.doctorId);
+    return this.service.listForProfile(profileId, user.doctorId);
   }
 
   @Post(':id/summary/retry')
@@ -79,6 +82,38 @@ export class ReportsController {
   @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
   retrySummary(@Param('id', ParseUUIDPipe) id: string) {
     return this.summaries.retry(id);
+  }
+
+  @Patch('appointment/:appointmentId/progress')
+  @ApiOperation({
+    summary:
+      "Save the doctor's corrected across-visits summary. The correction is also kept as training data.",
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  saveProgress(
+    @Param('appointmentId', ParseUUIDPipe) appointmentId: string,
+    @Body() dto: UpdateProgressSummaryDto,
+  ) {
+    return this.summaries.saveProgressCorrection(appointmentId, {
+      status: dto.status,
+      summary: dto.summary,
+      improvements: dto.improvements ?? [],
+      deteriorations: dto.deteriorations ?? [],
+      unchanged: dto.unchanged ?? [],
+      trends: dto.trends ?? [],
+      current_status: dto.current_status ?? '',
+      watch_points: dto.watch_points ?? [],
+    });
+  }
+
+  @Post('appointment/:appointmentId/progress/retry')
+  @ApiOperation({
+    summary:
+      "Rebuild the across-visits summary — what changed since the patient's last visit",
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
+  retryProgress(@Param('appointmentId', ParseUUIDPipe) appointmentId: string) {
+    return this.summaries.retryProgress(appointmentId);
   }
 
   @Post('appointment/:appointmentId/summary/retry')

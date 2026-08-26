@@ -10,12 +10,37 @@ import {
   type IssuedPrescription,
 } from '../../types';
 import { StateView } from '../../components/StateView';
+import { PatientSwitcher, RequirePatient } from '../../components/PatientSwitcher';
+import { usePatientAuth } from '../../auth/PatientAuthContext';
 
-export const MyVisits: React.FC = () => {
+export const MyVisits: React.FC = () => (
+  <RequirePatient>
+    <MyVisitsForPatient />
+  </RequirePatient>
+);
+
+const MyVisitsForPatient: React.FC = () => {
   const { doctor } = useDoctorCtx();
+  const { selected } = usePatientAuth();
+  const queryClient = useQueryClient();
+  const profileId = selected!.id;
+
   const { data: visits, isLoading, error, refetch } = useQuery({
-    queryKey: ['patient-visits', doctor?.id],
-    queryFn: () => patientApi.myVisits(doctor?.id),
+    queryKey: ['patient-visits', profileId, doctor?.id],
+    queryFn: () => patientApi.myVisits(profileId, doctor?.id),
+  });
+
+  /**
+   * Cancelling is the fix for booking under the wrong patient — there is no
+   * merge, so an unwanted booking is withdrawn rather than reassigned.
+   */
+  const cancel = useMutation({
+    mutationFn: (id: string) => patientApi.cancelVisit(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['patient-visits'] });
+    },
+    onError: (err) =>
+      alert(err instanceof ApiException ? err.message : 'Could not cancel this booking.'),
   });
 
   return (
@@ -23,10 +48,12 @@ export const MyVisits: React.FC = () => {
       <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text)', margin: '0 0 4px' }}>
         My Visits
       </h2>
-      <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-        Your consultation history — doctor's notes and prescriptions from each visit. You
-        can upload reports to a visit until the doctor marks it done.
+      <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+        {selected!.name}'s consultation history — doctor's notes and prescriptions from
+        each visit. You can upload reports to a visit until the doctor marks it done.
       </p>
+
+      <PatientSwitcher />
 
       {isLoading ? (
         <StateView loading />
@@ -36,11 +63,16 @@ export const MyVisits: React.FC = () => {
           onRetry={() => refetch()}
         />
       ) : !visits?.length ? (
-        <StateView empty="No visits yet. Once you book an OPD appointment, it will show up here." />
+        <StateView empty={`No visits yet for ${selected!.name}. Once an OPD appointment is booked, it will show up here.`} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {visits.map((v) => (
-            <VisitCard key={v.id} visit={v} />
+            <VisitCard
+              key={v.id}
+              visit={v}
+              onCancel={() => cancel.mutate(v.id)}
+              cancelling={cancel.isPending}
+            />
           ))}
         </div>
       )}
@@ -48,8 +80,16 @@ export const MyVisits: React.FC = () => {
   );
 };
 
-const VisitCard: React.FC<{ visit: PatientVisit }> = ({ visit: v }) => {
+const VisitCard: React.FC<{
+  visit: PatientVisit;
+  onCancel: () => void;
+  cancelling: boolean;
+}> = ({ visit: v, onCancel, cancelling }) => {
   const [open, setOpen] = useState(false);
+  // Only an untouched booking may be withdrawn; once the doctor has engaged
+  // with the visit it is a clinical record. The server enforces this too.
+  const cancellable =
+    v.status === 'confirmed' && v.consultation_status === 'pending';
   // The card expands to reveal details and/or the report-upload box.
   const expandable =
     !!v.doctor_notes ||
@@ -57,7 +97,8 @@ const VisitCard: React.FC<{ visit: PatientVisit }> = ({ visit: v }) => {
     !!v.e_prescription ||
     v.prescriptions.length > 0 ||
     v.reports.length > 0 ||
-    v.accepts_reports;
+    v.accepts_reports ||
+    cancellable;
 
   return (
     <div className="section-card">
@@ -81,11 +122,25 @@ const VisitCard: React.FC<{ visit: PatientVisit }> = ({ visit: v }) => {
         <span
           className={'fee-badge'}
           style={{
-            background: v.status === 'rejected' ? '#FEE2E2' : v.consultation_status === 'done' ? '#DCFCE7' : '#EFF6FF',
-            color: v.status === 'rejected' ? '#B91C1C' : v.consultation_status === 'done' ? '#166534' : '#1D4ED8',
+            background:
+              v.status === 'rejected' || v.status === 'cancelled'
+                ? '#FEE2E2'
+                : v.consultation_status === 'done'
+                  ? '#DCFCE7'
+                  : '#EFF6FF',
+            color:
+              v.status === 'rejected' || v.status === 'cancelled'
+                ? '#B91C1C'
+                : v.consultation_status === 'done'
+                  ? '#166534'
+                  : '#1D4ED8',
           }}
         >
-          {v.status === 'rejected' ? 'Rejected' : v.consultation_status.replace('_', ' ')}
+          {v.status === 'rejected'
+            ? 'Rejected'
+            : v.status === 'cancelled'
+              ? 'Cancelled'
+              : v.consultation_status.replace('_', ' ')}
         </span>
       </div>
 
@@ -148,6 +203,44 @@ const VisitCard: React.FC<{ visit: PatientVisit }> = ({ visit: v }) => {
             </div>
           )}
           {v.accepts_reports && <ReportUploader appointmentId={v.id} />}
+
+          {cancellable && (
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              <button
+                type="button"
+                className="btn-outlined"
+                disabled={cancelling}
+                onClick={() => {
+                  if (
+                    confirm(
+                      `Cancel the appointment on ${v.appointment_date} at ${v.start_time?.slice(0, 5)}?\n\nThe slot will be released and any reports you uploaded for this visit will be removed.`,
+                    )
+                  ) {
+                    onCancel();
+                  }
+                }}
+                style={{ color: 'var(--error)', borderColor: '#FCA5A5' }}
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel this appointment'}
+              </button>
+              <p
+                style={{
+                  margin: '8px 0 0',
+                  fontSize: 12.5,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                Booked under the wrong patient? Cancel here and book again for the
+                right one.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

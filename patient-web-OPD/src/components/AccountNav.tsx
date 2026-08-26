@@ -69,7 +69,7 @@ export const AccountNav: React.FC = () => {
       </Link>
       <button
         onClick={logout}
-        title={`Sign out (${patient.name})`}
+        title={`Sign out (${patient.mobile})`}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
       >
         <User size={18} />
