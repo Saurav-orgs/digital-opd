@@ -7,6 +7,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { DoctorVerificationStatus } from '../common/enums';
 
 @Injectable()
 export class AuthService {
@@ -23,7 +24,26 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.password_hash);
     if (!ok) throw new AppException(ErrorCode.INVALID_CREDENTIALS);
 
-    if (!user.is_active) throw new AppException(ErrorCode.ACCOUNT_DISABLED);
+    if (!user.is_active) {
+      // A doctor who registered themselves is inactive for a reason they can
+      // act on, so say which — "contact an administrator" is useless advice
+      // when the answer is simply "we haven't looked at your licence yet".
+      const status = user.doctor?.verification_status;
+      if (status === DoctorVerificationStatus.PENDING) {
+        throw new AppException(ErrorCode.ACCOUNT_DISABLED, {
+          message:
+            'Your registration is still being reviewed. You will be able to sign in once your practice licence has been verified.',
+        });
+      }
+      if (status === DoctorVerificationStatus.REJECTED) {
+        throw new AppException(ErrorCode.ACCOUNT_DISABLED, {
+          message:
+            user.doctor?.rejection_reason ||
+            'Your registration was not approved. Please contact the platform administrator.',
+        });
+      }
+      throw new AppException(ErrorCode.ACCOUNT_DISABLED);
+    }
 
     const principal = UsersService.toAuthUser(user);
 

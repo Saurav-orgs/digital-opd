@@ -3,7 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import { User, Trash2, Plus, Check } from 'lucide-react';
 import { patientApi } from '../../patientApi';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
-import { ApiException, type PatientDetailsInput } from '../../types';
+import { ApiException, type PatientDetailsInput, type PatientProfile } from '../../types';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 
 /**
  * Everyone registered on this number — add, switch to, or remove.
@@ -16,11 +17,15 @@ import { ApiException, type PatientDetailsInput } from '../../types';
 export const Patients: React.FC = () => {
   const { profiles, selected, selectProfile, refreshProfiles } = usePatientAuth();
   const [adding, setAdding] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PatientProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const remove = useMutation({
     mutationFn: (id: string) => patientApi.deleteProfile(id),
-    onSuccess: () => refreshProfiles(),
+    onSuccess: () => {
+      setDeleteTarget(null);
+      return refreshProfiles();
+    },
     onError: (err) =>
       setError(
         err instanceof ApiException ? err.message : 'Could not delete this patient.',
@@ -120,13 +125,7 @@ export const Patients: React.FC = () => {
                   }}
                   onClick={() => {
                     setError(null);
-                    if (
-                      confirm(
-                        `Delete ${p.name}?\n\nTheir bookings will be cancelled and any reports removed. This cannot be undone.`,
-                      )
-                    ) {
-                      remove.mutate(p.id);
-                    }
+                    setDeleteTarget(p);
                   }}
                 >
                   <Trash2 size={13} />
@@ -136,6 +135,23 @@ export const Patients: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Delete ${deleteTarget.name}?`}
+          destructive
+          confirmLabel="Delete patient"
+          busy={remove.isPending}
+          message={
+            <>
+              Any upcoming bookings for {deleteTarget.name} will be cancelled and
+              their reports removed. This cannot be undone.
+            </>
+          }
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => remove.mutate(deleteTarget.id)}
+        />
+      )}
 
       {adding ? (
         <AddPatientForm

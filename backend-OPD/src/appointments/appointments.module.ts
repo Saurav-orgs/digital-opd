@@ -13,6 +13,7 @@ import { DoctorsModule } from '../doctors/doctors.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
+import { BlockedNumbersModule } from '../blocked-numbers/blocked-numbers.module';
 
 @Module({
   imports: [
@@ -31,6 +32,8 @@ import { PatientProfilesModule } from '../patient-profiles/patient-profiles.modu
     ConsultationsModule,
     // Booking resolves which patient on the number the visit is for.
     PatientProfilesModule,
+    // Public booking is refused for numbers the clinic has blocked.
+    BlockedNumbersModule,
   ],
   controllers: [AppointmentsController, PublicController],
   providers: [AppointmentsService],

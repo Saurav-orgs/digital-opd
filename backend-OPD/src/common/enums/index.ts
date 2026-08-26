@@ -18,6 +18,16 @@ export enum PermissionModule {
   REPORTS = 'reports',
 }
 
+/**
+ * Where a doctor's registration stands. A self-registered doctor is inert until
+ * the super admin has seen their practice licence.
+ */
+export enum DoctorVerificationStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+}
+
 /** Kinds of in-app patient notification. */
 export enum NotificationType {
   REPORT_AVAILABLE = 'report_available',

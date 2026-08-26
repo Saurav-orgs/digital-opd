@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { doctorsApi } from '../api/endpoints';
-import type { CreateDoctorResult, Doctor } from '../api/types';
-import { Badge, Empty, Loading } from '../components/ui';
+import type { CreateDoctorResult, Doctor, PendingDoctor } from '../api/types';
+import { Badge, ConfirmDialog, Empty, Loading } from '../components/ui';
+import { useToast } from '../components/Toast';
 
 export default function DoctorsPage() {
   const qc = useQueryClient();
@@ -10,6 +11,7 @@ export default function DoctorsPage() {
   const [editDoctor, setEditDoctor] = useState<Doctor | null>(null);
   const [createdResult, setCreatedResult] = useState<CreateDoctorResult | null>(null);
   const [resetDoctor, setResetDoctor] = useState<Doctor | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Doctor | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['doctors'],
@@ -46,6 +48,8 @@ export default function DoctorsPage() {
         </button>
       </div>
 
+      <PendingRegistrations />
+
       {!data?.length ? (
         <Empty>No doctors yet. Create one to get started.</Empty>
       ) : (
@@ -59,11 +63,7 @@ export default function DoctorsPage() {
               rotating={slugMut.isPending && slugMut.variables === d.id}
               onEdit={() => setEditDoctor(d)}
               onResetPassword={() => setResetDoctor(d)}
-              onDelete={() => {
-                if (window.confirm(`Remove Dr. ${d.name}? This cannot be undone.`)) {
-                  deleteMut.mutate(d.id);
-                }
-              }}
+              onDelete={() => setDeleteTarget(d)}
               deleting={deleteMut.isPending && deleteMut.variables === d.id}
             />
           ))}
@@ -89,6 +89,27 @@ export default function DoctorsPage() {
             setEditDoctor(null);
             qc.invalidateQueries({ queryKey: ['doctors'] });
           }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Remove doctor"
+          destructive
+          confirmLabel="Remove doctor"
+          busy={deleteMut.isPending}
+          message={
+            <>
+              Remove <strong>{deleteTarget.name}</strong>? Their login stops
+              working and their booking link goes dead. This cannot be undone.
+            </>
+          }
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() =>
+            deleteMut.mutate(deleteTarget.id, {
+              onSuccess: () => setDeleteTarget(null),
+            })
+          }
         />
       )}
 
@@ -218,7 +239,6 @@ function EditDoctorModal({
     specialization: doctor.specialization ?? '',
     qualifications: doctor.qualifications ?? '',
     bio: doctor.bio ?? '',
-    consultation_fee: doctor.consultation_fee != null ? String(doctor.consultation_fee) : '',
     profile_base_url: doctor.profile_base_url ?? '',
   });
   const [error, setError] = useState('');
@@ -231,9 +251,6 @@ function EditDoctorModal({
         qualifications: form.qualifications.trim() || undefined,
         bio: form.bio.trim() || undefined,
         profile_base_url: form.profile_base_url.trim() || undefined,
-        consultation_fee: form.consultation_fee.trim()
-          ? Number(form.consultation_fee)
-          : undefined,
       }),
     onSuccess: onSaved,
     onError: (e: any) => setError(e?.message ?? 'Something went wrong.'),
@@ -338,8 +355,6 @@ function EditDoctorModal({
         <label className="form-label" style={{ marginTop: 12 }}>Qualifications</label>
         <input className="input" placeholder="MD, DM (Cardiology)" {...field('qualifications')} />
 
-        <label className="form-label" style={{ marginTop: 12 }}>Consultation fee (₹)</label>
-        <input className="input" type="number" min="0" placeholder="e.g. 500" {...field('consultation_fee')} />
 
         <label className="form-label" style={{ marginTop: 12 }}>Bio</label>
         <textarea
@@ -440,6 +455,137 @@ function CreateDoctorModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Doctors who signed themselves up and are waiting on review.
+ *
+ * The licence is the whole point of this panel — approving without opening it
+ * defeats the verification step, so the link is the most prominent control
+ * here, ahead of Approve.
+ */
+function PendingRegistrations() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [rejectTarget, setRejectTarget] = useState<PendingDoctor | null>(null);
+  const [reason, setReason] = useState('');
+
+  const { data } = useQuery({
+    queryKey: ['pending-doctors'],
+    queryFn: doctorsApi.pendingRegistrations,
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['pending-doctors'] });
+    qc.invalidateQueries({ queryKey: ['doctors'] });
+  };
+
+  const approve = useMutation({
+    mutationFn: (id: string) => doctorsApi.approveRegistration(id),
+    onSuccess: () => { toast.success('Doctor approved'); refresh(); },
+    onError: (e) => toast.error(e),
+  });
+
+  const reject = useMutation({
+    mutationFn: () => doctorsApi.rejectRegistration(rejectTarget!.id, reason.trim() || undefined),
+    onSuccess: () => {
+      toast.success('Registration rejected');
+      setRejectTarget(null);
+      setReason('');
+      refresh();
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  if (!data?.length) return null;
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div className="card-title" style={{ marginBottom: 10 }}>
+        Pending registrations ({data.length})
+      </div>
+
+      <div className="stack" style={{ gap: 10 }}>
+        {data.map((d) => (
+          <div
+            key={d.id}
+            className="card"
+            style={{ borderLeft: '3px solid var(--warning, #f59e0b)' }}
+          >
+            <div className="row" style={{ justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <strong>{d.name}</strong>
+                <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+                  {[d.specialization, d.qualifications].filter(Boolean).join(' · ') ||
+                    'No specialization given'}
+                </div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Reg. no. <strong>{d.license_number ?? '—'}</strong>
+                  {d.contact_mobile ? ` · ${d.contact_mobile}` : ''}
+                </div>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {d.license_url && (
+                  <a
+                    className="btn btn-sm btn-primary"
+                    href={d.license_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    View licence
+                  </a>
+                )}
+                <button
+                  className="btn btn-sm"
+                  disabled={approve.isPending}
+                  onClick={() => approve.mutate(d.id)}
+                >
+                  Approve
+                </button>
+                <button
+                  className="btn btn-sm"
+                  style={{ color: 'var(--danger, #dc2626)', borderColor: 'var(--danger, #dc2626)' }}
+                  onClick={() => setRejectTarget(d)}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {rejectTarget && (
+        <div className="modal-backdrop" onClick={() => setRejectTarget(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <h3>Reject registration</h3>
+            <p className="muted" style={{ fontSize: 13.5 }}>
+              <strong>{rejectTarget.name}</strong> will not be able to sign in. The
+              reason is shown to them when they try.
+            </p>
+            <label className="form-label" style={{ marginTop: 12 }}>Reason (optional)</label>
+            <input
+              className="input"
+              autoFocus
+              placeholder="e.g. licence document was unreadable"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <div className="row" style={{ marginTop: 18, gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setRejectTarget(null)}>Cancel</button>
+              <button
+                className="btn btn-danger"
+                disabled={reject.isPending}
+                onClick={() => reject.mutate()}
+              >
+                {reject.isPending ? 'Rejecting…' : 'Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

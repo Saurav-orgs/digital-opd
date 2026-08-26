@@ -2,6 +2,8 @@ import api from './client';
 import type {
   Appointment,
   AuthUser,
+  BlockedNumber,
+  PendingDoctor,
   ConsultationSession,
   CreateDoctorResult,
   EPrescription,
@@ -76,6 +78,13 @@ export const doctorsApi = {
    * super admin can read it out — there is no email delivery here, so a
    * locked-out doctor has no other way back in.
    */
+  /** Registrations awaiting super-admin review, each with a licence link. */
+  pendingRegistrations: () =>
+    api.get<PendingDoctor[]>('/doctors/registrations/pending').then((r) => r.data),
+  approveRegistration: (id: string) =>
+    api.post<Doctor>(`/doctors/${id}/approve`).then((r) => r.data),
+  rejectRegistration: (id: string, reason?: string) =>
+    api.post<Doctor>(`/doctors/${id}/reject`, { reason }).then((r) => r.data),
   resetPassword: (id: string, password: string) =>
     api
       .post<{ email: string; password: string }>(`/doctors/${id}/reset-password`, {
@@ -282,5 +291,29 @@ export const patientProfilesApi = {
   byMobile: (mobile: string) =>
     api
       .get<PatientProfile[]>('/patient-profiles/by-mobile', { params: { mobile } })
+      .then((r) => r.data),
+};
+
+// ── Blocked numbers ──────────────────────────────────────────
+// A clinic's own defence against nuisance bookings. Scoped per doctor: the
+// server derives the tenant from the caller, so nothing here names a doctor.
+export const blockedNumbersApi = {
+  list: () => api.get<BlockedNumber[]>('/blocked-numbers').then((r) => r.data),
+  block: (mobile: string, reason?: string) =>
+    api.post<BlockedNumber>('/blocked-numbers', { mobile, reason }).then((r) => r.data),
+  unblock: (id: string) =>
+    api.delete<{ ok: boolean }>(`/blocked-numbers/${id}`).then((r) => r.data),
+};
+
+/**
+ * Doctor self-registration. Public — no token, because the account it creates
+ * cannot be used until the super admin approves it.
+ */
+export const doctorRegistrationApi = {
+  register: (form: FormData) =>
+    api
+      .post<{ ok: boolean; message: string }>('/doctors/register', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       .then((r) => r.data),
 };

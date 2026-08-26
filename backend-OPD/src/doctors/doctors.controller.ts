@@ -23,6 +23,8 @@ import { ConfigService } from '@nestjs/config';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
+import { RegisterDoctorDto, RejectDoctorDto } from './dto/register-doctor.dto';
+import { Public } from '../common/decorators/public.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule, UserType } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -124,6 +126,69 @@ export class DoctorsController {
     this.assertSuperAdmin(user);
     const base = this.config.get<string>('patientWebBase') ?? '';
     return this.doctorsService.createTenant(dto, base);
+  }
+
+  @Public()
+  @Post('register')
+  @ApiOperation({
+    summary:
+      'Doctor self-registration. Creates a pending account — no login and no booking link until the super admin approves the licence.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('license', {
+      storage: memoryStorage(),
+      limits: { fileSize: 6 * 1024 * 1024 },
+    }),
+  )
+  async register(
+    @Body() dto: RegisterDoctorDto,
+    @UploadedFile() license: Express.Multer.File,
+  ) {
+    if (!license) {
+      throw new AppException(ErrorCode.FILE_REQUIRED, {
+        message: 'Please attach your practice licence or registration certificate.',
+      });
+    }
+    await this.doctorsService.registerSelf(dto, license);
+    // Deliberately thin: nothing about the new tenant is returned, because
+    // nothing about it is usable yet.
+    return {
+      ok: true,
+      message:
+        'Registration received. You will be able to sign in once your licence has been verified.',
+    };
+  }
+
+  @Get('registrations/pending')
+  @ApiOperation({ summary: 'Super-admin: registrations awaiting review' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
+  pendingRegistrations(@CurrentUser() user: AuthUser) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.listPending();
+  }
+
+  @Post(':id/approve')
+  @ApiOperation({ summary: 'Super-admin: approve a doctor registration' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  approveRegistration(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.approveRegistration(id);
+  }
+
+  @Post(':id/reject')
+  @ApiOperation({ summary: 'Super-admin: reject a doctor registration' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  rejectRegistration(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDoctorDto,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.rejectRegistration(id, dto.reason);
   }
 
   @Post(':id/reset-password')

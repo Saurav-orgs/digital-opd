@@ -114,7 +114,9 @@ export class UsersService {
   async findForAuth(email: string): Promise<User | null> {
     return this.userModel.scope('withSecret').findOne({
       where: { email: email.toLowerCase() },
-      include: [this.roleWithPerms],
+      // `doctor` comes along so login can tell a self-registered doctor still
+      // awaiting review apart from an account an admin switched off.
+      include: [this.roleWithPerms, 'doctor'],
     });
   }
 

@@ -12,6 +12,7 @@ import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
+import { BlockedNumbersService } from '../blocked-numbers/blocked-numbers.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { WalkInAppointmentDto } from './dto/walkin-appointment.dto';
 import { RescheduleDto } from './dto/reschedule.dto';
@@ -45,6 +46,7 @@ export class AppointmentsService {
     private readonly notifications: NotificationsService,
     private readonly prescriptions: PrescriptionsService,
     private readonly profiles: PatientProfilesService,
+    private readonly blocked: BlockedNumbersService,
     private readonly config: ConfigService,
   ) {}
 
@@ -61,6 +63,10 @@ export class AppointmentsService {
     if (!doctor || !doctor.is_enabled) {
       throw new AppException(ErrorCode.DOCTOR_DISABLED);
     }
+
+    // Refuse before touching slots: a blocked number must not be able to probe
+    // availability or race for a slot either.
+    await this.blocked.assertNotBlocked(dto.doctor_id, dto.patient_mobile);
 
     // Validate slot (window / past / leave / exists) → derive end_time.
     const { endTime } = await this.slots.assertBookableSlot(

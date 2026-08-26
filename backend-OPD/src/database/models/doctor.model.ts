@@ -8,6 +8,7 @@ import {
 import { OpdSchedule } from './opd-schedule.model';
 import { ScheduleException } from './schedule-exception.model';
 import { Appointment } from './appointment.model';
+import { DoctorVerificationStatus } from '../../common/enums';
 
 @Table({
   tableName: 'doctors',
@@ -40,6 +41,33 @@ export class Doctor extends Model<Doctor> {
 
   @Column({ type: DataType.DECIMAL(10, 2), allowNull: true })
   consultation_fee: number | null;
+
+  // ── Registration & verification ────────────────────────────
+  // A self-registered doctor sits at `pending` — login refused, booking link
+  // dead — until the super admin has reviewed the licence below.
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: false,
+    defaultValue: DoctorVerificationStatus.APPROVED,
+  })
+  verification_status: DoctorVerificationStatus;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  license_number: string | null;
+
+  /** S3 key of the practice licence / registration certificate. */
+  @Column({ type: DataType.STRING, allowNull: true })
+  license_file_key: string | null;
+
+  @Column({ type: DataType.STRING(15), allowNull: true })
+  contact_mobile: string | null;
+
+  @Column({ type: DataType.TEXT, allowNull: true })
+  rejection_reason: string | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  reviewed_at: Date | null;
 
   // ── Prescription letterhead (per-doctor branding) ──────────
   /** Clinic/practice name shown on the prescription pad. Falls back to the

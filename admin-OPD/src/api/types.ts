@@ -58,6 +58,7 @@ export interface Doctor {
   qualifications: string | null;
   bio: string | null;
   consultation_fee: string | null;
+  verification_status?: 'pending' | 'approved' | 'rejected';
   profile_photo_url: string | null;
   public_slug: string;
   is_enabled: boolean;
@@ -281,4 +282,20 @@ export interface MedicineCatalogEntry {
   strength: string | null;
   form: string | null;
   usage_count: number;
+}
+
+/** A self-registered doctor awaiting review, with their licence to inspect. */
+export interface PendingDoctor extends Doctor {
+  license_number: string | null;
+  contact_mobile: string | null;
+  /** Presigned link to the uploaded practice licence. */
+  license_url: string | null;
+}
+
+export interface BlockedNumber {
+  id: string;
+  mobile: string;
+  reason: string | null;
+  createdAt?: string;
+  created_at?: string;
 }

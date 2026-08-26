@@ -18,6 +18,7 @@ import { AppointmentsModule } from './appointments/appointments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PatientAuthModule } from './patient-auth/patient-auth.module';
 import { PatientProfilesModule } from './patient-profiles/patient-profiles.module';
+import { BlockedNumbersModule } from './blocked-numbers/blocked-numbers.module';
 import { PatientPortalModule } from './patient-portal/patient-portal.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
@@ -72,6 +73,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     DashboardModule,
     NotificationsModule,
     PatientProfilesModule,
+    BlockedNumbersModule,
     PatientAuthModule,
     PatientPortalModule,
     ReportsModule,

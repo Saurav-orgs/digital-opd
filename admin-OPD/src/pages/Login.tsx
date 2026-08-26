@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import { Field } from '../components/ui';
@@ -70,8 +70,10 @@ export default function Login() {
           </div>
           {forgotNote && (
             <div className="muted login-forgot-note">
-              Password reset is coming soon. For now, please contact your system administrator to
-              reset your password.
+              Ask your administrator to reset it — a doctor's password is reset by
+              the platform admin from the Doctors screen, and staff passwords by
+              their doctor from Users. Once you are signed in you can change it
+              yourself under My profile.
             </div>
           )}
           {error && (
@@ -82,6 +84,10 @@ export default function Login() {
           <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
+
+          <div className="muted" style={{ marginTop: 16, fontSize: 13, textAlign: 'center' }}>
+            New here? <Link to="/register">Register your practice</Link>
+          </div>
         </form>
       </div>
     </div>

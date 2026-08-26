@@ -12,6 +12,8 @@ import Pathlabs from './pages/Pathlabs';
 import Reports from './pages/Reports';
 import AppointmentPage from './pages/AppointmentPage';
 import DoctorsPage from './pages/Doctors';
+import BlockedNumbersPage from './pages/BlockedNumbers';
+import DoctorRegisterPage from './pages/DoctorRegister';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -39,6 +41,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<DoctorRegisterPage />} />
       <Route
         element={
           <RequireAuth>
@@ -56,6 +59,7 @@ export default function App() {
         <Route path="/profile/schedule" element={<DoctorSchedule />} />
         <Route path="/appointments/:id" element={<AppointmentPage />} />
         <Route path="/doctors" element={<DoctorsPage />} />
+        <Route path="/blocked-numbers" element={<BlockedNumbersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

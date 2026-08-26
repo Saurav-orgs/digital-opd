@@ -175,7 +175,7 @@ export default function Profile() {
                     alt="Doctor booking QR"
                     style={{ width: 140, height: 140, objectFit: 'contain', display: 'inline-block' }}
                   />
-                  <div style={{ marginTop: 8 }}>
+                  <div className="row" style={{ marginTop: 8, gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                     <a
                       className="btn btn-sm"
                       href={meQ.data.qr_code_url}
@@ -183,8 +183,16 @@ export default function Profile() {
                       rel="noreferrer"
                       download="doctor-booking-qr.png"
                     >
-                      ⬇ Download QR code
+                      ⬇ Download QR
                     </a>
+                    <ShareQrButton
+                      qrUrl={meQ.data.qr_code_url}
+                      doctorName={meQ.data.name}
+                      bookingUrl={
+                        meQ.data.booking_url ||
+                        `${(meQ.data.profile_base_url || window.location.origin.replace(':5173', ':5174')).replace(/\/+$/, '')}/d/${meQ.data.public_slug}`
+                      }
+                    />
                   </div>
                 </div>
               )}
@@ -369,6 +377,74 @@ function LetterheadPreview({
         <div style={{ marginTop: 8 }}>Patient details, medicines and advice appear here.</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Shares the QR image itself, not just the booking link — a doctor sending this
+ * to a patient on WhatsApp wants the picture, which is what they will print or
+ * forward.
+ *
+ * Web Share level 2 (`files`) is the good path and exists on the phones this
+ * matters on. Where it is missing — most desktop browsers — the image is copied
+ * to the clipboard instead, so it can be pasted straight into a chat. Download
+ * remains as the button next to this one.
+ */
+function ShareQrButton({
+  qrUrl,
+  doctorName,
+  bookingUrl,
+}: {
+  qrUrl: string;
+  doctorName: string;
+  bookingUrl: string;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const share = async () => {
+    setBusy(true);
+    try {
+      const blob = await fetch(qrUrl).then((r) => {
+        if (!r.ok) throw new Error('Could not load the QR image.');
+        return r.blob();
+      });
+      const file = new File([blob], `${doctorName.replace(/\s+/g, '-')}-booking-qr.png`, {
+        type: blob.type || 'image/png',
+      });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Book an appointment with ${doctorName}`,
+          text: `Scan this QR or open ${bookingUrl} to book an appointment with ${doctorName}.`,
+        });
+        return;
+      }
+
+      // No file sharing here — put the image on the clipboard instead.
+      if (navigator.clipboard && 'ClipboardItem' in window) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type || 'image/png']: blob }),
+        ]);
+        toast.success('QR code copied — paste it into a chat');
+        return;
+      }
+
+      toast.error('Sharing is not supported here — use Download QR instead.');
+    } catch (err) {
+      // A user dismissing the share sheet is not an error worth shouting about.
+      if ((err as Error)?.name === 'AbortError') return;
+      toast.error((err as Error)?.message ?? 'Could not share the QR code.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button className="btn btn-sm btn-primary" onClick={share} disabled={busy}>
+      {busy ? 'Preparing…' : '↗ Share QR'}
+    </button>
   );
 }
 

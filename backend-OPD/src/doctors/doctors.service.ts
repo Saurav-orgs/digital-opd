@@ -9,10 +9,16 @@ import { Role } from '../database/models/role.model';
 import { RolePermission } from '../database/models/role-permission.model';
 import { User } from '../database/models/user.model';
 import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
+import { RegisterDoctorDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
-import { PermissionAction, PermissionModule, UserType } from '../common/enums';
+import {
+  DoctorVerificationStatus,
+  PermissionAction,
+  PermissionModule,
+  UserType,
+} from '../common/enums';
 
 // Modules the tenant Doctor role receives (all clinical modules).
 // doctors:create and doctors:delete stay super-admin-only.
@@ -50,8 +56,18 @@ export class DoctorsService {
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * The clinics on the platform.
+   *
+   * Registrations still awaiting review are excluded: they belong in the
+   * pending queue, where the licence is on screen next to the decision. Listing
+   * them here would put an "Enable" button beside a doctor nobody has verified,
+   * which is exactly the check this flow exists to enforce. Rejected ones are
+   * hidden for the same reason.
+   */
   async findAll() {
     const doctors = await this.doctorModel.findAll({
+      where: { verification_status: DoctorVerificationStatus.APPROVED },
       order: [['created_at', 'DESC']],
     });
     return doctors.map((d) => this.toView(d));
@@ -111,6 +127,144 @@ export class DoctorsService {
     const doctor = await this.getOrFail(id);
     if (doctor.qr_code_key) await this.storage.delete(doctor.qr_code_key);
     await doctor.update({ qr_code_key: null } as any);
+    return this.toView(doctor);
+  }
+
+  /**
+   * A doctor signing themselves up.
+   *
+   * The tenant is built exactly as `createTenant` builds it — profile, roles,
+   * login — but everything arrives switched off: the doctor is `pending`,
+   * `is_enabled` is false so the booking link is dead, and the login is
+   * inactive so `ACCOUNT_DISABLED` greets any sign-in attempt. Nothing here is
+   * trusted; the licence file is the only evidence, and a human has to look at
+   * it before any of this becomes real.
+   */
+  async registerSelf(
+    dto: RegisterDoctorDto,
+    license: Express.Multer.File,
+  ): Promise<{ id: string; status: DoctorVerificationStatus }> {
+    const existing = await this.userModel.findOne({
+      where: { email: dto.email.toLowerCase() },
+      paranoid: false,
+    });
+    if (existing) {
+      throw new AppException(ErrorCode.CONFLICT, {
+        message: 'An account with this email already exists.',
+      });
+    }
+
+    // Upload before the transaction: an S3 failure should not leave a
+    // half-written tenant behind, and an orphaned object is the cheaper leak.
+    this.storage.validateDocument(license);
+    const { key } = await this.storage.uploadDocument(license, 'doctor-licenses');
+
+    return this.sequelize.transaction(async (t) => {
+      const slug = await this.uniqueSlug(dto.name);
+      const doctor = await this.doctorModel.create(
+        {
+          name: dto.name,
+          specialization: dto.specialization ?? null,
+          qualifications: dto.qualifications ?? null,
+          contact_mobile: dto.contact_mobile,
+          license_number: dto.license_number,
+          license_file_key: key,
+          public_slug: slug,
+          // Both off until a human approves: no bookings, no login.
+          is_enabled: false,
+          verification_status: DoctorVerificationStatus.PENDING,
+        } as any,
+        { transaction: t },
+      );
+
+      const doctorRole = await this.createTenantRole(
+        'Doctor',
+        'Full clinical access for this tenant.',
+        TENANT_DOCTOR_PERMS,
+        doctor.id,
+        t,
+      );
+      await this.createTenantRole(
+        'Pathlab',
+        'Report upload access for this tenant.',
+        TENANT_PATHLAB_PERMS,
+        doctor.id,
+        t,
+      );
+
+      await this.userModel.create(
+        {
+          name: dto.name,
+          email: dto.email.toLowerCase(),
+          password_hash: await bcrypt.hash(dto.password, 10),
+          type: UserType.DOCTOR,
+          role_id: doctorRole.id,
+          doctor_id: doctor.id,
+          is_active: false,
+        } as any,
+        { transaction: t },
+      );
+
+      return { id: doctor.id, status: DoctorVerificationStatus.PENDING };
+    });
+  }
+
+  /** Registrations waiting on the super admin, with a link to the licence. */
+  async listPending(): Promise<any[]> {
+    const rows = await this.doctorModel.findAll({
+      where: { verification_status: DoctorVerificationStatus.PENDING },
+      order: [['created_at', 'ASC']],
+    });
+    return Promise.all(
+      rows.map(async (d) => ({
+        ...this.toView(d),
+        license_number: d.license_number,
+        contact_mobile: d.contact_mobile,
+        license_url: d.license_file_key
+          ? await this.storage.presignedGetUrl(d.license_file_key)
+          : null,
+      })),
+    );
+  }
+
+  /** Approve a registration: the tenant and its login both come alive. */
+  async approveRegistration(id: string) {
+    const doctor = await this.getOrFail(id);
+    if (doctor.verification_status === DoctorVerificationStatus.APPROVED) {
+      return this.toView(doctor);
+    }
+
+    await doctor.update({
+      verification_status: DoctorVerificationStatus.APPROVED,
+      rejection_reason: null,
+      reviewed_at: new Date(),
+      is_enabled: true,
+    } as any);
+    await this.userModel.update(
+      { is_active: true } as any,
+      { where: { doctor_id: doctor.id, type: UserType.DOCTOR } },
+    );
+
+    return this.toView(doctor);
+  }
+
+  /**
+   * Turn a registration down. The row is kept rather than deleted so the same
+   * person cannot silently re-register on the same email, and so the reason can
+   * be shown if they ask why.
+   */
+  async rejectRegistration(id: string, reason?: string) {
+    const doctor = await this.getOrFail(id);
+    await doctor.update({
+      verification_status: DoctorVerificationStatus.REJECTED,
+      rejection_reason: reason?.trim() || null,
+      reviewed_at: new Date(),
+      is_enabled: false,
+    } as any);
+    await this.userModel.update(
+      { is_active: false } as any,
+      { where: { doctor_id: doctor.id, type: UserType.DOCTOR } },
+    );
     return this.toView(doctor);
   }
 

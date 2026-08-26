@@ -40,6 +40,60 @@ export function Modal({
   );
 }
 
+/**
+ * In-app replacement for `window.confirm`.
+ *
+ * The browser dialog is jarring, unstyled and — on a destructive action — gives
+ * no room to spell out what is actually about to happen. This does, and it
+ * matches the rest of the admin.
+ */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  destructive,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  message: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onCancel}>
+      <div
+        className="modal"
+        style={{ maxWidth: 420 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>{title}</h3>
+        <div style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+          {message}
+        </div>
+        <div className="row" style={{ marginTop: 20, gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </button>
+          <button
+            className={`btn ${destructive ? 'btn-danger' : 'btn-primary'}`}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const STATUS_LABEL: Record<string, string> = {
   paid_unverified: 'Paid · unverified',
   on_hold: 'On hold',

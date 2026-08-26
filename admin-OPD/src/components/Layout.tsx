@@ -14,7 +14,11 @@ export default function Layout() {
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 
   const items = NAV.filter(
-    (n) => can(n.module, 'read') && (!n.superAdminOnly || isSuperAdmin),
+    (n) =>
+      !n.hidden &&
+      can(n.module, 'read') &&
+      (!n.superAdminOnly || isSuperAdmin) &&
+      (!n.doctorOnly || !isSuperAdmin),
   );
 
   const getFormattedRole = (type?: string) => {

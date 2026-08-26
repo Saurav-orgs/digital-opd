@@ -11,6 +11,7 @@ import {
 } from '../../types';
 import { StateView } from '../../components/StateView';
 import { PatientSwitcher, RequirePatient } from '../../components/PatientSwitcher';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
 
 export const MyVisits: React.FC = () => (
@@ -34,9 +35,12 @@ const MyVisitsForPatient: React.FC = () => {
    * Cancelling is the fix for booking under the wrong patient — there is no
    * merge, so an unwanted booking is withdrawn rather than reassigned.
    */
+  const [cancelTarget, setCancelTarget] = useState<PatientVisit | null>(null);
+
   const cancel = useMutation({
     mutationFn: (id: string) => patientApi.cancelVisit(id),
     onSuccess: () => {
+      setCancelTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['patient-visits'] });
     },
     onError: (err) =>
@@ -70,11 +74,38 @@ const MyVisitsForPatient: React.FC = () => {
             <VisitCard
               key={v.id}
               visit={v}
-              onCancel={() => cancel.mutate(v.id)}
-              cancelling={cancel.isPending}
+              onCancel={() => setCancelTarget(v)}
+              cancelling={cancel.isPending && cancel.variables === v.id}
             />
           ))}
         </div>
+      )}
+
+      {cancelTarget && (
+        <ConfirmDialog
+          title="Cancel this appointment?"
+          destructive
+          confirmLabel="Cancel appointment"
+          cancelLabel="Keep it"
+          busy={cancel.isPending}
+          message={
+            <>
+              The appointment on <strong>{cancelTarget.appointment_date}</strong>{' '}
+              at <strong>{cancelTarget.start_time?.slice(0, 5)}</strong> will be
+              withdrawn and the slot released.
+              {cancelTarget.reports.length > 0 && (
+                <>
+                  {' '}
+                  The {cancelTarget.reports.length} report
+                  {cancelTarget.reports.length > 1 ? 's' : ''} uploaded for this
+                  visit will be removed.
+                </>
+              )}
+            </>
+          }
+          onCancel={() => setCancelTarget(null)}
+          onConfirm={() => cancel.mutate(cancelTarget.id)}
+        />
       )}
     </div>
   );
@@ -216,15 +247,7 @@ const VisitCard: React.FC<{
                 type="button"
                 className="btn-outlined"
                 disabled={cancelling}
-                onClick={() => {
-                  if (
-                    confirm(
-                      `Cancel the appointment on ${v.appointment_date} at ${v.start_time?.slice(0, 5)}?\n\nThe slot will be released and any reports you uploaded for this visit will be removed.`,
-                    )
-                  ) {
-                    onCancel();
-                  }
-                }}
+                onClick={onCancel}
                 style={{ color: 'var(--error)', borderColor: '#FCA5A5' }}
               >
                 {cancelling ? 'Cancelling…' : 'Cancel this appointment'}
