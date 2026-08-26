@@ -794,6 +794,148 @@ body,
   font-weight: 500;
 }
 
+/* Report picker (booking step 2) ───────────────────────────────
+   Patients were choosing a file and going straight to Confirm, losing it.
+   Title, file and Add are framed as one unit, the Add button carries real
+   weight, and an unfinished report says so out loud. */
+.report-draft {
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-card);
+  background: var(--primary-light);
+  padding: 14px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.report-draft.pending {
+  border-color: var(--primary);
+  border-style: solid;
+  background: var(--primary-tint);
+}
+
+.report-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  cursor: pointer;
+}
+
+.report-file-row:hover {
+  border-color: var(--border-hover);
+}
+
+.visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.report-file-btn {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: 6px;
+  background: var(--primary-tint);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.report-file-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-file-name.has-file {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Green, not blue: distinct from the blue Confirm button beside it, so the
+   two never read as the same action. */
+.btn-add-report {
+  width: 100%;
+  height: 46px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--secondary);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.15s ease;
+}
+
+.btn-add-report:hover {
+  background: var(--secondary-hover);
+}
+
+.btn-add-report.pending {
+  animation: report-add-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes report-add-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(15, 110, 86, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(15, 110, 86, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-add-report.pending {
+    animation: none;
+  }
+}
+
+.report-pending-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.report-added-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--done);
+}
+
+.report-added-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--card);
+}
+
 /* Buttons */
 .btn-primary {
   width: 100%;

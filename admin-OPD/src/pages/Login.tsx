@@ -11,6 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [forgotNote, setForgotNote] = useState(false);
 
   if (user) navigate('/', { replace: true });
 
@@ -62,6 +63,17 @@ export default function Login() {
               required
             />
           </Field>
+          <div className="login-forgot">
+            <button type="button" className="link-btn" onClick={() => setForgotNote(true)}>
+              Forgot password?
+            </button>
+          </div>
+          {forgotNote && (
+            <div className="muted login-forgot-note">
+              Password reset is coming soon. For now, please contact your system administrator to
+              reset your password.
+            </div>
+          )}
           {error && (
             <div className="err" style={{ marginBottom: 12, textAlign: 'left' }}>
               {error}

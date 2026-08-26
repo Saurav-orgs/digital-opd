@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   Upload,
   X,
+  Plus,
+  ArrowUp,
 } from 'lucide-react';
 import { api } from '../api';
 import { patientApi, patientTokenStore } from '../patientApi';
@@ -35,28 +37,18 @@ const ACCEPTED_TYPES = 'image/png,image/jpeg,image/webp,application/pdf';
  */
 const ReportsStep: React.FC<{
   staged: StagedReport[];
-  onChange: (next: StagedReport[]) => void;
+  onRemove: (id: string) => void;
+  title: string;
+  onTitleChange: (t: string) => void;
+  file: File | null;
+  onFileChange: (f: File | null) => void;
+  fileRef: React.RefObject<HTMLInputElement | null>;
+  onAdd: () => void;
   warning: string | null;
-  onWarning: (w: string | null) => void;
-}> = ({ staged, onChange, warning, onWarning }) => {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [title, setTitle] = useState('');
-
-  const add = () => {
-    const file = fileRef.current?.files?.[0];
-    if (!title.trim()) return onWarning('Please enter a title for this report.');
-    if (!file) return onWarning('Please choose a file to add.');
-    if (file.size > MAX_REPORT_BYTES) {
-      return onWarning('That file is larger than 5 MB. Please choose a smaller one.');
-    }
-    onChange([
-      ...staged,
-      { id: `${file.name}-${Date.now()}`, title: title.trim(), file },
-    ]);
-    setTitle('');
-    if (fileRef.current) fileRef.current.value = '';
-    onWarning(null);
-  };
+}> = ({ staged, onRemove, title, onTitleChange, file, onFileChange, fileRef, onAdd, warning }) => {
+  // Anything typed or chosen but not yet in the list. This is the state where
+  // patients used to hit Confirm and lose the file, so it is called out loudly.
+  const pending = Boolean(file || title.trim());
 
   return (
     <div className="section-card">
@@ -71,60 +63,83 @@ const ReportsStep: React.FC<{
       </p>
 
       {staged.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {staged.map((r) => (
-            <div
-              key={r.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '10px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                fontSize: 13,
-              }}
-            >
-              <FileText size={15} color="var(--primary)" />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600 }}>{r.title}</div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                  {r.file.name} · {(r.file.size / 1024).toFixed(0)} KB
+        <div style={{ marginBottom: 16 }}>
+          <div className="report-added-head">
+            <CheckCircle2 size={14} color="var(--done)" />
+            <span>
+              {staged.length} report{staged.length > 1 ? 's' : ''} added to this booking
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {staged.map((r) => (
+              <div key={r.id} className="report-added-row">
+                <FileText size={15} color="var(--primary)" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{r.title}</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                    {r.file.name} · {(r.file.size / 1024).toFixed(0)} KB
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className="link-btn link-btn-danger"
+                  onClick={() => onRemove(r.id)}
+                  aria-label={`Remove ${r.title}`}
+                >
+                  <X size={15} />
+                </button>
               </div>
-              <button
-                type="button"
-                className="link-btn link-btn-danger"
-                onClick={() => onChange(staged.filter((s) => s.id !== r.id))}
-                aria-label={`Remove ${r.title}`}
-              >
-                <X size={15} />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="form-field">
-        <label className="form-label icon-label">
-          <FileText size={14} color="var(--text-secondary)" />
-          <span>Report title</span>
+      {/* Title, file and the Add button belong to one another — framing them
+          together is what stops the last step from being skipped. */}
+      <div className={'report-draft' + (pending ? ' pending' : '')}>
+        <div className="form-field">
+          <label className="form-label icon-label">
+            <FileText size={14} color="var(--text-secondary)" />
+            <span>Report title</span>
+          </label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. Blood Test — CBC"
+            value={title}
+            onChange={(e) => onTitleChange(e.target.value)}
+          />
+        </div>
+
+        <label className="report-file-row">
+          <input
+            ref={fileRef}
+            type="file"
+            accept={ACCEPTED_TYPES}
+            className="visually-hidden-input"
+            onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+          />
+          <span className="report-file-btn">Choose file</span>
+          <span className={'report-file-name' + (file ? ' has-file' : '')}>
+            {file ? `${file.name} · ${(file.size / 1024).toFixed(0)} KB` : 'No file chosen'}
+          </span>
         </label>
-        <input
-          type="text"
-          className="form-input"
-          placeholder="e.g. Blood Test — CBC"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </div>
 
-      <input ref={fileRef} type="file" accept={ACCEPTED_TYPES} style={{ marginBottom: 12 }} />
-
-      <div>
-        <button type="button" className="btn-secondary" onClick={add}>
-          Add this report
+        <button
+          type="button"
+          className={'btn-add-report' + (pending ? ' pending' : '')}
+          onClick={onAdd}
+        >
+          <Plus size={18} />
+          <span>Add this report</span>
         </button>
+
+        {pending && (
+          <div className="report-pending-hint">
+            <ArrowUp size={14} />
+            <span>Not attached yet — tap “Add this report” to include it.</span>
+          </div>
+        )}
       </div>
 
       {warning && <div className="error-text" style={{ marginTop: 10 }}>{warning}</div>}
@@ -158,6 +173,13 @@ export const BookingForm: React.FC = () => {
   const [staged, setStaged] = useState<StagedReport[]>([]);
   const [reportWarning, setReportWarning] = useState<string | null>(null);
 
+  // The report being filled in right now. Held here, not inside the step, so
+  // Confirm can still pick it up when the patient never pressed Add.
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftFile, setDraftFile] = useState<File | null>(null);
+  const reportFileRef = useRef<HTMLInputElement>(null);
+  const reportsCardRef = useRef<HTMLDivElement>(null);
+
   const [mobile, setMobile] = useState(patient?.mobile ?? '');
   const [name, setName] = useState(patient?.name ?? '');
   const [gender, setGender] = useState('');
@@ -188,6 +210,35 @@ export const BookingForm: React.FC = () => {
       </div>
     );
   }
+
+  /**
+   * Move the report the patient has filled in into the staged list. Returns the
+   * new list, or the reason it could not be added — the caller decides whether
+   * that reason blocks the booking or just shows a warning.
+   */
+  const stageDraft = (): { list?: StagedReport[]; error?: string } => {
+    if (!draftFile) return { error: 'Please choose a file to add.' };
+    if (!draftTitle.trim()) return { error: 'Please enter a title for this report.' };
+    if (draftFile.size > MAX_REPORT_BYTES) {
+      return { error: 'That file is larger than 5 MB. Please choose a smaller one.' };
+    }
+
+    const list = [
+      ...staged,
+      { id: `${draftFile.name}-${Date.now()}`, title: draftTitle.trim(), file: draftFile },
+    ];
+    setStaged(list);
+    setDraftTitle('');
+    setDraftFile(null);
+    if (reportFileRef.current) reportFileRef.current.value = '';
+    setReportWarning(null);
+    return { list };
+  };
+
+  const addReport = () => {
+    const { error } = stageDraft();
+    if (error) setReportWarning(error);
+  };
 
   const validate = () => {
     let valid = true;
@@ -240,8 +291,11 @@ export const BookingForm: React.FC = () => {
    * appointment is already booked by this point, and losing that over a failed
    * upload would be far worse than asking the patient to re-add a file.
    */
-  const attachStagedReports = async (appointmentId: string): Promise<string | null> => {
-    if (staged.length === 0) return null;
+  const attachStagedReports = async (
+    appointmentId: string,
+    reports: StagedReport[],
+  ): Promise<string | null> => {
+    if (reports.length === 0) return null;
 
     try {
       if (!patientTokenStore.get()) {
@@ -252,16 +306,48 @@ export const BookingForm: React.FC = () => {
       return 'Your appointment is booked, but we could not attach your reports. You can add them from My Visits.';
     }
 
-    let failed = 0;
-    for (const r of staged) {
+    const failed: StagedReport[] = [];
+    for (const r of reports) {
       try {
         await patientApi.uploadVisitReport(appointmentId, r.title, r.file);
       } catch {
-        failed += 1;
+        failed.push(r);
       }
     }
-    if (failed === 0) return null;
-    return `Your appointment is booked, but ${failed} of ${staged.length} report(s) could not be uploaded. You can add them from My Visits.`;
+    if (failed.length === 0) return null;
+
+    // An upload that timed out on a slow connection may still have landed on
+    // the server. Ask the visit what it actually holds before telling the
+    // patient a report was lost — they were seeing failures for reports that
+    // turned out to be there.
+    const missing = await reconcileFailedUploads(appointmentId, failed);
+    if (missing.length === 0) return null;
+
+    return `Your appointment is booked, but ${missing.length} of ${reports.length} report(s) could not be uploaded. You can add them from My Visits.`;
+  };
+
+  /** Which of the failed uploads are genuinely absent from the booked visit. */
+  const reconcileFailedUploads = async (
+    appointmentId: string,
+    failed: StagedReport[],
+  ): Promise<StagedReport[]> => {
+    try {
+      const visits = await patientApi.myVisits(doctor.id);
+      const visit = visits.find((v) => v.id === appointmentId);
+      if (!visit) return failed;
+
+      // Titles are consumed one at a time so two reports sharing a title still
+      // need two rows on the server before both count as delivered.
+      const landed = visit.reports.map((r) => r.title);
+      return failed.filter((r) => {
+        const at = landed.indexOf(r.title);
+        if (at === -1) return true;
+        landed.splice(at, 1);
+        return false;
+      });
+    } catch {
+      return failed; // can't tell — keep the honest warning
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -274,6 +360,19 @@ export const BookingForm: React.FC = () => {
     if (step === 1) {
       setStep(2);
       return;
+    }
+
+    // The patient may have filled in a report and gone straight for Confirm.
+    // Take it along rather than dropping it silently.
+    let reports = staged;
+    if (draftFile || draftTitle.trim()) {
+      const { list, error } = stageDraft();
+      if (error) {
+        setReportWarning(error);
+        reportsCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      reports = list!;
     }
 
     setSubmitting(true);
@@ -290,7 +389,7 @@ export const BookingForm: React.FC = () => {
         description: description.trim(),
       });
 
-      const reportsWarning = await attachStagedReports(result.id);
+      const reportsWarning = await attachStagedReports(result.id, reports);
 
       navigate('/confirmation', {
         replace: true,
@@ -446,12 +545,19 @@ export const BookingForm: React.FC = () => {
           </div>
 
           {step === 2 && (
-            <ReportsStep
-              staged={staged}
-              onChange={setStaged}
-              warning={reportWarning}
-              onWarning={setReportWarning}
-            />
+            <div ref={reportsCardRef}>
+              <ReportsStep
+                staged={staged}
+                onRemove={(id) => setStaged(staged.filter((r) => r.id !== id))}
+                title={draftTitle}
+                onTitleChange={setDraftTitle}
+                file={draftFile}
+                onFileChange={setDraftFile}
+                fileRef={reportFileRef}
+                onAdd={addReport}
+                warning={reportWarning}
+              />
+            </div>
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

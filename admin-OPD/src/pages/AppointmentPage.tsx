@@ -8,6 +8,7 @@ import { useToast } from '../components/Toast';
 import { Badge, Loading } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
+import { appointmentRefetchInterval } from '../lib/summaryPolling';
 
 export default function AppointmentPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +22,9 @@ export default function AppointmentPage() {
     queryKey: ['appointment', id],
     queryFn: () => appointmentsApi.get(id!),
     enabled: !!id,
+    // Report summaries finish in the background — keep polling until they do,
+    // so "Summarising…" resolves on its own instead of needing a reload.
+    refetchInterval: appointmentRefetchInterval,
   });
 
   const [notes, setNotes] = useState('');

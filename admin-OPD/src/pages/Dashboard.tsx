@@ -88,81 +88,85 @@ export default function Dashboard() {
         <Tile accent="gray" icon="📅" num={data.upcoming} label="Upcoming" />
       </div>
 
-      <div className="card" style={{ marginBottom: 14, padding: '14px 16px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
-              <span
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  fontSize: 14,
-                  color: 'var(--muted)',
-                  pointerEvents: 'none',
-                }}
-              >
-                🔍
-              </span>
-              <input
-                className="input"
-                type="search"
-                placeholder="Search patient name, mobile number…"
-                style={{ width: '100%', padding: '9px 12px 9px 36px' }}
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
+      {/* Filters and the list read as one surface: the toolbar acts on the
+          rows directly below it, so a seam between them would be a lie. */}
+      <div className="list-panel">
+        <div className="list-panel-head">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 12,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: 14,
+                    color: 'var(--muted)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  🔍
+                </span>
+                <input
+                  className="input"
+                  type="search"
+                  placeholder="Search patient name, mobile number…"
+                  style={{ width: '100%', padding: '9px 12px 9px 36px' }}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                />
+              </div>
+
+              {/* Status filter sits right beside the date filter, not its own row. */}
+              <div className="row" style={{ gap: 8, flexWrap: 'nowrap', flex: '0 0 auto' }}>
+                <DateFilter range={range} date={date} onChange={setDate} />
+                <select
+                  className="select"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as StatusFilter)}
+                  style={{ width: 130, flex: '0 0 auto' }}
+                  aria-label="Filter by status"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="done">Done</option>
+                  <option value="all">All statuses</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Range tabs — always one row, sized down on narrow screens. */}
+            <div className="range-tabs">
+              <TabButton
+                label="Previous"
+                active={range === 'previous'}
+                pending={data.pending.previous}
+                onClick={() => selectRange('previous')}
+              />
+              <TabButton
+                label="Today"
+                active={range === 'today'}
+                pending={data.pending.today}
+                onClick={() => selectRange('today')}
+              />
+              <TabButton
+                label="Upcoming"
+                active={range === 'upcoming'}
+                pending={data.pending.upcoming}
+                onClick={() => selectRange('upcoming')}
               />
             </div>
-
-            {/* Status filter sits right beside the date filter, not its own row. */}
-            <div className="row" style={{ gap: 8, flexWrap: 'nowrap', flex: '0 0 auto' }}>
-              <DateFilter range={range} date={date} onChange={setDate} />
-              <select
-                className="select"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as StatusFilter)}
-                style={{ width: 130, flex: '0 0 auto' }}
-                aria-label="Filter by status"
-              >
-                <option value="pending">Pending</option>
-                <option value="done">Done</option>
-                <option value="all">All statuses</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Range tabs — always one row, sized down on narrow screens. */}
-          <div className="range-tabs">
-            <TabButton
-              label="Previous"
-              active={range === 'previous'}
-              pending={data.pending.previous}
-              onClick={() => selectRange('previous')}
-            />
-            <TabButton
-              label="Today"
-              active={range === 'today'}
-              pending={data.pending.today}
-              onClick={() => selectRange('today')}
-            />
-            <TabButton
-              label="Upcoming"
-              active={range === 'upcoming'}
-              pending={data.pending.upcoming}
-              onClick={() => selectRange('upcoming')}
-            />
           </div>
         </div>
-      </div>
 
-      <RangeTable
-        range={range}
-        search={search}
-        date={date}
-        status={status}
-        onSelect={(id) => navigate(`/appointments/${id}`)}
-      />
+        <RangeTable
+          range={range}
+          search={search}
+          date={date}
+          status={status}
+          onSelect={(id) => navigate(`/appointments/${id}`)}
+        />
+      </div>
 
       {walkInOpen && doctorId && (
         <WalkInModal doctorId={doctorId} onClose={() => setWalkInOpen(false)} />

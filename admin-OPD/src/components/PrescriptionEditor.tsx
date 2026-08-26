@@ -4,6 +4,15 @@ import { consultationApi, medicinesApi } from '../api/endpoints';
 import type { PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
 import { Field } from './ui';
+import { ApiError } from '../api/client';
+import {
+  errorsFromApiDetails,
+  hasErrors,
+  noErrors,
+  validatePrescription,
+  type MedicineField,
+  type PrescriptionErrors,
+} from '../lib/prescriptionValidation';
 
 const blankRow = (): PrescriptionMedicine => ({
   medicine_name: '',
@@ -40,6 +49,7 @@ export function PrescriptionEditor({
   const [form, setForm] = useState({ diagnosis: '', advice: '', follow_up_date: '' });
   const [rows, setRows] = useState<PrescriptionMedicine[]>([blankRow()]);
   const [dirty, setDirty] = useState(false);
+  const [errors, setErrors] = useState<PrescriptionErrors>(noErrors);
   const lastLoadedSessionRef = useRef<string | null>(null);
 
   // Adopt server state when prescription data arrives or when a new AI draft lands
@@ -65,13 +75,17 @@ export function PrescriptionEditor({
     }
   }, [prescriptionQ.data, dirty]);
 
+  /** Editor row indexes that end up in the payload, in payload order. */
+  const sentRowIndexes = () =>
+    rows.map((r, i) => (r.medicine_name.trim() ? i : -1)).filter((i) => i >= 0);
+
   const body = () => ({
     diagnosis: form.diagnosis || undefined,
     advice: form.advice || undefined,
     follow_up_date: form.follow_up_date || undefined,
-    medicines: rows
-      .filter((r) => r.medicine_name.trim())
-      .map((r) => ({
+    medicines: sentRowIndexes().map((i) => {
+      const r = rows[i];
+      return {
         id: r.id,
         medicine_name: r.medicine_name.trim(),
         strength: r.strength || undefined,
@@ -80,17 +94,47 @@ export function PrescriptionEditor({
         timing: r.timing || undefined,
         duration_days: r.duration_days ?? undefined,
         instructions: r.instructions || undefined,
-      })),
+      };
+    }),
   });
+
+  /**
+   * Puts a failed submit where the doctor can act on it: the field that needs
+   * attention gets the message inline, and the toast names it rather than
+   * saying only that something went wrong.
+   */
+  const reportFailure = (e: unknown) => {
+    if (e instanceof ApiError && e.statusCode === 422) {
+      const mapped = errorsFromApiDetails(e.details, sentRowIndexes());
+      if (hasErrors(mapped)) {
+        setErrors(mapped);
+        toast.error(new ApiError(e.code, mapped.summary ?? e.message, e.statusCode));
+        return;
+      }
+    }
+    toast.error(e);
+  };
+
+  /** Returns true when the draft is clean; otherwise shows what is missing. */
+  const check = (mode: 'save' | 'issue') => {
+    const found = validatePrescription(form, rows, mode);
+    setErrors(found);
+    if (hasErrors(found)) {
+      toast.error(new ApiError('VALIDATION_FAILED', found.summary!, 422));
+      return false;
+    }
+    return true;
+  };
 
   const save = useMutation({
     mutationFn: () => consultationApi.savePrescription(appointmentId, body()),
     onSuccess: () => {
       setDirty(false);
+      setErrors(noErrors());
       qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
       toast.success('Draft saved');
     },
-    onError: (e) => toast.error(e),
+    onError: reportFailure,
   });
 
   const issue = useMutation({
@@ -101,16 +145,25 @@ export function PrescriptionEditor({
     },
     onSuccess: () => {
       setDirty(false);
+      setErrors(noErrors());
       qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
       qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
       toast.success('Prescription issued', 'The patient has been notified.');
     },
-    onError: (e) => toast.error(e),
+    onError: reportFailure,
   });
 
   const patchRow = (i: number, patch: Partial<PrescriptionMedicine>) => {
     setDirty(true);
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    // Drop the message for a field the moment it's being fixed.
+    setErrors((prev) => {
+      const row = prev.rows[i];
+      if (!row) return prev;
+      const next = { ...row };
+      for (const key of Object.keys(patch)) delete next[key as keyof typeof next];
+      return { ...prev, rows: { ...prev.rows, [i]: next }, summary: undefined };
+    });
   };
 
   const data = prescriptionQ.data;
@@ -164,7 +217,7 @@ export function PrescriptionEditor({
   return (
     <div>
       <div className="grid cols-2">
-        <Field label="Diagnosis">
+        <Field label="Diagnosis" error={errors.header.diagnosis}>
           <input
             className="input"
             disabled={!canEdit}
@@ -172,10 +225,11 @@ export function PrescriptionEditor({
             onChange={(e) => {
               setDirty(true);
               setForm({ ...form, diagnosis: e.target.value });
+              setErrors((p) => ({ ...p, header: { ...p.header, diagnosis: undefined }, summary: undefined }));
             }}
           />
         </Field>
-        <Field label="Follow-up date">
+        <Field label="Follow-up date" error={errors.header.follow_up_date}>
           <input
             className="input"
             type="date"
@@ -184,6 +238,7 @@ export function PrescriptionEditor({
             onChange={(e) => {
               setDirty(true);
               setForm({ ...form, follow_up_date: e.target.value });
+              setErrors((p) => ({ ...p, header: { ...p.header, follow_up_date: undefined }, summary: undefined }));
             }}
           />
         </Field>
@@ -205,6 +260,7 @@ export function PrescriptionEditor({
             index={i}
             total={rows.length}
             row={row}
+            errors={errors.rows[i]}
             canEdit={canEdit}
             onChange={(patch) => patchRow(i, patch)}
             onRemove={() => {
@@ -213,6 +269,8 @@ export function PrescriptionEditor({
                 const next = prev.filter((_, idx) => idx !== i);
                 return next.length > 0 ? next : [blankRow()];
               });
+              // Row indexes shift, so old messages would point at the wrong row.
+              setErrors(noErrors());
             }}
           />
         ))}
@@ -231,7 +289,7 @@ export function PrescriptionEditor({
         </button>
       )}
 
-      <Field label="Advice">
+      <Field label="Advice" error={errors.header.advice}>
         <textarea
           className="input"
           rows={2}
@@ -240,6 +298,7 @@ export function PrescriptionEditor({
           onChange={(e) => {
             setDirty(true);
             setForm({ ...form, advice: e.target.value });
+            setErrors((p) => ({ ...p, header: { ...p.header, advice: undefined }, summary: undefined }));
           }}
         />
       </Field>
@@ -249,14 +308,14 @@ export function PrescriptionEditor({
           <button
             className="btn btn-sm"
             disabled={save.isPending || !dirty}
-            onClick={() => save.mutate()}
+            onClick={() => { if (check('save')) save.mutate(); }}
           >
             {save.isPending ? 'Saving…' : 'Save draft'}
           </button>
           <button
             className="btn btn-primary btn-sm"
             disabled={issue.isPending}
-            onClick={() => issue.mutate()}
+            onClick={() => { if (check('issue')) issue.mutate(); }}
           >
             {issue.isPending ? 'Issuing…' : 'Issue prescription'}
           </button>
@@ -270,6 +329,7 @@ function MedicineRow({
   row,
   index,
   total,
+  errors,
   canEdit,
   onChange,
   onRemove,
@@ -277,6 +337,7 @@ function MedicineRow({
   row: PrescriptionMedicine;
   index: number;
   total: number;
+  errors?: Partial<Record<MedicineField, string>>;
   canEdit: boolean;
   onChange: (patch: Partial<PrescriptionMedicine>) => void;
   onRemove: () => void;
@@ -326,7 +387,7 @@ function MedicineRow({
       </div>
 
       <div className="grid cols-2" style={{ gap: 8 }}>
-        <Field label="Medicine name">
+        <Field label="Medicine name" error={errors?.medicine_name}>
           <input
             className="input"
             list={`meds-${row.id ?? row.medicine_name}-${index}`}
@@ -344,7 +405,7 @@ function MedicineRow({
             ))}
           </datalist>
         </Field>
-        <Field label="Strength">
+        <Field label="Strength" error={errors?.strength}>
           <input
             className="input"
             placeholder="e.g. 500mg"
@@ -356,7 +417,7 @@ function MedicineRow({
       </div>
 
       <div className="grid cols-2" style={{ gap: 8 }}>
-        <Field label="Dosage">
+        <Field label="Dosage" error={errors?.dosage}>
           <input
             className="input"
             disabled={!canEdit}
@@ -365,7 +426,7 @@ function MedicineRow({
             onChange={(e) => onChange({ dosage: e.target.value })}
           />
         </Field>
-        <Field label="Timing">
+        <Field label="Timing" error={errors?.timing}>
           <select
             className="select"
             disabled={!canEdit}
@@ -382,7 +443,7 @@ function MedicineRow({
       </div>
 
       <div className="grid cols-2" style={{ gap: 8, marginBottom: 0 }}>
-        <Field label="Duration (days)">
+        <Field label="Duration (days)" error={errors?.duration_days}>
           <input
             className="input"
             type="number"
@@ -397,7 +458,7 @@ function MedicineRow({
             }
           />
         </Field>
-        <Field label="Special instructions">
+        <Field label="Special instructions" error={errors?.instructions}>
           <input
             className="input"
             placeholder="e.g. with warm water"

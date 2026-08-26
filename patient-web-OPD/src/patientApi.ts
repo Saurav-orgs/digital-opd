@@ -21,9 +21,20 @@ const client = axios.create({
   timeout: 15000,
 });
 
+/**
+ * Uploads get their own budget. A 5 MB report on a phone connection routinely
+ * takes longer than the 15s that suits a JSON call, and aborting the request
+ * does not stop the server finishing it — the patient was told the report had
+ * failed while it was quietly landing on their visit.
+ */
+const UPLOAD_TIMEOUT_MS = 120000;
+
 client.interceptors.request.use((config) => {
   const token = patientTokenStore.get();
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    config.timeout = UPLOAD_TIMEOUT_MS;
+  }
   return config;
 });
 

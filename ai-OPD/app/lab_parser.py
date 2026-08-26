@@ -51,6 +51,8 @@ class ParsedReportIR:
     abnormal_results: list[LabResult] = field(default_factory=list)
     normal_results: list[LabResult] = field(default_factory=list)
     ecg_findings: list[str] = field(default_factory=list)
+    radiology_findings: list[str] = field(default_factory=list)
+    pft_findings: list[str] = field(default_factory=list)
 
     def grouped_abnormals(self) -> dict[str, list[LabResult]]:
         grouped: dict[str, list[LabResult]] = {}
@@ -162,6 +164,69 @@ def clean_test_name(raw_name: str) -> str:
     return name
 
 
+# Lines of a "Test: X / Result: Y / Reference: Z" block, matched one line at a
+# time by the scanner below.
+_KV_NAME = re.compile(r"(?i)(?:test|investigation|parameter)\s*[:\-]\s*(.+?)\s*$")
+_KV_VALUE = re.compile(
+    r"(?i)(?:result|observed value|value)\s*[:\-]\s*"
+    r"([<>]?\s*\d+(?:\.\d+)?)\s*([A-Za-z0-9\^/%:.\-]+)?\s*$"
+)
+_KV_REFERENCE = re.compile(
+    r"(?i)(?:reference|bio\.?\s*ref\.?\s*interval|normal range)\s*[:\-]\s*"
+    r"(?:(?:<=|<|>=|>)\s*)?(\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(\d+(?:\.\d+)?)"
+)
+
+# How many lines after "Test:" the Result and Reference may appear.
+_KV_WINDOW = 6
+
+
+def _iter_key_value_blocks(text: str):
+    """Yield (name, value, unit, ref_low, ref_high) for each Test/Result/Reference block.
+
+    Scans line by line inside a short window rather than matching one regex
+    across the whole document. The previous version used two unbounded `.*?`
+    under re.DOTALL, so a report carrying "Test:"/"Result:" but no
+    "Reference: low-high" — common, plenty of labs omit intervals — made the
+    engine backtrack over the entire text from every start position. Measured:
+    767 chars 1.2s, 1.5k chars 9.7s, 3k chars never finished. A multi-page OCR'd
+    report is tens of thousands of characters, which pegged a core and hung the
+    whole single-threaded sidecar until it was killed. This form is linear.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        name_match = _KV_NAME.match(line.strip())
+        if not name_match:
+            continue
+
+        window = lines[i + 1 : i + 1 + _KV_WINDOW]
+
+        value_match = None
+        value_at = -1
+        for j, candidate in enumerate(window):
+            value_match = _KV_VALUE.search(candidate.strip())
+            if value_match:
+                value_at = j
+                break
+        if not value_match:
+            continue
+
+        reference_match = None
+        for candidate in window[value_at + 1 :]:
+            reference_match = _KV_REFERENCE.search(candidate.strip())
+            if reference_match:
+                break
+        if not reference_match:
+            continue
+
+        yield (
+            name_match.group(1),
+            value_match.group(1).replace("<", "").replace(">", "").strip(),
+            (value_match.group(2) or "").strip(),
+            reference_match.group(1),
+            reference_match.group(2),
+        )
+
+
 def parse_lab_report_text(text: str) -> ParsedReportIR:
     """Deterministic parser extracting test records and evaluating clinical reference ranges."""
     ir = ParsedReportIR()
@@ -169,10 +234,15 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
 
     # 1. Extract Patient Metadata
     name_m = re.search(r"(?i)(?:prepared for|customer name|patient name)\s*[:\n]\s*(?:Mr\.|Ms\.|Mrs\.|Dr\.)?\s*([A-Za-z\s]+?)(?:\r|\n|$)", text)
+    if not name_m:
+        name_m = re.search(r"(?i)\bname\s*[:\n]\s*(?:Mr\.|Ms\.|Mrs\.|Dr\.)?\s*([A-Za-z\s]+?)(?:\r|\n|$)", text)
     if name_m:
-        ir.patient_name = name_m.group(1).strip().title()
+        pname = name_m.group(1).strip().title()
+        # Clean trailing OCR noise words
+        pname = re.sub(r"(?i)\s+(?:spree|collected|dwk|self|male|female|age|yrs|years|mr|mrs|dr)$", "", pname).strip()
+        ir.patient_name = pname
 
-    age_gender_m = re.search(r"(?i)(?:gender\/age|age\/gender|basic info)\s*[:\n]\s*([A-Za-z0-9\s\/\,]+?)(?:\r|\n|$)", text)
+    age_gender_m = re.search(r"(?i)(?:gender\/age|age\/gender|age\/sex|sex\/age|basic info)\s*[:\n]\s*([A-Za-z0-9\s\/\,]+?)(?:\r|\n|$)", text)
     if age_gender_m:
         raw_ag = age_gender_m.group(1).strip()
         if "female" in raw_ag.lower():
@@ -188,7 +258,7 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
             ir.age = f"{age_m.group(1)} Yrs"
             ir.gender = age_m.group(2).capitalize()
 
-    date_m = re.search(r"(?i)(?:sample collection date|collection date|date of collection|report date)\s*[:\n]\s*(\d{1,2}[\/\-\.][A-Za-z0-9]+[\/\-\.]\d{2,4})", text)
+    date_m = re.search(r"(?i)(?:sample collection date|collection date|date of collection|report date|date)\s*[:\n]\s*(\d{1,2}[\/\-\.][A-Za-z0-9]+[\/\-\.]\d{2,4})", text)
     if date_m:
         ir.date = date_m.group(1).strip()
 
@@ -203,25 +273,55 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
         r"(?i)(st[-\s]t segment[^\.\n]*)",
         r"(?i)(right bundle branch block[^\.\n]*)",
         r"(?i)(left bundle branch block[^\.\n]*)",
+        r"(?i)(qt\/qtc\s*[^\n]*)",
+        r"(?i)(p\/qrs\/t axis[^\n]*)",
     ]:
         for match in re.finditer(ecg_pat, text):
             finding = match.group(1).strip()
             if finding and finding not in ir.ecg_findings:
                 ir.ecg_findings.append(finding)
 
-    # 2b. Multi-Line Key-Value Block Parser (e.g. Test: X \n Result: Y \n Reference: Z)
-    kv_matches = re.finditer(
-        r"(?i)(?:test|investigation|parameter)\s*[:\-\s]\s*([^\n]+).*?(?:result|observed value|value)\s*[:\-\s]\s*([<>]?\s*\d+(?:\.\d+)?)\s*([A-Za-z0-9\^\/\%\:\.\-]+)?.*?(?:reference|bio\.?\s*ref\.?\s*interval|normal range)\s*[:\-\s]\s*(?:(?:<=|<|>=|>)\s*)?(\d+(?:\.\d+)?)\s*[-–—to]+\s*(\d+(?:\.\d+)?)",
-        text,
-        re.DOTALL,
-    )
-    for m in kv_matches:
-        raw_name = m.group(1).strip()
-        val_str = m.group(2).strip().replace("<", "").replace(">", "").strip()
-        unit = (m.group(3) or "").strip()
-        low_str = m.group(4).strip()
-        high_str = m.group(5).strip()
+    if not ir.ecg_findings and re.search(r"(?i)\b(?:section\s*:\s*ecg|electrocardiography|12[-\s]lead ecg)\b", text):
+        hr_m = re.search(r"(?i)\bhr\b[^\d\n]*(\d+)", text)
+        hr_str = f" (HR: {hr_m.group(1)} bpm)" if hr_m else ""
+        ir.ecg_findings.append(f"12-Lead ECG recorded{hr_str}")
 
+    # 2b. Extract Radiology / Ultrasound Findings
+    for rad_pat in [
+        r"(?i)(mild hepatomegaly with grade [iIvV\/]+ fatty changes[^\.\n]*)",
+        r"(?i)(mild hepatomegaly[^\.\n]*)",
+        r"(?i)(prostatomegaly[^\.\n]*)",
+        r"(?i)(fatty changes in liver[^\.\n]*)",
+        r"(?i)(cholelithiasis[^\.\n]*)",
+        r"(?i)(nephrolithiasis[^\.\n]*)",
+        r"(?i)(hydronephrosis[^\.\n]*)",
+        r"(?i)(liver is mildly enlarged[^\.\n]*)",
+        r"(?i)(prostate is enlarged[^\.\n]*)",
+    ]:
+        for match in re.finditer(rad_pat, text):
+            start_pos = max(0, match.start() - 30)
+            prefix = text[start_pos:match.start()].lower()
+            # Ignore negated findings like "no hydronephrosis", "no focal lesion", "no evidence of"
+            if re.search(r"\b(no|without|no evidence of|not detected)\s*$", prefix):
+                continue
+            finding = match.group(1).strip()
+            finding = re.sub(r"\s+", " ", finding).strip()
+            if len(finding) >= 6 and not any(finding.lower() == f.lower() for f in ir.radiology_findings):
+                ir.radiology_findings.append(finding)
+
+    # 2c. Extract Pulmonary Function Test (PFT) / Spirometry Findings
+    for pft_pat in [
+        r"(?i)(obstructive abnormality\s*:\s*[^\.\n]*)",
+        r"(?i)(restrictive anomaly\s*:\s*[^\.\n]*)",
+    ]:
+        for match in re.finditer(pft_pat, text):
+            finding = match.group(1).strip()
+            finding = re.sub(r"\s+", " ", finding).strip()
+            if len(finding) >= 6 and not any(finding.lower() == f.lower() for f in ir.pft_findings):
+                ir.pft_findings.append(finding)
+
+    # 2b. Multi-Line Key-Value Block Parser (e.g. Test: X \n Result: Y \n Reference: Z)
+    for raw_name, val_str, unit, low_str, high_str in _iter_key_value_blocks(text):
         test_name = clean_test_name(raw_name)
         if test_name and len(test_name) >= 2 and test_name.lower() not in seen_tests:
             try:

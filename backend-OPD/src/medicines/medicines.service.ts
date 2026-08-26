@@ -65,10 +65,12 @@ export class MedicinesService {
       const name = medicine.name?.trim();
       if (!name) continue;
 
-      // Case-insensitive match within the same tenant.
-      const where: any = { ...sqlWhere(fn('lower', col('name')), name.toLowerCase()) };
-      if (doctorId) where.doctor_id = doctorId;
-      const existing = await this.catalogModel.findOne({ where });
+      // Case-insensitive match within the same tenant. The lower(name)
+      // comparison has to stay a Where instance — spreading it into a plain
+      // object turns its internals into column names Postgres does not have.
+      const conditions: any[] = [sqlWhere(fn('lower', col('name')), name.toLowerCase())];
+      if (doctorId) conditions.push({ doctor_id: doctorId });
+      const existing = await this.catalogModel.findOne({ where: { [Op.and]: conditions } });
 
       if (existing) {
         await existing.increment('usage_count');

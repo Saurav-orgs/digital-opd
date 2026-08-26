@@ -508,9 +508,33 @@ textarea.input:focus {
   color: var(--state-error);
   font-size: 12px;
 }
+/* A field carrying a message reads as wrong at a glance, not just in the text. */
+.field:has(.err) .input,
+.field:has(.err) .select,
+.field:has(.err) textarea.input {
+  border-color: var(--state-error);
+}
 .field .hint {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* ── List panel (filter toolbar + its table, as one surface) ─ */
+.list-panel {
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.list-panel-head {
+  padding: 14px 16px;
+  border-bottom: var(--hairline);
+}
+/* The table already lives inside the panel's border, so it drops its own. */
+.list-panel .table-wrap {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 /* ── Table (scrolls horizontally on small screens) ─────────── */
@@ -779,6 +803,33 @@ tr.clickable-row:hover {
   align-items: center;
   justify-content: center;
   font-size: 24px;
+  margin-bottom: 14px;
+}
+.login-forgot {
+  display: flex;
+  justify-content: flex-end;
+  margin: -6px 0 14px;
+}
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--primary);
+  cursor: pointer;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.login-forgot-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  background: var(--primary-tint);
+  border-radius: 8px;
+  padding: 10px 12px;
   margin-bottom: 14px;
 }
 

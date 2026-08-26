@@ -34,7 +34,8 @@ export const Footer: React.FC = () => {
               Home
             </Link>
             <span className="footer-divider">•</span>
-            <Link to="/privacy-policy" className="footer-bottom-link">
+            {/* <Link to="/privacy-policy" className="footer-bottom-link"> */}
+            <Link to="" className="footer-bottom-link">
               Privacy Policy
             </Link>
           </div>

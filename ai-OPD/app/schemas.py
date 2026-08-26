@@ -35,7 +35,9 @@ class ReportSummary(BaseModel):
     summary: str = Field(default="", description="Two or three sentences a doctor can scan")
     key_findings: list[str] = Field(default_factory=list)
     abnormal_values: list[AbnormalValue] = Field(default_factory=list)
-    report_type: str = Field(default="", description="e.g. 'CBC', 'Lipid profile'")
+    # Defaulted, not "": a `mode="before"` validator does not run for a field the
+    # model omitted entirely, so an absent report_type would reach the UI blank.
+    report_type: str = Field(default="Medical Report", description="e.g. 'CBC', 'Lipid profile'")
     title: str = ""
 
     @field_validator("report_type", mode="before")

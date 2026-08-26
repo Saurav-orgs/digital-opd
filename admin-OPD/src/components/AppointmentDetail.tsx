@@ -9,6 +9,7 @@ import { InlineSlotPicker } from './InlineSlotPicker';
 import { PrescriptionTabs } from './PrescriptionTabs';
 import { reportsApi } from '../api/endpoints';
 import type { PatientReport } from '../api/types';
+import { appointmentRefetchInterval } from '../lib/summaryPolling';
 
 /**
  * Full appointment detail — notes, consultation outcome, reschedule,
@@ -24,6 +25,9 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
   const { data: a, isLoading } = useQuery({
     queryKey: ['appointment', id],
     queryFn: () => appointmentsApi.get(id),
+    // Report summaries finish in the background — keep polling until they do,
+    // so "Summarising…" resolves on its own instead of needing a reload.
+    refetchInterval: appointmentRefetchInterval,
   });
 
   // Local draft for the doctor's note, seeded from the loaded appointment.

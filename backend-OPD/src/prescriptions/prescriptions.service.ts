@@ -151,14 +151,20 @@ export class PrescriptionsService {
     } as any);
 
     // 3. Grow the tenant's medicine vocabulary from what was actually issued.
-    await this.medicines.recordUsage(
-      medicines.map((m) => ({
-        name: m.medicine_name,
-        strength: m.strength,
-        form: m.form,
-      })),
-      appointment.doctor_id,
-    );
+    //    Best-effort: the prescription is already frozen by this point, so a
+    //    catalogue failure must not surface as a failed issue.
+    try {
+      await this.medicines.recordUsage(
+        medicines.map((m) => ({
+          name: m.medicine_name,
+          strength: m.strength,
+          form: m.form,
+        })),
+        appointment.doctor_id,
+      );
+    } catch (err) {
+      this.logger.warn(`Could not record medicine usage: ${(err as Error).message}`);
+    }
 
     // 4. Capture the training pair. Best-effort: a logging failure must never
     //    cost the patient their prescription.

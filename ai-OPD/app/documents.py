@@ -1,18 +1,16 @@
 """Turn an uploaded report into plain text.
 
-Two paths, in order of preference:
-  1. `pdfplumber` for PDFs that carry a real text layer — exact, instant, free.
-  2. Tesseract OCR for photographed reports and image-only PDFs, which is what
-     most Indian lab reports actually are.
-
-OCR output is noisy; the summariser prompt is told when text came from OCR so it
-can treat it with appropriate suspicion.
+Hybrid extraction engine:
+1. `pdfplumber` for digital text layer.
+2. Per-page adaptive Tesseract OCR for scanned attachments, USG reports, landscape ECGs, and PFT curves.
+3. Orientation auto-detection (0, 90, 180, 270 deg) for landscape diagnostic pages.
 """
 
 from __future__ import annotations
 
 import logging
 import shutil
+import re
 from typing import Literal
 
 from .config import settings
@@ -21,38 +19,79 @@ log = logging.getLogger(__name__)
 
 ExtractionMethod = Literal["pdf_text", "ocr", "none"]
 
-# A PDF page with only a scanned image still yields a few stray characters, so
-# require a meaningful amount of text before trusting the text layer.
-_MIN_PDF_TEXT_CHARS = 10
-
 
 def ocr_available() -> bool:
     return shutil.which("tesseract") is not None
 
 
-def _extract_pdf_text(path: str) -> str:
-    import pdfplumber
+def _score_text_quality(text: str) -> int:
+    """Score the medical information density of extracted text."""
+    if not text:
+        return 0
+    keywords = [
+        "conclusions", "impression", "findings", "ecg", "axis", "infarction",
+        "ultrasound", "pft", "spirometry", "hepatomegaly", "prostatomegaly",
+        "liver", "kidney", "prostate", "fev1", "fvc", "pef", "glucose", "serum",
+        "reference", "result", "normal", "abnormal", "hemoglobin", "cholesterol",
+        "left axis deviation", "myocardial", "pr interval", "qt/qtc"
+    ]
+    text_lower = text.lower()
+    kw_hits = sum(1 for kw in keywords if kw in text_lower)
+    return len(text.strip()) + (kw_hits * 150)
 
-    parts: list[str] = []
-    with pdfplumber.open(path) as pdf:
-        for idx, page in enumerate(pdf.pages, 1):
-            page_text = page.extract_text(layout=True) or page.extract_text() or ""
-            if page_text.strip():
-                parts.append(f"--- Page {idx} ---\n{page_text.strip()}")
-    return "\n\n".join(parts).strip()
 
-
-def _ocr_pdf(path: str) -> str:
-    """Rasterise each page, then OCR it."""
+def _extract_pdf_hybrid(path: str) -> tuple[str, ExtractionMethod]:
     import pdfplumber
     import pytesseract
 
+    has_ocr = ocr_available()
     parts: list[str] = []
+    used_ocr = False
+
     with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            image = page.to_image(resolution=200).original
-            parts.append(pytesseract.image_to_string(image, lang=settings.ocr_languages))
-    return "\n".join(parts).strip()
+        for idx, page in enumerate(pdf.pages, 1):
+            digital_text = page.extract_text(layout=True) or page.extract_text() or ""
+            best_page_text = digital_text.strip()
+
+            # Check if this page needs OCR (scanned attachment, "REPORT ATTACHED", or sparse text)
+            needs_ocr = (
+                len(best_page_text) < 100
+                or "REPORT ATTACHED" in best_page_text.upper()
+                or (len(page.images) > 0 and len(best_page_text) < 500)
+            )
+
+            if needs_ocr and has_ocr:
+                try:
+                    img = page.to_image(resolution=200).original
+                    # Test normal 0 deg
+                    ocr_0 = pytesseract.image_to_string(img.convert("L"), lang=settings.ocr_languages)
+                    best_ocr = ocr_0
+                    best_score = _score_text_quality(ocr_0)
+
+                    # For scanned reports / landscape diagrams (like ECGs), test rotations
+                    for rot in [270, 90, 180]:
+                        rot_img = img.rotate(rot, expand=True)
+                        ocr_rot = pytesseract.image_to_string(rot_img.convert("L"), lang=settings.ocr_languages)
+                        score = _score_text_quality(ocr_rot)
+                        if score > best_score:
+                            best_score = score
+                            best_ocr = ocr_rot
+
+                    if _score_text_quality(best_ocr) > _score_text_quality(digital_text):
+                        used_ocr = True
+                        if digital_text and len(digital_text) > 40 and "REPORT ATTACHED" not in digital_text.upper():
+                            best_page_text = f"{digital_text}\n\n[Scanned Page Content]:\n{best_ocr.strip()}"
+                        else:
+                            best_page_text = best_ocr.strip()
+                except Exception as e:
+                    log.warning("Page %d OCR failed: %s", idx, e)
+
+            if best_page_text:
+                parts.append(f"--- Page {idx} ---\n{best_page_text}")
+
+    full_text = "\n\n".join(parts).strip()
+    method: ExtractionMethod = "ocr" if used_ocr else "pdf_text"
+    return full_text[: settings.max_document_chars], method
 
 
 def _ocr_image(path: str) -> str:
@@ -60,8 +99,20 @@ def _ocr_image(path: str) -> str:
     from PIL import Image
 
     with Image.open(path) as image:
-        # Reports photographed in poor light OCR better in greyscale.
-        return pytesseract.image_to_string(image.convert("L"), lang=settings.ocr_languages).strip()
+        img_l = image.convert("L")
+        best_ocr = pytesseract.image_to_string(img_l, lang=settings.ocr_languages).strip()
+        best_score = _score_text_quality(best_ocr)
+
+        # Check rotations for landscape mobile photos
+        for rot in [270, 90, 180]:
+            rot_img = image.rotate(rot, expand=True).convert("L")
+            rot_ocr = pytesseract.image_to_string(rot_img, lang=settings.ocr_languages).strip()
+            score = _score_text_quality(rot_ocr)
+            if score > best_score:
+                best_score = score
+                best_ocr = rot_ocr
+
+        return best_ocr
 
 
 def extract_text(path: str, content_type: str) -> tuple[str, ExtractionMethod]:
@@ -78,18 +129,9 @@ def extract_text(path: str, content_type: str) -> tuple[str, ExtractionMethod]:
 
     if is_pdf:
         try:
-            text = _extract_pdf_text(path)
-            if len(text) >= _MIN_PDF_TEXT_CHARS:
-                return text[: settings.max_document_chars], "pdf_text"
+            return _extract_pdf_hybrid(path)
         except Exception as err:
-            log.warning("PDF text extraction failed, falling back to OCR: %s", err)
-
-        if not ocr_available():
-            return "", "none"
-        try:
-            return _ocr_pdf(path)[: settings.max_document_chars], "ocr"
-        except Exception as err:
-            log.warning("PDF OCR failed: %s", err)
+            log.warning("PDF extraction failed: %s", err)
             return "", "none"
 
     if not ocr_available():

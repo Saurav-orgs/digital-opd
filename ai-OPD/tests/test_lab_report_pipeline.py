@@ -190,3 +190,40 @@ def test_multi_panel_comprehensive_regression():
     assert results["ldl : hdl cholesterol"].status == "HIGH"
     assert results["urine blood"].status == "ABNORMAL"
     assert len(ir.ecg_findings) > 0
+
+
+# ── TEST CASE 7: Hybrid Scanned Report (USG + ECG + PFT) ──
+def test_hybrid_usg_ecg_pft_report():
+    """Verify hybrid diagnostic report: extracts USG, ECG, and PFT findings."""
+    text = """
+    Customer Name : Mr.RAJIV VERMA
+    Age/Gender : 62 Y 0 M 0 D /Male
+    Collection Date : 11/Aug/2026
+
+    ULTRASOUND WHOLE ABDOMEN
+    Liver is mildly enlarged in size (153 mm), and shows diffusely increased echotexture.
+    Both kidneys show normal size. No hydronephrosis noted.
+    Prostate is enlarged in size measures 48 x 44 x 41 mm vol - 47 cc.
+    Impression: MILD HEPATOMEGALY WITH GRADE I/II FATTY CHANGES. PROSTATOMEGALY.
+
+    Section: ecg
+    P/QRS/T Axis (deg: 15. 1/26.4/20. 1
+    QT/QTc ms : 381/415
+    Longitudinal Left axis deviation, possible old inferior MI
+
+    PFT / Spirometry
+    Obstructive abnormality:Very serious
+    Restrictive anomaly:Very serious
+    """
+    ir = parse_lab_report_text(text)
+    assert ir.patient_name == "Rajiv Verma"
+    assert len(ir.ecg_findings) > 0
+    assert len(ir.radiology_findings) >= 2
+    assert len(ir.pft_findings) >= 2
+
+    sanitized = validate_and_sanitize_summary({}, ir)
+    assert len(sanitized["abnormal_values"]) >= 4
+    labels = [a["label"] for a in sanitized["abnormal_values"]]
+    assert "ECG Finding" in labels
+    assert "USG / Radiology Finding" in labels
+    assert "PFT / Spirometry Finding" in labels
