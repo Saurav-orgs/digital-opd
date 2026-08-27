@@ -388,6 +388,38 @@ class ApiClient {
         return EPrescription.fromJson(_decode(res) as Map<String, dynamic>);
       });
 
+  /// The issued prescription PDF's bytes, for handing to the share sheet.
+  ///
+  /// Fetched through the API rather than from `pdfUrl`: that presigned link
+  /// expires after five minutes, while this one carries the doctor's token and
+  /// is valid whenever they press Share.
+  Future<({List<int> bytes, String filename})> prescriptionPdf(
+          String appointmentId) =>
+      _guard(() async {
+        final res = await http.get(
+          _uri('/appointments/$appointmentId/prescription/pdf'),
+          headers: _headers(json: false),
+        );
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          // The body is JSON on every error path; let the shared decoder turn
+          // it into a readable ApiException.
+          _decode(res);
+        }
+        return (
+          bytes: res.bodyBytes,
+          filename: _filenameFrom(res.headers['content-disposition']) ??
+              'prescription.pdf',
+        );
+      });
+
+  /// The server's filename for a download, read from Content-Disposition.
+  String? _filenameFrom(String? disposition) {
+    if (disposition == null) return null;
+    final match = RegExp(r'filename="?([^";]+)"?').firstMatch(disposition);
+    final name = match?.group(1)?.trim();
+    return (name == null || name.isEmpty) ? null : name;
+  }
+
   Future<void> retryReportSummary(String reportId) =>
       _guard(() async => _post('/reports/$reportId/summary/retry'));
 

@@ -5,6 +5,8 @@ import { authApi, doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
+import { ApiError } from '../api/client';
+import { downloadFile } from '../lib/shareFile';
 
 /**
  * The doctor's own home in the admin — profile details, photo and a link to
@@ -188,7 +190,6 @@ export default function Profile() {
                       ⬇ Download QR
                     </a>
                     <ShareQrButton
-                      qrUrl={meQ.data.qr_code_url}
                       doctorName={meQ.data.name}
                       bookingUrl={
                         meQ.data.booking_url ||
@@ -414,17 +415,22 @@ function LetterheadPreview({
  * to a patient on WhatsApp wants the picture, which is what they will print or
  * forward.
  *
+ * The bytes come from the API, not from `qr_code_url`. That URL points straight
+ * at the S3 bucket, which serves the object publicly but sends no
+ * `Access-Control-Allow-Origin` header — so `fetch`ing it from this origin is
+ * blocked by the browser and this button could only ever report a failure. The
+ * <img> above still uses that URL, because images are not subject to the same
+ * restriction.
+ *
  * Web Share level 2 (`files`) is the good path and exists on the phones this
  * matters on. Where it is missing — most desktop browsers — the image is copied
- * to the clipboard instead, so it can be pasted straight into a chat. Download
- * remains as the button next to this one.
+ * to the clipboard instead, so it can be pasted straight into a chat, and
+ * failing that it is saved. Download remains as the button next to this one.
  */
 function ShareQrButton({
-  qrUrl,
   doctorName,
   bookingUrl,
 }: {
-  qrUrl: string;
   doctorName: string;
   bookingUrl: string;
 }) {
@@ -434,13 +440,8 @@ function ShareQrButton({
   const share = async () => {
     setBusy(true);
     try {
-      const blob = await fetch(qrUrl).then((r) => {
-        if (!r.ok) throw new Error('Could not load the QR image.');
-        return r.blob();
-      });
-      const file = new File([blob], `${doctorName.replace(/\s+/g, '-')}-booking-qr.png`, {
-        type: blob.type || 'image/png',
-      });
+      const { blob, filename } = await doctorsApi.myQrFile();
+      const file = new File([blob], filename, { type: blob.type || 'image/png' });
 
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({
@@ -453,18 +454,28 @@ function ShareQrButton({
 
       // No file sharing here — put the image on the clipboard instead.
       if (navigator.clipboard && 'ClipboardItem' in window) {
-        await navigator.clipboard.write([
-          new ClipboardItem({ [blob.type || 'image/png']: blob }),
-        ]);
-        toast.success('QR code copied — paste it into a chat');
-        return;
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ [blob.type || 'image/png']: blob }),
+          ]);
+          toast.success('QR code copied — paste it into a chat');
+          return;
+        } catch {
+          // Clipboard images are refused in some browsers; fall through to save.
+        }
       }
 
-      toast.error('Sharing is not supported here — use Download QR instead.');
+      downloadFile(file);
+      toast.success(
+        'QR code downloaded',
+        'This browser cannot open a share sheet — attach the saved image instead.',
+      );
     } catch (err) {
       // A user dismissing the share sheet is not an error worth shouting about.
       if ((err as Error)?.name === 'AbortError') return;
-      toast.error((err as Error)?.message ?? 'Could not share the QR code.');
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not share the QR code.',
+      );
     } finally {
       setBusy(false);
     }

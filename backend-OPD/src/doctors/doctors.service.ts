@@ -122,6 +122,26 @@ export class DoctorsService {
     return this.toView(doctor);
   }
 
+  /**
+   * The QR image's bytes. Same reason as the prescription PDF: the bucket
+   * sends no CORS headers, so the browser cannot `fetch` the S3 URL to build a
+   * File for the share sheet. The <img> on the profile page still points
+   * straight at S3 — images are not subject to that restriction.
+   */
+  async qrFile(id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const doctor = await this.getOrFail(id);
+    if (!doctor.qr_code_key) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'No QR code has been uploaded yet.',
+      });
+    }
+    const slug = doctor.public_slug || 'doctor';
+    return {
+      buffer: await this.storage.download(doctor.qr_code_key),
+      filename: `${slug}-booking-qr.png`,
+    };
+  }
+
   /** Remove the custom doctor profile QR code image. */
   async removeQr(id: string) {
     const doctor = await this.getOrFail(id);

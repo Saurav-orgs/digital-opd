@@ -1,4 +1,5 @@
 import api from './client';
+import { filenameFromDisposition } from '../lib/shareFile';
 import type {
   Appointment,
   AuthUser,
@@ -110,6 +111,18 @@ export const doctorsApi = {
   uploadMyLetterheadLogo: (file: File) => upload('/doctors/me/letterhead-logo', file),
   uploadMyQr: (file: File) => upload('/doctors/me/qr', file),
   removeMyQr: () => api.delete<Doctor>('/doctors/me/qr').then((r) => r.data),
+  /**
+   * The QR image's bytes, through the API rather than the S3 URL — S3 sends no
+   * CORS headers, so the browser cannot read that URL to build a shareable file.
+   */
+  myQrFile: () =>
+    api.get('/doctors/me/qr', { responseType: 'blob' }).then((r) => ({
+      blob: r.data as Blob,
+      filename: filenameFromDisposition(
+        r.headers['content-disposition'],
+        'booking-qr.png',
+      ),
+    })),
 };
 
 function upload(url: string, file: File) {
@@ -225,6 +238,17 @@ export const consultationApi = {
     api
       .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`)
       .then((r) => r.data),
+  /** The issued PDF itself, for the share sheet or a download. */
+  prescriptionPdf: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/prescription/pdf`, { responseType: 'blob' })
+      .then((r) => ({
+        blob: r.data as Blob,
+        filename: filenameFromDisposition(
+          r.headers['content-disposition'],
+          'prescription.pdf',
+        ),
+      })),
   saveHandwriting: (appointmentId: string, image: Blob) => {
     const fd = new FormData();
     fd.append('file', image, 'handwriting.png');

@@ -187,6 +187,44 @@ export class PrescriptionsService {
     return this.toView(await this.reload(prescription.id));
   }
 
+  /**
+   * The issued PDF's bytes, for a client that wants the document itself rather
+   * than a link — the doctor sharing a prescription into WhatsApp hands the
+   * share sheet a real file.
+   *
+   * Deliberately served through the API instead of handing out the presigned
+   * S3 URL: the bucket returns no `Access-Control-Allow-Origin`, so a browser
+   * `fetch` of that URL is blocked before it can read a byte. This route
+   * carries the API's own CORS policy, and the same permission check as every
+   * other view of the prescription.
+   */
+  async pdfFile(
+    appointmentId: string,
+    user: AuthUser,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const appointment = await this.assertAccess(appointmentId, user);
+    const prescription = await this.prescriptionModel.findOne({
+      where: {
+        appointment_id: appointmentId,
+        status: PrescriptionStatus.ISSUED,
+      },
+    });
+    if (!prescription?.pdf_key) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'This visit has no issued prescription yet.',
+      });
+    }
+
+    const who = (appointment.patient_name || 'patient')
+      .replace(/[^A-Za-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
+    return {
+      buffer: await this.storage.download(prescription.pdf_key),
+      filename: `prescription-${who || 'patient'}-${appointment.appointment_date}.pdf`,
+    };
+  }
+
   // ── patient-facing ─────────────────────────────────────────
 
   /** Issued prescription for a visit, shaped for the patient portal. */

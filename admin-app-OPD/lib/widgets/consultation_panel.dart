@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/api_client.dart';
@@ -47,6 +48,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
   Appointment? _appointment;
   bool _loading = true;
   bool _saving = false;
+  bool _sharing = false;
 
   // Which input method is showing: handwrite | voice | type | upload.
   String _mode = 'voice';
@@ -644,6 +646,36 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     return const SizedBox.shrink();
   }
 
+  /// Hands the issued prescription to the system share sheet as the PDF
+  /// itself, so the doctor can send it into WhatsApp (or anything else the
+  /// phone offers) and the patient receives the document — no link to open, no
+  /// login, nothing that expires.
+  Future<void> _sharePrescription() async {
+    setState(() => _sharing = true);
+    try {
+      final file = await _api.prescriptionPdf(widget.appointmentId);
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/${file.filename}';
+      await File(path).writeAsBytes(file.bytes);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(path, mimeType: 'application/pdf')],
+          subject: 'Prescription',
+          text: 'Prescription from your visit.',
+        ),
+      );
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } catch (e) {
+      if (mounted) {
+        showErrorSnack(context, 'Could not share the prescription.');
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
   Widget _issuedView() {
     final p = _prescription!;
     return Column(
@@ -660,6 +692,17 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                 icon: const Icon(Icons.download_outlined, size: 16),
                 label: const Text('PDF'),
               ),
+            TextButton.icon(
+              onPressed: _sharing ? null : _sharePrescription,
+              icon: _sharing
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.share_outlined, size: 16),
+              label: Text(_sharing ? 'Preparing…' : 'Share'),
+            ),
           ],
         ),
         if (p.isHandwritten && p.handwritingImageUrl != null) ...[

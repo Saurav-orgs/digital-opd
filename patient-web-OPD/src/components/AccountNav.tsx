@@ -1,13 +1,15 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bell, User, LogIn, FileText, CalendarClock, LogOut } from 'lucide-react';
+import { Bell, User, LogIn, FileText, CalendarClock, LogOut, Plus } from 'lucide-react';
 import { usePatientAuth } from '../auth/PatientAuthContext';
 import { patientApi } from '../patientApi';
+import { useDoctorCtx } from '../context/DoctorContext';
 
 /** Signed-in account menu (visits/reports/bell+badge) or a Sign-in link. */
 export const AccountNav: React.FC = () => {
   const { patient, loading, logout } = usePatientAuth();
+  const { doctor } = useDoctorCtx();
 
   const { data } = useQuery({
     queryKey: ['patient-unread-count'],
@@ -30,11 +32,25 @@ export const AccountNav: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-      <Link to="/visits" className="web-contact-pill" style={{ textDecoration: 'none' }} title="My visits">
+      {/*
+        Booking is what a patient comes back to do, so it stays reachable from
+        the visits and reports pages rather than only from the doctor's landing
+        page. Straight to that doctor's date picker when we know who they came
+        from; "/" otherwise, which explains how to find their doctor.
+      */}
+      <Link
+        to={doctor ? `/d/${doctor.slug}` : '/'}
+        className="web-cta-pill"
+        title="Book a new appointment"
+      >
+        <Plus size={15} />
+        <span>Appointment</span>
+      </Link>
+      <Link to="/visits" className="web-contact-pill web-nav-pill" style={{ textDecoration: 'none' }} title="My visits">
         <CalendarClock size={14} />
         <span>Visits</span>
       </Link>
-      <Link to="/reports" className="web-contact-pill" style={{ textDecoration: 'none' }} title="My reports">
+      <Link to="/reports" className="web-contact-pill web-nav-pill" style={{ textDecoration: 'none' }} title="My reports">
         <FileText size={14} />
         <span>Reports</span>
       </Link>

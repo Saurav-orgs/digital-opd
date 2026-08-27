@@ -7,10 +7,13 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
@@ -25,6 +28,7 @@ import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doct
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
 import { RegisterDoctorDto, RejectDoctorDto } from './dto/register-doctor.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule, UserType } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -104,6 +108,24 @@ export class DoctorsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.doctorsService.uploadQr(this.selfId(user), file);
+  }
+
+  @Get('me/qr')
+  @ApiOperation({
+    summary: 'Doctor’s own QR image bytes, for download or native share',
+  })
+  @RawResponse()
+  async ownQrFile(
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.doctorsService.qrFile(this.selfId(user));
+    res.set({
+      'Content-Type': 'image/png',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition',
+    });
+    return new StreamableFile(buffer);
   }
 
   @Delete('me/qr')

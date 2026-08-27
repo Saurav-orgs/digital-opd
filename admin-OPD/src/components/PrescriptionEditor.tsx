@@ -5,6 +5,7 @@ import type { PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
 import { Field } from './ui';
 import { ApiError } from '../api/client';
+import { shareFile } from '../lib/shareFile';
 import {
   errorsFromApiDetails,
   hasErrors,
@@ -13,6 +14,51 @@ import {
   type MedicineField,
   type PrescriptionErrors,
 } from '../lib/prescriptionValidation';
+
+/**
+ * Sends the issued prescription out through the platform's share sheet as the
+ * PDF itself — the doctor picks WhatsApp (or anything else the device offers)
+ * and the patient receives the document, not a link that expires or needs a
+ * login.
+ *
+ * The bytes come from the API rather than the presigned S3 URL next to this
+ * button: that URL is fine for the browser to *navigate* to, but cannot be
+ * read by script, because the bucket sends no CORS headers.
+ */
+function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const onShare = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await consultationApi.prescriptionPdf(appointmentId);
+      const file = new File([blob], filename, { type: 'application/pdf' });
+      const outcome = await shareFile(file, {
+        title: 'Prescription',
+        text: 'Prescription from your visit.',
+      });
+      if (outcome === 'downloaded') {
+        toast.success(
+          'Prescription downloaded',
+          'This browser cannot open a share sheet — attach the saved PDF instead.',
+        );
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not share the prescription.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button className="btn btn-sm btn-primary" onClick={onShare} disabled={busy}>
+      {busy ? 'Preparing…' : '↗ Share'}
+    </button>
+  );
+}
 
 const blankRow = (): PrescriptionMedicine => ({
   medicine_name: '',
@@ -178,11 +224,14 @@ export function PrescriptionEditor({
       <div>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="badge badge-available">Issued</span>
-          {data?.pdf_url && (
-            <a className="btn btn-sm" href={data.pdf_url} target="_blank" rel="noreferrer">
-              Download PDF
-            </a>
-          )}
+          <div className="row" style={{ gap: 8 }}>
+            {data?.pdf_url && (
+              <a className="btn btn-sm" href={data.pdf_url} target="_blank" rel="noreferrer">
+                Download PDF
+              </a>
+            )}
+            <SharePrescriptionButton appointmentId={appointmentId} />
+          </div>
         </div>
         {data?.diagnosis && (
           <p style={{ marginTop: 10 }}>

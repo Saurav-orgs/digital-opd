@@ -6,10 +6,13 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
@@ -20,6 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { ConsultationsService } from './consultations.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
+import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { UpdatePrescriptionDto } from '../prescriptions/dto/prescription.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
@@ -119,6 +123,26 @@ export class ConsultationsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.prescriptions.saveHandwriting(id, file, user);
+  }
+
+  @Get('prescription/pdf')
+  @ApiOperation({
+    summary: 'The issued prescription PDF itself, for download or native share',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
+  @RawResponse()
+  async prescriptionPdf(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.prescriptions.pdfFile(id, user);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition',
+    });
+    return new StreamableFile(buffer);
   }
 
   @Post('prescription/issue')

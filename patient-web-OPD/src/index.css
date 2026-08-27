@@ -179,6 +179,26 @@ body,
   border: 1px solid rgba(24, 95, 165, 0.15);
 }
 
+.web-cta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--primary);
+  white-space: nowrap;
+  transition: filter 0.15s ease;
+}
+
+.web-cta-pill:hover {
+  filter: brightness(1.08);
+}
+
 /* Main Container */
 .web-container {
   width: 100%;
@@ -1299,6 +1319,33 @@ body,
 }
 
 /* Small Mobile Screens (<= 580px) */
+/* Narrow screens: the bar carries the brand, this button, two pills, the bell
+   and sign-out — 413px of content in a 375px viewport once the button is
+   added. Only the primary action keeps a label, shortened, because a bare "+"
+   would echo the brand mark sitting right beside it. The other two fall back
+   to their icons, which their `title` attributes still name. */
+@media (max-width: 480px) {
+  .web-nav-links {
+    gap: 10px;
+  }
+
+  .web-nav-pill span {
+    display: none;
+  }
+
+  .web-nav-pill {
+    padding: 7px 9px;
+  }
+
+  .web-cta-pill span {
+    display: none;
+  }
+
+  .web-cta-pill::after {
+    content: 'Book';
+  }
+}
+
 @media (max-width: 580px) {
   .web-hero-badges {
     gap: 6px;
