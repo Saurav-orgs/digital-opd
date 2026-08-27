@@ -24,7 +24,9 @@ export interface PrescriptionErrors {
 const MEDICINE_LABELS: Record<MedicineField, string> = {
   medicine_name: 'Medicine name',
   strength: 'Strength',
-  dosage: 'Dosage',
+  // Field stays `dosage` on the wire (the AI returns that key); only the
+  // label the client asked for changed.
+  dosage: 'Frequency',
   timing: 'Timing',
   duration_days: 'Duration (days)',
   instructions: 'Special instructions',
@@ -65,7 +67,7 @@ function rowLabel(r: PrescriptionMedicine, index: number): string {
 
 /**
  * Checks the draft the same way the API does, but *before* sending it, so a
- * missing dosage reads as "Please fill Dosage for Medicine #2" next to the
+ * missing frequency reads as "Please fill Frequency for Medicine #2" next to the
  * actual input instead of a generic failure toast after the round trip.
  *
  * `mode: 'save'` only enforces what blocks a draft from being stored;
@@ -100,7 +102,7 @@ export function validatePrescription(
     }
 
     if (mode === 'issue' && !text(row.dosage)) {
-      setRow(index, 'dosage', 'Please fill the dosage, e.g. 1-0-1.');
+      setRow(index, 'dosage', 'Please fill the frequency, e.g. 1-0-1.');
     }
 
     const days = row.duration_days;

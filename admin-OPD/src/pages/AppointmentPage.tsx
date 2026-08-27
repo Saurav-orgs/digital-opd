@@ -9,7 +9,8 @@ import { Badge, Loading } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
-import { appointmentRefetchInterval } from '../lib/summaryPolling';
+import { CombinedSummaryDetail } from '../components/CombinedSummaryDetail';
+import { appointmentRefetchInterval, hasTrajectory } from '../lib/summaryPolling';
 
 export default function AppointmentPage() {
   const { id } = useParams<{ id: string }>();
@@ -193,13 +194,16 @@ export default function AppointmentPage() {
               </div>
 
               {/*
-                One combined card, not two. When the patient has an earlier
-                visit, the across-visits comparison is the more useful read and
-                already folds this visit's reports into it; a first visit falls
-                back to the plain across-reports summary.
+                One combined card, not two. The across-visits comparison wins
+                when it has something to say — it already folds this visit's
+                reports into it. But a trajectory with nothing comparable in it
+                is not worth the doctor's first glance, and showing it would
+                bury this visit's own summary, so that case falls back too.
               */}
               <div className="stack" style={{ gap: 10, marginBottom: 12 }}>
-                {a.progress_summary_status ? (
+                {a.progress_summary_status &&
+                (a.progress_summary_status !== 'ready' ||
+                  hasTrajectory(a.progress_summary)) ? (
                   <ProgressSummaryCard
                     appointmentId={a.id}
                     summary={a.progress_summary}
@@ -216,6 +220,12 @@ export default function AppointmentPage() {
                     error={a.reports_summary_error}
                     count={a.reports_summary_count}
                     reportCount={a.reports.length}
+                    reports={a.reports}
+                    /* Explains why no trajectory is shown despite an earlier visit. */
+                    noComparison={
+                      a.progress_summary_status === 'ready' &&
+                      !hasTrajectory(a.progress_summary)
+                    }
                     onRetried={invalidate}
                   />
                 )}
@@ -431,7 +441,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
  * stays compiled and ready rather than rotting behind a comment.
  */
 export function VisitReportSummary({
-  appointmentId, summary, status, error, count, reportCount, onRetried,
+  appointmentId, summary, status, error, count, reportCount, reports, noComparison, onRetried,
 }: {
   appointmentId: string;
   summary?: import('../api/types').ReportAiSummary | null;
@@ -439,6 +449,10 @@ export function VisitReportSummary({
   error?: string | null;
   count?: number;
   reportCount: number;
+  /** This visit's reports, for the multi-report breakdown below the summary. */
+  reports?: import('../api/types').PatientReport[];
+  /** True when an earlier visit exists but shares no comparable measurement. */
+  noComparison?: boolean;
   onRetried: () => void;
 }) {
   const toast = useToast();
@@ -454,7 +468,7 @@ export function VisitReportSummary({
     <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--primary-tint, #eef4ff)', border: '1px solid var(--primary, #cddffb)' }}>
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
         <strong style={{ fontSize: 13 }}>
-          Combined summary{count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
+          Combined AI summary{count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
         </strong>
         {status === 'ready' && (
           <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
@@ -472,7 +486,16 @@ export function VisitReportSummary({
           </button>
         </div>
       ) : summary ? (
-        <SummaryBody summary={summary} />
+        <>
+          <SummaryBody summary={summary} />
+          {noComparison && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+              The previous visit shares no comparable measurement with this one,
+              so there is no trend to show.
+            </div>
+          )}
+          {reports && <CombinedSummaryDetail reports={reports} />}
+        </>
       ) : (
         <span className="muted" style={{ fontSize: 12.5 }}>Waiting for report summaries…</span>
       )}

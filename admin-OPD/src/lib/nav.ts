@@ -24,7 +24,7 @@ export const NAV: NavItem[] = [
   { path: '/dashboard', label: 'Appointments', module: 'dashboard', icon: '🗓', doctorOnly: true },
   { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: '🧪', doctorOnly: true },
   { path: '/reports', label: 'Reports', module: 'reports', icon: '📄', doctorOnly: true },
-  { path: '/blocked-numbers', label: 'Blocked numbers', module: 'appointments', icon: '🚫', doctorOnly: true },
+  { path: '/blocked-numbers', label: 'Blocked Patients', module: 'appointments', icon: '🚫', doctorOnly: true },
   // Hidden for now at the client's request; routes and permissions still work.
   { path: '/users', label: 'Users', module: 'users', icon: '👤', hidden: true },
   { path: '/roles', label: 'Roles', module: 'roles', icon: '🔑', hidden: true },

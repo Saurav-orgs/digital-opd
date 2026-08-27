@@ -166,6 +166,113 @@ def clean_test_name(raw_name: str) -> str:
 
 # Lines of a "Test: X / Result: Y / Reference: Z" block, matched one line at a
 # time by the scanner below.
+
+# ── Plausibility gate ────────────────────────────────────────
+#
+# The line patterns below are shaped like "Name Value Unit Low - High", which
+# ordinary English prose also fits. A sentence such as
+#
+#     "...detectable as early as 5 days after fever starts and usually
+#      lasts 30 to 90 days..."
+#
+# parses as a test called "early as", value 5, unit "days after fever starts
+# and usually last", range 30-90 — and is then reported to the doctor as a LOW
+# result. Everything downstream trusts this parser precisely because it is
+# deterministic, so a fabricated result here reaches the summary as fact.
+#
+# Two cheap signals separate a real row from a sentence: real units are short
+# (mg/dL, %, U/L), and real test names are not prose fragments.
+
+# A unit longer than this is a sentence fragment, not a unit.
+_MAX_UNIT_WORDS = 3
+_MAX_UNIT_CHARS = 20
+
+# Words no real test name starts or ends with. A name *containing* one may be
+# legitimate ("Total Protein, Serum"), so only the edges are checked.
+# "a"/"an" are deliberately absent: a real name may legitimately end in a bare
+# letter ("Vitamin A", "Apolipoprotein - A1"), and rejecting those costs far
+# more than the prose they would have caught.
+_PROSE_EDGE_WORDS = {
+    "as", "the", "and", "or", "but", "if", "of", "in", "on", "at",
+    "to", "by", "for", "with", "from", "than", "then", "that", "this", "these",
+    "is", "are", "was", "were", "be", "been", "has", "have", "had", "not",
+    "usually", "early", "late", "after", "before", "during", "within", "about",
+    "approximately", "up", "over", "under", "more", "less", "least", "most",
+    "may", "can", "should", "would", "such", "very", "also", "however",
+}
+
+
+def is_plausible_test(name: str, unit: str | None = None) -> bool:
+    """Whether a parsed row looks like a lab result rather than a sentence."""
+    cleaned = (name or "").strip()
+    if len(cleaned) < 2:
+        return False
+
+    # A unit that runs on is the strongest tell that prose was matched.
+    u = (unit or "").strip()
+    if u:
+        if len(u) > _MAX_UNIT_CHARS or len(u.split()) > _MAX_UNIT_WORDS:
+            return False
+        # Every real unit is either "%" or contains a letter (mg/dL, IU/mL,
+        # 10^3/µL, Ratio). A purely numeric "unit" like "-2.5" or "-15" means
+        # the pattern chewed through a reference table — "1st trimester 0.1
+        # -2.5" and "Extreme-risk group- category C 10 -15" both land here.
+        if u != "%" and not re.search(r"[A-Za-zµμ]", u):
+            return False
+
+    # Alphanumeric tokens, so "A1" and "HbA1c" survive as single units.
+    tokens = re.findall(r"[A-Za-z0-9]+", cleaned.lower())
+    if not tokens:
+        return False
+
+    def is_prose_word(tok: str) -> bool:
+        # Only a purely alphabetic token of two or more letters can be a prose
+        # word — "A1" is a test suffix, "as" is English.
+        return tok.isalpha() and len(tok) > 1 and tok in _PROSE_EDGE_WORDS
+
+    # "early as", "usually last" — prose fragments, not test names.
+    if is_prose_word(tokens[0]) or is_prose_word(tokens[-1]):
+        return False
+
+    words = tokens
+
+    # A test name is a label, not a clause. Real ones are short, even the
+    # verbose ones ("Glucose, Fasting, Plasma" is four words).
+    if len(words) > 8:
+        return False
+
+    return True
+
+
+# ── Reference-first column layouts ───────────────────────────
+#
+# Hospital "investigation summary" sheets print the reference interval BEFORE
+# the unit and the result, and carry one result column per visit — the current
+# one first, earlier ones after it:
+#
+#   GLYCATED Hb (HbA1c)   < 5.70        %        6.60   8.60
+#   TSH                   0.27 - 4.20   uIU/mL   2.800
+#
+# Patterns A-C all read a row left to right as name, value, unit, reference, so
+# they match nothing here and a whole report parses as zero results — which the
+# summariser's guard then reads as "no evidence for any of these panels". These
+# two run only after A-D have failed, so no layout already handled reaches them.
+_UNIT_TOKEN = r"[A-Za-z%µμ][A-Za-z0-9µμ/%^.\-]{0,14}"
+# A leading asterisk marks a calculated parameter ("*LDL CHOLESTEROL").
+_NAME_HEAD = r"\*?\s*([A-Za-z][A-Za-z0-9\s\(\)\-\,\/\+\:\.]*?)"
+# Trailing columns are previous visits; only the first result is current. The
+# end anchor is what keeps these off prose — a sentence rarely stops on a bare
+# number.
+_PRIOR_COLUMNS = r"(?:\s+\d+(?:\.\d+)?)*\s*$"
+
+_REF_FIRST_BOUND = re.compile(
+    rf"^{_NAME_HEAD}\s*(<=|<|>=|>)\s*(\d+(?:\.\d+)?)\s+({_UNIT_TOKEN})\s+(\d+(?:\.\d+)?){_PRIOR_COLUMNS}"
+)
+_REF_FIRST_RANGE = re.compile(
+    rf"^{_NAME_HEAD}\s+(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s+({_UNIT_TOKEN})\s+(\d+(?:\.\d+)?){_PRIOR_COLUMNS}"
+)
+
+
 _KV_NAME = re.compile(r"(?i)(?:test|investigation|parameter)\s*[:\-]\s*(.+?)\s*$")
 _KV_VALUE = re.compile(
     r"(?i)(?:result|observed value|value)\s*[:\-]\s*"
@@ -227,6 +334,57 @@ def _iter_key_value_blocks(text: str):
         )
 
 
+def _is_same_assay_twice(a: LabResult, b: LabResult) -> bool:
+    """Whether two rows are one assay the lab printed under both its names.
+
+    Reports do this: "GLYCATED Hb (HbA1c)" and "GLYCOSYLATED Hb (HbA1c)", same
+    value, same interval, one below the other. Reporting both makes the
+    summariser say it twice.
+
+    Identical value, unit, interval and panel is not enough on its own — a
+    differential can list "Monocyte Count 5 % 2-10" and "Eosinophil Count
+    5 % 2-10" and those are two real results. So the names must also differ in
+    exactly one word, and those two words must share a prefix: glycated and
+    glycosylated do, monocyte and eosinophil do not.
+    """
+    if (a.value, a.unit, a.reference_raw, a.category) != (b.value, b.unit, b.reference_raw, b.category):
+        return False
+
+    a_tokens = re.findall(r"[A-Za-z0-9]+", a.test_name.lower())
+    b_tokens = re.findall(r"[A-Za-z0-9]+", b.test_name.lower())
+    if len(a_tokens) != len(b_tokens):
+        return False
+
+    differing = [(x, y) for x, y in zip(a_tokens, b_tokens) if x != y]
+    if len(differing) != 1:
+        return False
+
+    x, y = differing[0]
+    shared = 0
+    for cx, cy in zip(x, y):
+        if cx != cy:
+            break
+        shared += 1
+    return shared >= 4
+
+
+def _drop_duplicate_assays(ir: ParsedReportIR) -> None:
+    """Keep the first spelling of any assay recorded twice."""
+    kept: list[LabResult] = []
+    dropped: set[int] = set()
+    for r in ir.all_results:
+        if any(_is_same_assay_twice(r, k) for k in kept):
+            dropped.add(id(r))
+            continue
+        kept.append(r)
+
+    if not dropped:
+        return
+    ir.all_results = kept
+    ir.abnormal_results = [r for r in ir.abnormal_results if id(r) not in dropped]
+    ir.normal_results = [r for r in ir.normal_results if id(r) not in dropped]
+
+
 def parse_lab_report_text(text: str) -> ParsedReportIR:
     """Deterministic parser extracting test records and evaluating clinical reference ranges."""
     ir = ParsedReportIR()
@@ -261,6 +419,38 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
     date_m = re.search(r"(?i)(?:sample collection date|collection date|date of collection|report date|date)\s*[:\n]\s*(\d{1,2}[\/\-\.][A-Za-z0-9]+[\/\-\.]\d{2,4})", text)
     if date_m:
         ir.date = date_m.group(1).strip()
+
+    # Hospital summary sheets label these fields one per line and run a second
+    # field on the same line ("Age : 62 Yrs   Episode No. : OP16484377"), which
+    # the combined patterns above cannot reach. Each fallback only fills a field
+    # still empty, so no layout that already parses is affected.
+    if not ir.patient_name:
+        name_m = re.search(
+            r"(?i)\bname\s*[:\n]\s*(?:Mr\.?|Ms\.?|Mrs\.?|Dr\.?)?\s+([A-Za-z][A-Za-z\s]+?)"
+            r"(?:\s+(?:registration|reg\.?\s*no|episode|uhid|ip\s*no|op\s*no|patient\s*id)\b|\r|\n|$)",
+            text,
+        )
+        if name_m:
+            ir.patient_name = name_m.group(1).strip().title()
+
+    if not ir.age:
+        age_only_m = re.search(r"(?i)^\s*age\s*[:\-]\s*(\d+)\s*(?:yrs?|years?|y)\b", text, re.MULTILINE)
+        if age_only_m:
+            ir.age = f"{age_only_m.group(1)} Yrs"
+
+    if not ir.gender:
+        gender_only_m = re.search(r"(?i)^\s*(?:gender|sex)\s*[:\-]\s*(male|female)\b", text, re.MULTILINE)
+        if gender_only_m:
+            ir.gender = gender_only_m.group(1).capitalize()
+
+    if not ir.date:
+        date_alt_m = re.search(
+            r"(?i)(?:date of admission|date of registration|date of reporting|reported on|collected on)"
+            r"\s*[:\-]?\s*(\d{1,2}[\/\-\.][A-Za-z0-9]+[\/\-\.]\d{2,4})",
+            text,
+        )
+        if date_alt_m:
+            ir.date = date_alt_m.group(1).strip()
 
     # 2. Extract ECG findings if present
     for ecg_pat in [
@@ -323,7 +513,12 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
     # 2b. Multi-Line Key-Value Block Parser (e.g. Test: X \n Result: Y \n Reference: Z)
     for raw_name, val_str, unit, low_str, high_str in _iter_key_value_blocks(text):
         test_name = clean_test_name(raw_name)
-        if test_name and len(test_name) >= 2 and test_name.lower() not in seen_tests:
+        if (
+            test_name
+            and len(test_name) >= 2
+            and test_name.lower() not in seen_tests
+            and is_plausible_test(test_name, unit)
+        ):
             try:
                 val = float(val_str)
                 low_ref = float(low_str)
@@ -381,6 +576,9 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
             test_name = clean_test_name(raw_name)
             if not test_name or len(test_name) < 2 or test_name.lower() in seen_tests:
                 continue
+            # Prose can satisfy this pattern; make sure it is really a lab row.
+            if not is_plausible_test(test_name, unit):
+                continue
 
             try:
                 val = float(val_str)
@@ -433,6 +631,9 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
             test_name = clean_test_name(raw_name)
             if not test_name or len(test_name) < 2 or test_name.lower() in seen_tests:
                 continue
+            # Prose can satisfy this pattern; make sure it is really a lab row.
+            if not is_plausible_test(test_name, unit):
+                continue
 
             try:
                 val = float(val_str)
@@ -476,6 +677,9 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
 
             test_name = clean_test_name(raw_name)
             if not test_name or len(test_name) < 2 or test_name.lower() in seen_tests:
+                continue
+            # Prose can satisfy this pattern; make sure it is really a lab row.
+            if not is_plausible_test(test_name, unit):
                 continue
 
             try:
@@ -522,6 +726,9 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
             test_name = clean_test_name(raw_name)
             if not test_name or len(test_name) < 2 or test_name.lower() in seen_tests:
                 continue
+            # Prose can satisfy this pattern; make sure it is really a lab row.
+            if not is_plausible_test(test_name, unit):
+                continue
 
             is_norm = (val_str.lower() in ("negative", "nil", "absent", "normal")) and (ref_str.lower() in ("negative", "nil", "absent", "normal"))
             status = "NORMAL" if is_norm else "ABNORMAL"
@@ -547,4 +754,89 @@ def parse_lab_report_text(text: str) -> ParsedReportIR:
                 ir.normal_results.append(result)
             continue
 
+        # ── Pattern E: Reference First, Bounded (Test  < Ref  Unit  Value …) ──
+        m_ref_bound = _REF_FIRST_BOUND.search(line)
+        if m_ref_bound:
+            raw_name, op, thresh_str, unit, val_str = m_ref_bound.groups()
+            unit = unit.strip()
+            test_name = clean_test_name(raw_name.strip())
+            if (
+                test_name
+                and len(test_name) >= 2
+                and test_name.lower() not in seen_tests
+                and is_plausible_test(test_name, unit)
+            ):
+                try:
+                    val = float(val_str)
+                    thresh = float(thresh_str)
+                    if op.startswith("<"):
+                        status = "HIGH" if val > thresh else "NORMAL"
+                        low_ref, high_ref = None, thresh
+                    else:
+                        status = "LOW" if val < thresh else "NORMAL"
+                        low_ref, high_ref = thresh, None
+
+                    result = LabResult(
+                        test_name=test_name,
+                        value=val_str,
+                        numeric_value=val,
+                        unit=unit,
+                        reference_raw=f"{op} {thresh_str} {unit}".strip(),
+                        reference_low=low_ref,
+                        reference_high=high_ref,
+                        status=status,
+                        category=classify_category(test_name),
+                    )
+
+                    seen_tests.add(test_name.lower())
+                    ir.all_results.append(result)
+                    if status in ("LOW", "HIGH"):
+                        ir.abnormal_results.append(result)
+                    else:
+                        ir.normal_results.append(result)
+                    continue
+                except (ValueError, TypeError):
+                    pass
+
+        # ── Pattern F: Reference First, Ranged (Test  Low - High  Unit  Value …) ──
+        m_ref_range = _REF_FIRST_RANGE.search(line)
+        if m_ref_range:
+            raw_name, low_str, high_str, unit, val_str = m_ref_range.groups()
+            unit = unit.strip()
+            test_name = clean_test_name(raw_name.strip())
+            if (
+                test_name
+                and len(test_name) >= 2
+                and test_name.lower() not in seen_tests
+                and is_plausible_test(test_name, unit)
+            ):
+                try:
+                    val = float(val_str)
+                    low_ref = float(low_str)
+                    high_ref = float(high_str)
+                    status = "LOW" if val < low_ref else "HIGH" if val > high_ref else "NORMAL"
+
+                    result = LabResult(
+                        test_name=test_name,
+                        value=val_str,
+                        numeric_value=val,
+                        unit=unit,
+                        reference_raw=f"{low_str} - {high_str} {unit}".strip(),
+                        reference_low=low_ref,
+                        reference_high=high_ref,
+                        status=status,
+                        category=classify_category(test_name),
+                    )
+
+                    seen_tests.add(test_name.lower())
+                    ir.all_results.append(result)
+                    if status in ("LOW", "HIGH"):
+                        ir.abnormal_results.append(result)
+                    else:
+                        ir.normal_results.append(result)
+                    continue
+                except (ValueError, TypeError):
+                    pass
+
+    _drop_duplicate_assays(ir)
     return ir

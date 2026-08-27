@@ -367,7 +367,7 @@ export class PrescriptionsService {
     const incomplete = medicines.find((m) => !m.dosage?.trim());
     if (incomplete) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: `Please set the dosage for "${incomplete.medicine_name}" before issuing.`,
+        message: `Please set the frequency for "${incomplete.medicine_name}" before issuing.`,
       });
     }
   }

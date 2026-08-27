@@ -227,3 +227,230 @@ def test_hybrid_usg_ecg_pft_report():
     assert "ECG Finding" in labels
     assert "USG / Radiology Finding" in labels
     assert "PFT / Spirometry Finding" in labels
+
+
+# ── TEST CASE 8: Reference-First Column Layout (hospital investigation summary) ──
+def test_reference_first_investigation_summary():
+    """Hospital sheets print reference, then unit, then one result column per visit.
+
+    This layout used to parse to zero results, which the guard then read as "no
+    evidence for any panel" and stripped the lipid and thyroid findings out of
+    a summary that had them right.
+    """
+    text = """
+    SIR GANGA RAM HOSPITAL
+    INVESTIGATION SUMMARY
+    Name : MR SANJEEV BHATIA Registration No. : 0884903
+    Age : 62 Yrs Episode No. : OP16484377
+    Gender : Male Date of Admission : 25-Jul-2026 10:06 AM
+    Investigation Bio. Ref. Interval Units (25-Jul-2026 (28-May-2026
+    GLYCATED Hb (HbA1c) < 5.70 % 6.60 8.60
+    TOTAL CHOLESTEROL < 190.00 mg/dL 112.00
+    HDL CHOLESTEROL > 40.00 mg/dL 44.00
+    *LDL CHOLESTEROL < 100.00 mg/dL 58.00
+    TRIGLYCERIDES, SERUM < 150.00 mg/dL 70.00
+    *NON - HDL < 130.00 mg/dL 68
+    TSH 0.27 - 4.20 uIU/mL 2.800
+    """
+    ir = parse_lab_report_text(text)
+    assert ir.patient_name == "Sanjeev Bhatia"
+    assert ir.age == "62 Yrs"
+    assert ir.gender == "Male"
+    assert ir.date == "25-Jul-2026"
+    assert len(ir.all_results) == 7
+
+    results = {r.test_name.lower(): r for r in ir.all_results}
+    hba1c = results["glycated hb (hba1c)"]
+    assert hba1c.status == "HIGH"
+    # The current visit is the first result column, not the previous 8.60.
+    assert hba1c.numeric_value == 6.60
+    assert results["total cholesterol"].status == "NORMAL"
+    # "> 40.00" is a floor, so 44 is normal — not a value above a ceiling.
+    assert results["hdl cholesterol"].status == "NORMAL"
+    assert results["ldl cholesterol"].status == "NORMAL"
+    assert results["non - hdl"].status == "NORMAL"
+    assert results["tsh"].status == "NORMAL"
+    assert results["tsh"].category == "Thyroid Profile"
+    assert len(ir.abnormal_results) == 1
+
+
+# ── TEST CASE 9: Reference-First Patterns Must Not Fire On Prose Or Legends ──
+def test_reference_first_patterns_ignore_prose_and_legends():
+    """The new patterns end-anchor on a result, so tables of ranges stay out."""
+    text = """
+    TSH REFERENCE INTERVALS IN PREGNANCY
+    1st trimester 0.1 - 2.5 mIU/L
+    2nd trimester 0.2 - 3.0 mIU/L
+    Desirable Total Cholesterol < 200.00 mg/dL
+    Optimal LDL < 100.00 mg/dL
+    NS1 antigen is detectable as early as 5 days after fever starts and usually
+    lasts 30 to 90 days in primary infection.
+    """
+    ir = parse_lab_report_text(text)
+    assert ir.all_results == []
+
+
+# ── TEST CASE 10: Document Text Is Evidence When The Parser Reads Nothing ──
+def test_grounding_keeps_panels_the_document_itself_names():
+    """An unparseable layout must not strip panels the report plainly contains."""
+    raw_text = """
+    LIPID PROFILE, SERUM
+    TOTAL CHOLESTEROL < 190.00 mg/dL 112.00
+    THYROID - STIMULATING HORMONE (TSH), SERUM
+    TSH 0.27 - 4.20 uIU/mL 2.800
+    """
+    ir = parse_lab_report_text("Nothing parseable here.")
+    assert ir.all_results == []
+
+    model = {
+        "summary": (
+            "Total cholesterol is 112.00 mg/dL. "
+            "TSH is 2.800 uIU/mL, inside its reference interval."
+        ),
+        "key_findings": ["Total cholesterol 112.00 mg/dL", "TSH 2.800 uIU/mL"],
+        "abnormal_values": [],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text=raw_text)
+    assert "cholesterol" in sanitized["summary"].lower()
+    assert "tsh" in sanitized["summary"].lower()
+    assert len(sanitized["key_findings"]) == 2
+
+
+# ── TEST CASE 11: Panels The Document Never Mentions Are Still Stripped ──
+def test_grounding_still_strips_panels_with_no_evidence_anywhere():
+    """The hallucination guard must survive the document-evidence relaxation."""
+    ir = parse_lab_report_text("Nothing parseable here.")
+    model = {
+        "summary": "Liver function is normal. Renal parameters including creatinine are unremarkable.",
+        "key_findings": ["Liver enzymes normal", "Creatinine normal"],
+        "abnormal_values": [],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text="A chest radiograph was performed.")
+    assert "liver" not in sanitized["summary"].lower()
+    assert "creatinine" not in sanitized["summary"].lower()
+    assert sanitized["key_findings"] == []
+
+
+# ── TEST CASE 12: Unverified Abnormals Survive Instead Of Being Blanked ──
+def test_abnormal_values_kept_when_engine_verified_nothing():
+    """An empty engine list is the absence of a finding, not a finding of none."""
+    ir = parse_lab_report_text("Nothing parseable here.")
+    model = {
+        "summary": "Haemoglobin is low at 9.1 g/dL.",
+        "key_findings": ["Haemoglobin 9.1 g/dL"],
+        "abnormal_values": [
+            {"label": "Haemoglobin", "value": "9.1 g/dL", "reference": "13.0 - 17.0", "direction": "low"},
+            {"label": "", "value": "", "direction": "high"},  # dropped: no content
+            "not a dict",                                     # dropped: wrong shape
+        ],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text="Haemoglobin 9.1 g/dL")
+    assert len(sanitized["abnormal_values"]) == 1
+    assert sanitized["abnormal_values"][0]["label"] == "Haemoglobin"
+    assert sanitized["abnormal_values"][0]["direction"] == "low"
+
+
+def test_verified_abnormals_still_override_the_model():
+    """When the engine did read values, its list stays authoritative."""
+    text = """
+    Patient Name: Anita Sen
+    Hemoglobin 14.2 g/dL 13.0 - 17.0
+    Platelet Count 45 10^3/µL 150 - 450
+    """
+    ir = parse_lab_report_text(text)
+    model = {"summary": "x", "key_findings": [], "abnormal_values": [
+        {"label": "Invented Test", "value": "999", "direction": "high"},
+    ]}
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text=text)
+    labels = [a["label"] for a in sanitized["abnormal_values"]]
+    assert "Invented Test" not in labels
+    assert any("platelet" in l.lower() for l in labels)
+
+
+# ── TEST CASE 13: Panel-Scoped Normality Survives Alongside An Abnormality ──
+def test_panel_scoped_normal_claim_survives_an_abnormal_result():
+    """"The lipid profile is all normal" is true next to a high HbA1c."""
+    text = """
+    Patient Name: Sanjeev Bhatia
+    Glycosylated Hemoglobin (HbA1c) 6.6 % 4 - 5.6
+    Total Cholesterol 112 mg/dL 0 - 190
+    Triglycerides 70 mg/dL 0 - 150
+    """
+    ir = parse_lab_report_text(text)
+    assert len(ir.abnormal_results) == 1
+
+    model = {
+        "summary": (
+            "HbA1c is elevated at 6.6%. "
+            "The lipid profile parameters are all within normal limits."
+        ),
+        "key_findings": ["Lipid profile: all parameters within normal limits"],
+        "abnormal_values": [],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text=text)
+    assert "lipid" in sanitized["summary"].lower()
+    assert sanitized["key_findings"] == ["Lipid profile: all parameters within normal limits"]
+
+
+def test_report_wide_normal_claim_still_removed():
+    """The dangerous claim — that the whole report is clear — must still go."""
+    text = """
+    Patient Name: Sanjeev Bhatia
+    Glycosylated Hemoglobin (HbA1c) 6.6 % 4 - 5.6
+    Total Cholesterol 112 mg/dL 0 - 190
+    """
+    ir = parse_lab_report_text(text)
+    model = {
+        "summary": "All parameters are within normal limits. No abnormal findings were noted.",
+        "key_findings": ["No abnormal findings"],
+        "abnormal_values": [],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text=text)
+    assert "no abnormal findings" not in sanitized["summary"].lower()
+    assert "all parameters are within normal limits" not in sanitized["summary"].lower()
+    # The false claim is replaced by the finding that contradicted it, not by
+    # an empty list.
+    assert all("no abnormal findings" not in f.lower() for f in sanitized["key_findings"])
+    assert any("hba1c" in f.lower() for f in sanitized["key_findings"])
+
+
+def test_all_clear_that_names_a_normal_panel_but_covers_the_report_is_removed():
+    """A panel named *after* the quantifier does not scope the claim."""
+    text = """
+    Patient Name: Sanjeev Bhatia
+    Glycosylated Hemoglobin (HbA1c) 6.6 % 4 - 5.6
+    Total Cholesterol 112 mg/dL 0 - 190
+    """
+    ir = parse_lab_report_text(text)
+    model = {
+        "summary": "All parameters, including the lipid profile, are within normal limits.",
+        "key_findings": [],
+        "abnormal_values": [],
+    }
+    sanitized = validate_and_sanitize_summary(model, ir, raw_text=text)
+    assert "all parameters" not in sanitized["summary"].lower()
+
+
+# ── TEST CASE 14: One Assay Printed Under Two Names ──
+def test_synonym_rows_collapse_to_one_result():
+    """Labs print HbA1c under both spellings; the doctor should see it once."""
+    text = """
+    Name : MR SANJEEV BHATIA Registration No. : 0884903
+    GLYCATED Hb (HbA1c) < 5.70 % 6.60 8.60
+    GLYCOSYLATED Hb (HbA1c) < 5.70 % 6.60 8.60
+    """
+    ir = parse_lab_report_text(text)
+    assert len(ir.all_results) == 1
+    assert len(ir.abnormal_results) == 1
+    assert ir.all_results[0].status == "HIGH"
+
+
+def test_distinct_tests_sharing_a_value_are_both_kept():
+    """Two real results that happen to match must never be collapsed."""
+    text = """
+    Patient Name: Ramesh Patel
+    Monocyte Count 5 % 2 - 10
+    Eosinophil Count 5 % 2 - 10
+    """
+    ir = parse_lab_report_text(text)
+    assert len(ir.all_results) == 2

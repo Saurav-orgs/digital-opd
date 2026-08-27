@@ -862,7 +862,8 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                   initialValue: m.dosage,
                   enabled: widget.canEdit,
                   decoration: const InputDecoration(
-                    labelText: 'Dosage',
+                    // Label only — `m.dosage` stays the wire field the AI fills.
+                    labelText: 'Frequency',
                     hintText: '1-0-1',
                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),

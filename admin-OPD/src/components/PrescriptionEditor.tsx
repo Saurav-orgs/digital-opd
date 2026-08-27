@@ -417,7 +417,7 @@ function MedicineRow({
       </div>
 
       <div className="grid cols-2" style={{ gap: 8 }}>
-        <Field label="Dosage" error={errors?.dosage}>
+        <Field label="Frequency" error={errors?.dosage}>
           <input
             className="input"
             disabled={!canEdit}

@@ -376,6 +376,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 12),
+          // Clinic / practice name commented out for now as requested
+          /*
           LabeledField(
             label: 'Clinic / practice name',
             child: TextField(
@@ -384,6 +386,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: const InputDecoration(hintText: 'Rao Heart Clinic'),
             ),
           ),
+          */
           LabeledField(
             label: 'Address',
             child: TextField(
@@ -404,7 +407,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          // Logo row
+          // Logo upload row commented out as requested by client design update
+          /*
           Row(
             children: [
               if (me.clinicLogoUrl != null && me.clinicLogoUrl!.isNotEmpty)
@@ -438,6 +442,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
             ],
           ),
+          */
           const SizedBox(height: 14),
           _letterheadPreview(me),
           if (_canEdit) ...[
@@ -456,105 +461,194 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// A faithful mini of the PDF letterhead band, so the doctor sees their pad.
+  /// A faithful mini of the new PDF letterhead layout.
   Widget _letterheadPreview(Doctor me) {
-    const brand = Color(0xFF0F766E);
-    final clinicName = _clinicName.text.trim().isNotEmpty
-        ? _clinicName.text.trim()
-        : (_name.text.trim().isNotEmpty ? _name.text.trim() : 'Your clinic');
-    final creds = [_qualifications.text.trim(), _specialization.text.trim()]
-        .where((s) => s.isNotEmpty)
-        .join('  •  ');
-    final contact = [_clinicAddress.text.trim(), _clinicPhone.text.trim()]
-        .where((s) => s.isNotEmpty)
-        .join('\n');
-    final showDoctorLine = clinicName != _name.text.trim();
+    const accent = Color(0xFF1B6EF3);
+    final docName = _name.text.trim().isNotEmpty
+        ? (_name.text.trim().toLowerCase().startsWith('dr.')
+            ? _name.text.trim()
+            : 'Dr. ${_name.text.trim()}')
+        : 'Dr. Doctor Name';
+    final qualifications = _qualifications.text.trim().isNotEmpty
+        ? _qualifications.text.trim()
+        : 'M.B.B.S.';
+    final specialization = _specialization.text.trim().isNotEmpty
+        ? _specialization.text.trim()
+        : (_clinicName.text.trim().isNotEmpty ? _clinicName.text.trim() : '');
+    final address = _clinicAddress.text.trim().isNotEmpty
+        ? _clinicAddress.text.trim()
+        : 'Address';
+    final phone = _clinicPhone.text.trim();
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      padding: const EdgeInsets.all(14),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Top blue bar
           Container(
+            height: 3.5,
             width: double.infinity,
-            color: brand,
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (me.clinicLogoUrl != null && me.clinicLogoUrl!.isNotEmpty) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.all(2),
-                      child: Image.network(me.clinicLogoUrl!,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) =>
-                              const SizedBox(width: 40, height: 40)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(clinicName,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 17)),
-                      if (creds.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: Text(creds,
-                              style: const TextStyle(
-                                  color: Color(0xFFDCEDEA), fontSize: 10.5)),
-                        ),
-                      if (showDoctorLine && _name.text.trim().isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(_name.text.trim(),
-                              style: const TextStyle(
-                                  color: Color(0xFFCFE6E2),
-                                  fontSize: 10.5,
-                                  fontStyle: FontStyle.italic)),
-                        ),
-                    ],
-                  ),
-                ),
-                if (contact.isNotEmpty)
-                  SizedBox(
-                    width: 120,
-                    child: Text(contact,
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(
-                            color: Color(0xFFEAF3F1), fontSize: 9.5, height: 1.4)),
-                  ),
-              ],
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
-          Container(height: 3, color: const Color(0xFF0B5750)),
-          Container(
-            width: double.infinity,
-            color: Colors.white,
-            padding: const EdgeInsets.all(14),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Rx',
+          const SizedBox(height: 12),
+          // Doctor & Address row
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      docName,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    if (qualifications.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          qualifications,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                      ),
+                    if (specialization.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          specialization,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    address,
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                    ),
+                  ),
+                  if (phone.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        phone,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1, thickness: 0.5, color: Color(0xFFF3F4F6)),
+          const SizedBox(height: 10),
+          // Patient info row
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Patient Name',
                     style: TextStyle(
-                        color: brand,
-                        fontWeight: FontWeight.bold,
-                        fontStyle: FontStyle.italic,
-                        fontSize: 22)),
-                SizedBox(height: 6),
-                Text('Patient details, medicines and advice appear here.',
-                    style:
-                        TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-              ],
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                    ),
+                  ),
+                  SizedBox(height: 1),
+                  Text(
+                    'Patient Name (Age yrs, Gender)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                'Date',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1, thickness: 0.5, color: Color(0xFFF3F4F6)),
+          const SizedBox(height: 8),
+          const Text(
+            'TREATMENT ADVICE',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Medicines and advice appear here.',
+            style: TextStyle(
+              fontSize: 9.5,
+              fontStyle: FontStyle.italic,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1, thickness: 0.5, color: Color(0xFFE5E7EB)),
+          const SizedBox(height: 6),
+          const Center(
+            child: Text(
+              '*This is a digitally signed prescription and does not require signature.*',
+              style: TextStyle(
+                fontSize: 8,
+                fontStyle: FontStyle.italic,
+                color: Color(0xFF9CA3AF),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            height: 3.5,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
         ],

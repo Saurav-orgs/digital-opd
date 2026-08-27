@@ -59,9 +59,9 @@ export default function BlockedNumbersPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>Blocked numbers</h1>
+          <h1>Blocked Patients</h1>
           <p className="muted">
-            These numbers cannot book online with your clinic. They can still be
+            These patients cannot book online with your clinic. They can still be
             added as walk-ins at the front desk.
           </p>
         </div>

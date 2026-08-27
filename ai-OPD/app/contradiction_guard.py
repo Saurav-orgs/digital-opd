@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import logging
 from typing import Any
-from .lab_parser import ParsedReportIR
+from .lab_parser import CATEGORY_RULES, ParsedReportIR
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +75,86 @@ _SWEEPING_NORMAL = (
     r"|\bno\s+clinically\s+significant\b[^.\n]{0,40}?\bfindings?\b"
     r")"
 )
+
+
+# A claim of normality that is report-wide by construction. No panel scoping
+# can make these true while an abnormal result stands, so they are never
+# exempted below.
+_NEVER_PANEL_SCOPED = re.compile(
+    r"(?i)("
+    r"\bno\s+abnormal\s+(?:findings?|results?|values?|parameters?|patterns?)\b"
+    r"|\bno\s+significant\s+abnormalit"
+    r"|\bno\s+clinically\s+significant\b"
+    r")"
+)
+
+
+# Words that appear in category names but scope nothing on their own.
+_GENERIC_CATEGORY_WORDS = {"profile", "function", "studies", "routine", "and", "general", "pathology"}
+
+# The quantifier a sweeping claim turns on. What comes BEFORE it decides the
+# claim's scope: "the lipid profile is all within normal limits" is scoped by
+# the words preceding "all", while "all parameters, including the lipid
+# profile, are normal" covers the whole report and cannot be exempted.
+_QUANTIFIER = re.compile(r"(?i)\b(?:all|no|none|nothing)\b")
+
+
+def verified_normal_panel_terms(ir: ParsedReportIR) -> list[str]:
+    """Words that scope a normality claim to a panel the engine verified normal.
+
+    "All parameters are within normal limits" is dangerous on a report with an
+    abnormal result — it covers the abnormality too. "The lipid profile is all
+    within normal limits", on a report whose one abnormality is an HbA1c, is
+    simply true, and deleting it costs the doctor five results. The difference
+    is whether the sentence names a panel every parsed value of which was in
+    range.
+    """
+    abnormal_categories = {r.category for r in ir.abnormal_results}
+    terms: list[str] = []
+    for category, results in ir.grouped_normals().items():
+        if category in abnormal_categories:
+            continue
+        terms.append(category)
+        # A summary says "the lipid profile", never "Lipid & Cardiovascular
+        # Profile", so the category's own words have to count too — minus the
+        # ones shared by every category, which would match anything.
+        terms.extend(
+            w for w in re.findall(r"[A-Za-z]+", category)
+            if w.lower() not in _GENERIC_CATEGORY_WORDS
+        )
+        for keywords, cat in CATEGORY_RULES:
+            if cat == category:
+                terms.extend(keywords)
+        terms.extend(r.test_name for r in results)
+    return [t for t in terms if len(t) >= 3]
+
+
+def coerce_abnormal_values(items: Any) -> list[dict[str, Any]]:
+    """Normalise model-supplied abnormal values to the shape the schema expects.
+
+    Only reached when the engine verified nothing, so these carry no [VERIFIED]
+    status — the direction the model gave is all there is.
+    """
+    coerced: list[dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not label or not value:
+            continue
+        direction = str(item.get("direction") or "abnormal").strip().lower()
+        if direction not in ("high", "low", "abnormal", "normal"):
+            direction = "abnormal"
+        coerced.append({
+            "label": label,
+            "value": value,
+            "reference": str(item.get("reference") or ""),
+            "direction": direction,
+            "status": str(item.get("status") or direction.upper()),
+            "category": str(item.get("category") or ""),
+        })
+    return coerced
 
 
 def validate_and_sanitize_summary(
@@ -138,7 +218,15 @@ def validate_and_sanitize_summary(
             "status": "ABNORMAL",
             "category": "Pulmonology / PFT",
         })
-    sanitized["abnormal_values"] = authoritative_abnormals
+    # The engine's list wins whenever the engine read anything at all. When it
+    # read nothing, an empty list is not a finding but the absence of one, and
+    # assigning it here silently discarded every abnormal the model had found
+    # in the document text — leaving the report contributing nothing to the
+    # combined summary and progress views, which both read this field.
+    if authoritative_abnormals or not nothing_verified:
+        sanitized["abnormal_values"] = authoritative_abnormals
+    else:
+        sanitized["abnormal_values"] = coerce_abnormal_values(raw_summary.get("abnormal_values"))
 
     # ── SPECIAL CASE: SINGLE-TEST REPORT (1 or 2 tests) ──
     # If the report only contains 1 test and no diagnostic scans
@@ -165,50 +253,50 @@ def validate_and_sanitize_summary(
     narrative = str(sanitized.get("summary") or "")
     key_findings = [str(f) for f in sanitized.get("key_findings") or []]
 
-    # 3. Grounding Enforcement: NO EVIDENCE = DO NOT MENTION
     all_test_names_lower = {r.test_name.lower() for r in ir.all_results}
     categories_present = {r.category for r in ir.all_results}
 
-    # A. ECG
-    if not ir.ecg_findings:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(ecg|electrocardiogram|axis deviation|myocardial infarction|sinus rhythm)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(ecg|electrocardiogram|axis deviation|myocardial infarction|sinus rhythm)\b", f)]
+    # 3. Grounding Enforcement: NO EVIDENCE = DO NOT MENTION
+    #
+    # "No evidence" cannot mean "absent from the IR". The parser only reads the
+    # table layouts it has patterns for, and on an unfamiliar one it returns
+    # nothing at all — at which point every rule below fires at once and strips
+    # the summary down to whatever sentences happen to mention no panel. On a
+    # hospital investigation summary that deleted a full lipid profile and a
+    # TSH the model had read correctly, and the doctor received a summary
+    # naming three panels and reporting one.
+    #
+    # So the document itself is the second source of evidence: if the report
+    # says "cholesterol", a sentence about cholesterol is reporting, not
+    # inventing, and only the per-test checks below may correct it. Callers
+    # that pass no raw text (the unit tests) keep the original behaviour, since
+    # an empty document mentions nothing.
+    grounding_rules = [
+        # (what the sentence is about, whether the engine verified any of it)
+        (r"(?i)\b(ecg|electrocardiogram|axis deviation|myocardial infarction|sinus rhythm)\b",
+         bool(ir.ecg_findings)),
+        (r"(?i)\b(cardiovascular|lipid profile|atherogenic|dyslipidemia|cholesterol|triglyceride|lipoprotein|homocysteine)\b",
+         "Lipid & Cardiovascular Profile" in categories_present),
+        (r"(?i)\belectrolyte\b",
+         any(t in all_test_names_lower for t in ["sodium", "potassium", "chloride", "electrolyte"])),
+        (r"(?i)\b(liver|hepatic|ast|alt|bilirubin|transaminase|sgot|sgpt)\b",
+         ("Liver Function" in categories_present)
+         or any("liver" in r.lower() or "hepatomegaly" in r.lower() for r in getattr(ir, "radiology_findings", []))),
+        (r"(?i)\b(kidney|renal|creatinine|bun|egfr|urea)\b",
+         "Kidney Function" in categories_present),
+        (r"(?i)\b(vitamin|nutritional|mineral|calcium|vitamin d)\b",
+         "Vitamins & Minerals" in categories_present),
+        (r"(?i)\b(thyroid|tsh|t3|t4)\b",
+         "Thyroid Profile" in categories_present),
+        (r"(?i)\b(urine|urinary|pus cells)\b",
+         "Urine Routine & Microscopy" in categories_present),
+    ]
 
-    # B. Cardiovascular / Lipids
-    if "Lipid & Cardiovascular Profile" not in categories_present:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(cardiovascular|lipid profile|atherogenic|dyslipidemia|cholesterol|triglyceride|lipoprotein|homocysteine)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(cardiovascular|lipid profile|atherogenic|dyslipidemia|cholesterol|triglyceride|lipoprotein|homocysteine)\b", f)]
-
-    # C. Electrolytes
-    if not any(t in all_test_names_lower for t in ["sodium", "potassium", "chloride", "electrolyte"]):
-        narrative = remove_sentences_matching(narrative, r"(?i)\belectrolyte\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\belectrolyte\b", f)]
-
-    # D. Liver / Hepatic
-    has_liver = ("Liver Function" in categories_present) or any("liver" in r.lower() or "hepatomegaly" in r.lower() for r in getattr(ir, "radiology_findings", []))
-    if not has_liver:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(liver|hepatic|ast|alt|bilirubin|transaminase|sgot|sgpt)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(liver|hepatic|ast|alt|bilirubin|transaminase|sgot|sgpt)\b", f)]
-
-    # E. Kidney / Renal
-    if "Kidney Function" not in categories_present:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(kidney|renal|creatinine|bun|egfr|urea)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(kidney|renal|creatinine|bun|egfr|urea)\b", f)]
-
-    # F. Vitamins & Minerals
-    if "Vitamins & Minerals" not in categories_present:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(vitamin|nutritional|mineral|calcium|vitamin d)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(vitamin|nutritional|mineral|calcium|vitamin d)\b", f)]
-
-    # G. Thyroid
-    if "Thyroid Profile" not in categories_present:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(thyroid|tsh|t3|t4)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(thyroid|tsh|t3|t4)\b", f)]
-
-    # H. Urine
-    if "Urine Routine & Microscopy" not in categories_present:
-        narrative = remove_sentences_matching(narrative, r"(?i)\b(urine|urinary|pus cells)\b")
-        key_findings = [f for f in key_findings if not re.search(r"(?i)\b(urine|urinary|pus cells)\b", f)]
+    for pattern, verified in grounding_rules:
+        if verified or re.search(pattern, raw_text):
+            continue
+        narrative = remove_sentences_matching(narrative, pattern)
+        key_findings = [f for f in key_findings if not re.search(pattern, f)]
 
     # 4. Global "All Normal" False Claim Detection
     #    Fires when something abnormal WAS found (the claim contradicts it), and
@@ -221,9 +309,32 @@ def validate_and_sanitize_summary(
         or ir.ecg_findings
         or (nothing_verified and not document_states_normal)
     ):
+        # A sweeping claim scoped to a panel the engine checked and found
+        # entirely normal is accurate, not a contradiction — "the lipid profile
+        # is all within normal limits" alongside a high HbA1c. Removing those
+        # too threw away every normal result on any report that had one
+        # abnormality. Report-wide phrasings are never exempt.
+        panel_terms = verified_normal_panel_terms(ir)
+
+        def contradicts(sentence: str) -> bool:
+            if not re.search(_SWEEPING_NORMAL, sentence):
+                return False
+            if _NEVER_PANEL_SCOPED.search(sentence):
+                return True
+            quantifier = _QUANTIFIER.search(sentence)
+            if not quantifier:
+                return True
+            # Only a panel named ahead of the quantifier scopes it.
+            subject = sentence[: quantifier.start()].lower()
+            return not any(term.lower() in subject for term in panel_terms)
+
         before = narrative
-        narrative = remove_sentences_matching(narrative, _SWEEPING_NORMAL)
-        key_findings = [f for f in key_findings if not re.search(_SWEEPING_NORMAL, f)]
+        narrative = " ".join(
+            s.strip()
+            for s in re.split(r"(?<=[.!?])\s+", narrative)
+            if s.strip() and not contradicts(s)
+        ).strip()
+        key_findings = [f for f in key_findings if not contradicts(f)]
         if narrative != before:
             log.warning(
                 "Removed a sweeping 'all normal' claim contradicted by %d abnormal result(s).",

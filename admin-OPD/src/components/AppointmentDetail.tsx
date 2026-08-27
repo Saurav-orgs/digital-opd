@@ -396,7 +396,7 @@ export function VisitReportSummary({
     >
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
         <strong style={{ fontSize: 13 }}>
-          Combined summary{count ? ` · across ${count} report${count > 1 ? 's' : ''}` : ''}
+          Combined AI summary{count ? ` · across ${count} report${count > 1 ? 's' : ''}` : ''}
         </strong>
         {status === 'ready' && (
           <button

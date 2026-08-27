@@ -17,7 +17,7 @@ export default function Profile() {
   const toast = useToast();
   const qc = useQueryClient();
   const photoRef = useRef<HTMLInputElement>(null);
-  const logoRef = useRef<HTMLInputElement>(null);
+  // const logoRef = useRef<HTMLInputElement>(null);
   const canEdit = can('doctors', 'update');
   const canSchedule = can('opd_schedules', 'read');
 
@@ -69,11 +69,13 @@ export default function Profile() {
     onError: (e) => toast.error(e),
   });
 
+  /*
   const uploadLogo = useMutation({
     mutationFn: (file: File) => doctorsApi.uploadMyLetterheadLogo(file),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Letterhead logo updated'); },
     onError: (e) => toast.error(e),
   });
+  */
 
   if (!isDoctor) {
     // Staff and the super admin have no doctor profile, but they still need
@@ -259,6 +261,8 @@ export default function Profile() {
 
       <div className="grid cols-2-1">
         <div className="card">
+          {/* Clinic / practice name commented out for now as requested */}
+          {/*
           <Field label="Clinic / practice name">
             <input
               className="input"
@@ -268,6 +272,7 @@ export default function Profile() {
               onChange={(e) => setForm({ ...form, clinic_name: e.target.value })}
             />
           </Field>
+          */}
           <Field label="Address">
             <textarea
               className="input"
@@ -288,6 +293,8 @@ export default function Profile() {
             />
           </Field>
 
+          {/* Clinic logo upload commented out as requested by client design update */}
+          {/*
           <div className="card-title" style={{ marginTop: 8 }}>Clinic logo</div>
           <div className="row" style={{ alignItems: 'center', gap: 12 }}>
             {meQ.data?.clinic_logo_url ? (
@@ -313,6 +320,7 @@ export default function Profile() {
               </>
             )}
           </div>
+          */}
 
           {canEdit && (
             <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
@@ -327,11 +335,11 @@ export default function Profile() {
           <div className="card">
             <div className="card-title">Live preview</div>
             <LetterheadPreview
-              logoUrl={meQ.data?.clinic_logo_url ?? null}
-              clinicName={form.clinic_name || form.name || 'Your clinic'}
-              doctorName={form.name}
-              creds={[form.qualifications, form.specialization].filter(Boolean).join('  •  ')}
-              address={form.clinic_address}
+              clinicName={form.clinic_name || ''}
+              doctorName={form.name.startsWith('Dr.') || form.name.startsWith('Dr ') ? form.name : (form.name ? `Dr. ${form.name}` : 'Dr. Doctor Name')}
+              qualifications={form.qualifications || 'M.B.B.S.'}
+              specialization={form.specialization || form.clinic_name || ''}
+              address={form.clinic_address || 'Address'}
               phone={form.clinic_phone}
             />
           </div>
@@ -341,40 +349,61 @@ export default function Profile() {
   );
 }
 
-/** A faithful mini of the PDF letterhead band, so the doctor sees their pad. */
+/** A faithful mini of the new PDF letterhead layout. */
 function LetterheadPreview({
-  logoUrl, clinicName, doctorName, creds, address, phone,
+  doctorName, qualifications, specialization, address, phone,
 }: {
-  logoUrl: string | null;
-  clinicName: string;
+  clinicName?: string;
   doctorName: string;
-  creds: string;
+  qualifications: string;
+  specialization: string;
   address: string;
   phone: string;
 }) {
-  const brand = '#0F766E';
-  const showDoctorLine = clinicName !== doctorName;
+  const accent = '#1B6EF3';
   return (
-    <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-      <div style={{ background: brand, color: '#fff', padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        {logoUrl && (
-          <img src={logoUrl} alt="" style={{ width: 44, height: 44, objectFit: 'contain', background: '#fff', borderRadius: 6, flexShrink: 0 }} />
-        )}
+    <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff', padding: '16px 14px' }}>
+      {/* Top blue bar */}
+      <div style={{ height: 3.5, background: accent, borderRadius: 2, marginBottom: 12 }} />
+
+      {/* Header columns */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{clinicName}</div>
-          {creds && <div style={{ fontSize: 11, color: '#DCEDEA', marginTop: 3 }}>{creds}</div>}
-          {showDoctorLine && doctorName && (
-            <div style={{ fontSize: 11, fontStyle: 'italic', color: '#CFE6E2', marginTop: 2 }}>{doctorName}</div>
-          )}
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{doctorName}</div>
+          {qualifications && <div style={{ fontSize: 10.5, color: '#374151', marginTop: 2 }}>{qualifications}</div>}
+          {specialization && <div style={{ fontSize: 10, color: '#6B7280', marginTop: 1 }}>{specialization}</div>}
         </div>
-        <div style={{ fontSize: 10, color: '#EAF3F1', textAlign: 'right', whiteSpace: 'pre-line', maxWidth: 150 }}>
-          {[address, phone].filter(Boolean).join('\n')}
+        <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#111827', maxWidth: 140 }}>
+          <div>{address || 'Address'}</div>
+          {phone && <div style={{ fontSize: 10, fontWeight: 400, color: '#6B7280', marginTop: 2 }}>{phone}</div>}
         </div>
       </div>
-      <div style={{ height: 3, background: '#0B5750' }} />
-      <div style={{ padding: '18px 16px', color: 'var(--text-muted)', fontSize: 12 }}>
-        <div style={{ fontFamily: 'Times, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 22, color: brand }}>Rx</div>
-        <div style={{ marginTop: 8 }}>Patient details, medicines and advice appear here.</div>
+
+      {/* Patient info row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 16, borderTop: '1px solid #F3F4F6', paddingTop: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#111827' }}>Patient Name</div>
+          <div style={{ fontSize: 10, color: '#374151', marginTop: 1 }}>Patient Name (Age yrs, Gender)</div>
+        </div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#111827' }}>
+          Date
+        </div>
+      </div>
+
+      {/* Treatment / Content */}
+      <div style={{ marginTop: 14, borderTop: '1px solid #F3F4F6', paddingTop: 8 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: '#111827', letterSpacing: 0.3 }}>TREATMENT ADVICE</div>
+        <div style={{ fontSize: 9.5, color: '#6B7280', marginTop: 4, fontStyle: 'italic' }}>
+          Medicines and advice appear here.
+        </div>
+      </div>
+
+      {/* Bottom disclaimer & blue bar */}
+      <div style={{ marginTop: 18, borderTop: '0.5px solid #E5E7EB', paddingTop: 6, textAlign: 'center' }}>
+        <div style={{ fontSize: 8, fontStyle: 'italic', color: '#9CA3AF' }}>
+          *This is a digitally signed prescription and does not require signature.*
+        </div>
+        <div style={{ height: 3.5, background: accent, borderRadius: 2, marginTop: 6 }} />
       </div>
     </div>
   );

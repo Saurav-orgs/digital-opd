@@ -219,6 +219,10 @@ export interface ReportAiSummary {
     value: string;
     reference?: string;
     direction: 'high' | 'low' | 'abnormal';
+    /** Lab panel the value belongs to, e.g. "Complete Blood Count". */
+    category?: string;
+    /** The lab's own flag, e.g. "LOW" / "HIGH". */
+    status?: string;
   }[];
 }
 

@@ -879,8 +879,8 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
         children: [
           Text(
             a.reportsSummaryCount > 0
-                ? 'Combined summary · across ${a.reportsSummaryCount} reports'
-                : 'Combined summary',
+                ? 'Combined AI summary · across ${a.reportsSummaryCount} reports'
+                : 'Combined AI summary',
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
           ),
           const SizedBox(height: 6),

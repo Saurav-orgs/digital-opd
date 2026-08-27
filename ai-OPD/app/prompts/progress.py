@@ -49,8 +49,15 @@ Rules — follow these exactly:
 - unchanged: findings present in both visits that did not move.
 - current_status: where the patient stands today, from the current visit alone.
   This is the right home for a new finding that has nothing to compare against.
+  It must NOT repeat summary. If you find yourself writing the same sentence in
+  both, the summary is about the change and current_status is about today's
+  findings — put different content in each.
 - status: the overall direction. Use "unclear" whenever the two visits share no
   comparable measurement — that is a normal answer, not a failure.
+- When nothing is comparable, say so ONCE, in a single short clause, and spend
+  the rest of summary on what today's reports actually show. Do not write two
+  sentences that both amount to "there is nothing to compare"; a doctor reading
+  that has learned nothing from the card.
 - summary: two to four sentences. What changed, what it means, what to look at
   today. Do not list every value again; the lists already carry them.
 - watch_points: what the doctor should keep an eye on. Omit rather than invent.
