@@ -33,7 +33,7 @@ export default function Login() {
     <div className="auth-screen">
       <div className="card login-card">
         <div className="login-logo">+</div>
-        <h1 style={{ fontSize: 20, marginBottom: 2 }}>Digital OPD Admin</h1>
+        <h1 style={{ fontSize: 20, marginBottom: 2 }}>Digital OPD</h1>
         <div
           className="muted"
           style={{ fontSize: 10.5, fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase' }}
