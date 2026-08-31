@@ -355,6 +355,7 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  justify-content: center;
   transition: background 0.12s ease;
   white-space: nowrap;
 }
@@ -481,6 +482,34 @@ img {
   gap: 6px;
   margin-bottom: 14px;
 }
+/* One prescription medicine's inputs, side by side.
+   Flex rather than a grid with breakpoints: this row lives in a column whose
+   width depends on the page around it, so wrapping has to follow the space
+   actually available rather than the viewport's width. Fields wrap only when
+   they no longer fit, which on a wide screen puts the whole medicine on one
+   line instead of three. */
+.rx-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 10px;
+}
+.rx-fields > .field {
+  flex: 1 1 130px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+/* The two that hold real words get more room and give way last. */
+.rx-fields > .field.rx-medicine {
+  flex: 2.2 1 230px;
+}
+.rx-fields > .field.rx-instructions {
+  flex: 1.8 1 190px;
+}
+.rx-fields > .field.rx-narrow {
+  flex: 0.7 1 100px;
+}
+
 .field label {
   font-size: 13px;
   color: var(--text-secondary);
@@ -718,6 +747,56 @@ tr.clickable-row:hover {
   font-size: 17px;
   margin-bottom: 16px;
 }
+/* Consultation outcome buttons.
+   The three of them share one line at every width. On a phone the card is
+   about 300px wide inside its padding, which no set of full labels fits — so
+   the buttons split the width evenly and swap to short labels rather than
+   wrapping onto a second row. */
+.outcome-actions .lbl-short {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .outcome-actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  .outcome-actions .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 6px;
+    font-size: 13px;
+  }
+  .outcome-actions .lbl-full {
+    display: none;
+  }
+  .outcome-actions .lbl-short {
+    display: inline;
+  }
+}
+
+/* A modal with pinned controls: the body scrolls, the footer never leaves. */
+.modal-pinned {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 32px);
+}
+.modal-pinned .modal-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  /* Room for the focus ring on the last field. */
+  padding-right: 4px;
+}
+.modal-foot {
+  flex-shrink: 0;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: var(--hairline);
+  background: var(--card);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

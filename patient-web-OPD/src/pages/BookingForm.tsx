@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -13,6 +13,7 @@ import {
   X,
   Plus,
   ArrowUp,
+  Lock,
 } from 'lucide-react';
 import { api } from '../api';
 import { patientApi, patientTokenStore } from '../patientApi';
@@ -20,6 +21,7 @@ import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
+import { PasswordField } from '../components/PasswordField';
 
 /** A report the patient staged during booking, held until the visit exists. */
 interface StagedReport {
@@ -165,7 +167,7 @@ export const BookingForm: React.FC = () => {
   const date = state?.date;
   const slot = state?.slot;
 
-  const { patient } = usePatientAuth();
+  const { patient, profiles, loading: authLoading, login, signup } = usePatientAuth();
 
   /*
    * Four steps: the number, who the visit is for, their details, then optional
@@ -176,6 +178,16 @@ export const BookingForm: React.FC = () => {
    * caller should never be shown an empty pick-list.
    */
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  /*
+   * Step 1 in three parts: the number, then either the password for a number
+   * that already has an account or a new password for one that does not. A
+   * patient who is already signed in never sees any of it — see the effect
+   * below.
+   */
+  const [authStage, setAuthStage] = useState<'mobile' | 'password' | 'create'>('mobile');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [knownPatients, setKnownPatients] = useState<PatientProfile[] | null>(null);
   const [identifying, setIdentifying] = useState(false);
   // null here means "a new patient" — never "look one up by name".
@@ -304,25 +316,103 @@ export const BookingForm: React.FC = () => {
     return valid;
   };
 
-  /**
-   * Step 1 → find out who is already registered on this number.
+  /*
+   * A patient who is already signed in has nothing to prove: their number is
+   * the account they are signed into, so booking starts at "who is this visit
+   * for?" instead of asking for a number and a password they just used.
    *
-   * A number nobody has used before is created here as an empty account and
-   * goes straight to the details form; there is nothing to pick from.
+   * Waits for the session to finish loading, or a signed-in patient would see
+   * the number field flash on every page load.
    */
-  const identify = async () => {
+  useEffect(() => {
+    if (authLoading || !patient || step !== 1) return;
+    setMobile(patient.mobile);
+    setKnownPatients(profiles);
+    setStep(profiles.length > 0 ? 2 : 3);
+  }, [authLoading, patient, profiles, step]);
+
+  /**
+   * Once signed in, go where the number used to lead: pick a patient, or add
+   * the first one.
+   */
+  const enterBooking = (list: PatientProfile[]) => {
+    setKnownPatients(list);
+    setStep(list.length > 0 ? 2 : 3);
+  };
+
+  /**
+   * Step 1a → is this number registered, and has it got a password?
+   *
+   * This used to be `identify`, which took the number alone and returned the
+   * patients on it. Now the number decides only which field comes next.
+   */
+  const checkNumber = async () => {
     if (!validateMobile()) return;
     setIdentifying(true);
     setFormError(null);
     try {
-      const res = await patientApi.identify(mobile.trim());
-      setKnownPatients(res.patients);
-      setStep(res.patients.length > 0 ? 2 : 3);
+      const res = await patientApi.check(mobile.trim());
+      // An account with no password yet — one the front desk opened for a
+      // walk-in — is asked to choose one, not to guess a password it never set.
+      setAuthStage(res.exists && res.has_password ? 'password' : 'create');
+      setPassword('');
+      setConfirmPassword('');
+      setPasswordError(null);
     } catch (err) {
       setFormError(
         err instanceof ApiException
           ? err.message
           : 'Could not check this number. Please try again.',
+      );
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
+  /** Step 1b → sign in to a number that already has an account. */
+  const submitPassword = async () => {
+    if (!password) {
+      setPasswordError('Please enter your password.');
+      return;
+    }
+    setIdentifying(true);
+    setFormError(null);
+    setPasswordError(null);
+    try {
+      await login(mobile.trim(), password, doctor?.id);
+      enterBooking(await patientApi.profiles());
+    } catch (err) {
+      setPasswordError(
+        err instanceof ApiException ? err.message : 'Could not sign in. Please try again.',
+      );
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
+  /** Step 1b (new number) → choose a password, which opens the account. */
+  const submitNewPassword = async () => {
+    if (password.length < 8) {
+      setPasswordError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setIdentifying(true);
+    setFormError(null);
+    setPasswordError(null);
+    try {
+      await signup(mobile.trim(), password, doctor?.id);
+      // Usually empty, but an account the front desk opened may already have
+      // patients on it — those should still be offered.
+      enterBooking(await patientApi.profiles());
+    } catch (err) {
+      setPasswordError(
+        err instanceof ApiException
+          ? err.message
+          : 'Could not create your account. Please try again.',
       );
     } finally {
       setIdentifying(false);
@@ -433,8 +523,13 @@ export const BookingForm: React.FC = () => {
     e.preventDefault();
     setFormError(null);
 
-    // Step 1 is the number; step 2 is a pick, handled by its own buttons.
-    if (step === 1) return identify();
+    // Step 1 is signing in — number, then password; step 2 is a pick, handled
+    // by its own buttons.
+    if (step === 1) {
+      if (authStage === 'mobile') return checkNumber();
+      if (authStage === 'password') return submitPassword();
+      return submitNewPassword();
+    }
     if (step === 2) return;
 
     if (!validateDetails()) return;
@@ -506,7 +601,11 @@ export const BookingForm: React.FC = () => {
           <div className="step-badge-text">
             Step {step} of 4 ·{' '}
             {step === 1
-              ? 'Mobile Number'
+              ? authStage === 'mobile'
+                ? 'Mobile Number'
+                : authStage === 'password'
+                  ? 'Your Password'
+                  : 'Create a Password'
               : step === 2
                 ? 'Who is this visit for?'
                 : step === 3
@@ -527,6 +626,14 @@ export const BookingForm: React.FC = () => {
             if (step === 4) return setStep(3);
             if (step === 3) return setStep(knownPatients?.length ? 2 : 1);
             if (step === 2) return setStep(1);
+            // Within step 1, Back means "that was the wrong number".
+            if (authStage !== 'mobile') {
+              setAuthStage('mobile');
+              setPassword('');
+              setConfirmPassword('');
+              setPasswordError(null);
+              return;
+            }
             window.history.length > 1 ? navigate(-1) : navigate('/');
           }}
           style={{ borderRadius: '999px', padding: '8px 20px' }}
@@ -538,10 +645,10 @@ export const BookingForm: React.FC = () => {
 
       <form onSubmit={handleSubmit}>
         <div className="booking-grid">
-          {/* Step 1 — the number. This is also register/login: an unknown
-              number quietly becomes an account, and a known one tells us who
-              is already registered on it. */}
-          {step === 1 && (
+          {/* Step 1 — signing in. The number decides which field follows:
+              the password for an account that has one, or a new password for
+              a number that does not. */}
+          {step === 1 && authStage === 'mobile' && (
             <div className="section-card">
               <h3 className="card-section-title">
                 <Phone size={18} color="var(--primary)" />
@@ -567,11 +674,78 @@ export const BookingForm: React.FC = () => {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      void identify();
+                      void checkNumber();
                     }
                   }}
                 />
                 {mobileError && <span className="error-text">{mobileError}</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Step 1b — a number we know. */}
+          {step === 1 && authStage === 'password' && (
+            <div className="section-card">
+              <h3 className="card-section-title">
+                <Lock size={18} color="var(--primary)" />
+                <span>Enter your password</span>
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -4 }}>
+                {mobile} already has an account. Sign in to see the patients on
+                it and book for any of them.
+              </p>
+              <div className="form-field">
+                <label className="form-label">Password *</label>
+                <PasswordField
+                  autoFocus
+                  autoComplete="current-password"
+                  placeholder="Your password"
+                  value={password}
+                  onChange={(v) => {
+                    setPassword(v);
+                    setPasswordError(null);
+                  }}
+                />
+                {passwordError && <span className="error-text">{passwordError}</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Step 1b — a number with no account, or one the front desk opened
+              that has never had a password. Both choose one here. */}
+          {step === 1 && authStage === 'create' && (
+            <div className="section-card">
+              <h3 className="card-section-title">
+                <Lock size={18} color="var(--primary)" />
+                <span>Create a password</span>
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -4 }}>
+                This is your first visit with {mobile}. Choose a password so you
+                can come back to your records later.
+              </p>
+              <div className="form-field">
+                <label className="form-label">New password *</label>
+                <PasswordField
+                  autoFocus
+                  placeholder="At least 8 characters"
+                  value={password}
+                  onChange={(v) => {
+                    setPassword(v);
+                    setPasswordError(null);
+                  }}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Confirm password *</label>
+                <PasswordField
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChange={(v) => {
+                    setConfirmPassword(v);
+                    setPasswordError(null);
+                  }}
+                />
+                {passwordError && <span className="error-text">{passwordError}</span>}
               </div>
             </div>
           )}

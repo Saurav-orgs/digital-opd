@@ -72,6 +72,21 @@ export interface Doctor {
   clinic_logo_url: string | null;
 }
 
+/** A doctor as the super admin reviews them: profile plus the licence on file. */
+export interface DoctorProfile extends Doctor {
+  license_number: string | null;
+  contact_mobile: string | null;
+  /** Short-lived signed link to the certificate; null when none was uploaded. */
+  license_url: string | null;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
+  created_at: string | null;
+  login_email: string | null;
+  login_active: boolean;
+}
+
 /** Returned once by POST /doctors — never returned again, so show it immediately. */
 export interface CreateDoctorResult {
   doctor: Doctor;

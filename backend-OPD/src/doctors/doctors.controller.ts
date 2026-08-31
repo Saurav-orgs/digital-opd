@@ -23,6 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { SettingsService } from '../settings/settings.service';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
@@ -55,6 +56,7 @@ export class DoctorsController {
   constructor(
     private readonly doctorsService: DoctorsService,
     private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   // ── Doctor self-service (declared before :id) ──────────────
@@ -128,6 +130,20 @@ export class DoctorsController {
     return new StreamableFile(buffer);
   }
 
+  @Post(':id/qr/generate')
+  @ApiOperation({
+    summary:
+      "Super-admin: re-render a doctor's booking QR from their current link",
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  async generateQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.regenerateQr(id);
+  }
+
   @Delete('me/qr')
   @ApiOperation({ summary: 'Doctor removes own profile QR code image' })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
@@ -146,7 +162,7 @@ export class DoctorsController {
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
   createDoctor(@CurrentUser() user: AuthUser, @Body() dto: CreateDoctorDto) {
     this.assertSuperAdmin(user);
-    const base = this.config.get<string>('patientWebBase') ?? '';
+    const base = this.settings.patientWebBase();
     return this.doctorsService.createTenant(dto, base);
   }
 
@@ -154,7 +170,7 @@ export class DoctorsController {
   @Post('register')
   @ApiOperation({
     summary:
-      'Doctor self-registration. Creates a pending account — no login and no booking link until the super admin approves the licence.',
+      'Doctor self-registration. The account and its booking link are live immediately; the practice licence is collected for review after the fact, not as a gate.',
   })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
@@ -173,13 +189,52 @@ export class DoctorsController {
       });
     }
     await this.doctorsService.registerSelf(dto, license);
-    // Deliberately thin: nothing about the new tenant is returned, because
-    // nothing about it is usable yet.
+    // Deliberately thin: the caller is an unauthenticated form, so it gets a
+    // confirmation and nothing about the tenant it just created.
     return {
       ok: true,
-      message:
-        'Registration received. You will be able to sign in once your licence has been verified.',
+      message: 'Registration complete. You can sign in now.',
     };
+  }
+
+  @Get(':id/profile')
+  @ApiOperation({
+    summary: "Super-admin: a doctor's full profile, licence details and certificate",
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
+  doctorProfile(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    this.assertSuperAdmin(user);
+    return this.doctorsService.adminProfile(id);
+  }
+
+  @Post(':id/license')
+  @ApiOperation({
+    summary: "Super-admin: upload or replace a doctor's practice licence",
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(fileBody)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 6 * 1024 * 1024 },
+    }),
+  )
+  uploadLicense(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    this.assertSuperAdmin(user);
+    if (!file) {
+      throw new AppException(ErrorCode.FILE_REQUIRED, {
+        message: 'Please choose a licence or certificate file to upload.',
+      });
+    }
+    return this.doctorsService.uploadLicense(id, file);
   }
 
   @Get('registrations/pending')
@@ -236,7 +291,7 @@ export class DoctorsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     this.assertSuperAdmin(user);
-    const base = this.config.get<string>('patientWebBase') ?? '';
+    const base = this.settings.patientWebBase();
     return this.doctorsService.regenerateSlug(id, base);
   }
 

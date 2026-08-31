@@ -55,6 +55,17 @@ export class RegisterDoctorDto {
   @IsString()
   @MaxLength(200)
   qualifications?: string;
+
+  /**
+   * Version of the Provider Terms the sign-up form displayed. Sent by the
+   * client so the stored acceptance names the wording actually shown, rather
+   * than whatever the server happens to consider current later on.
+   */
+  @ApiPropertyOptional({ example: '2026-09-01' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  terms_version?: string;
 }
 
 export class RejectDoctorDto {

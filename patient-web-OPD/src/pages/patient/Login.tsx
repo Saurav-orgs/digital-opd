@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Phone, User, MapPin, LogIn, UserPlus } from 'lucide-react';
+import { Phone, User, MapPin, LogIn, UserPlus, Lock } from 'lucide-react';
+import { PasswordField } from '../../components/PasswordField';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException } from '../../types';
@@ -13,6 +14,8 @@ export const Login: React.FC = () => {
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [mobile, setMobile] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   // Registering creates one patient, so it asks for a patient's full details —
   // the same set booking and the front desk collect.
   const [name, setName] = useState('');
@@ -36,7 +39,11 @@ export const Login: React.FC = () => {
       setError('Enter a valid 10-digit mobile number.');
       return;
     }
+    if (password.length < 8) {
+      return setError('Password must be at least 8 characters.');
+    }
     if (mode === 'register') {
+      if (password !== confirmPassword) return setError('Passwords do not match.');
       if (name.trim().length < 2) return setError('Please enter the patient’s name.');
       if (!gender) return setError('Please select a gender.');
       const ageNum = Number(age);
@@ -53,10 +60,11 @@ export const Login: React.FC = () => {
     setSubmitting(true);
     try {
       if (mode === 'login') {
-        await login(mobile.trim(), doctor?.id);
+        await login(mobile.trim(), password, doctor?.id);
       } else {
         await register(
           mobile.trim(),
+          password,
           {
             name: name.trim(),
             gender,
@@ -72,12 +80,10 @@ export const Login: React.FC = () => {
       navigate(redirectTo, { replace: true });
     } catch (err) {
       if (err instanceof ApiException) {
-        if (err.code === 'PATIENT_NOT_FOUND') {
-          setMode('register');
-          setError('No patient registered on this number. Add their details to register.');
-        } else {
-          setError(err.message);
-        }
+        // Sign-in answers an unknown number and a wrong password identically,
+        // on purpose, so there is no longer a "not registered" case to catch
+        // here — the Register link below is how a new patient gets in.
+        setError(err.message);
       } else {
         setError('Something went wrong. Please try again.');
       }
@@ -95,7 +101,7 @@ export const Login: React.FC = () => {
         <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
           {mode === 'login'
             ? 'Use the mobile number you booked your OPD appointment with.'
-            : "We didn't find this number — add the patient's details to register."}
+            : "Choose a password and add the patient's details to register."}
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -114,8 +120,39 @@ export const Login: React.FC = () => {
             />
           </div>
 
+          <div className="form-field">
+            <label className="form-label icon-label">
+              <Lock size={14} color="var(--text-secondary)" />
+              <span>{mode === 'login' ? 'Password' : 'Create a password'}</span>
+            </label>
+            <PasswordField
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              placeholder={mode === 'login' ? 'Your password' : 'At least 8 characters'}
+              value={password}
+              onChange={(v) => {
+                setPassword(v);
+                setError(null);
+              }}
+            />
+          </div>
+
           {mode === 'register' && (
             <>
+              <div className="form-field">
+                <label className="form-label icon-label">
+                  <Lock size={14} color="var(--text-secondary)" />
+                  <span>Confirm password</span>
+                </label>
+                <PasswordField
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChange={(v) => {
+                    setConfirmPassword(v);
+                    setError(null);
+                  }}
+                />
+              </div>
+
               <div className="form-field">
                 <label className="form-label icon-label">
                   <User size={14} color="var(--text-secondary)" />

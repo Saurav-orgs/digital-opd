@@ -4,7 +4,7 @@ import { pathlabsApi } from '../api/endpoints';
 import type { User } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { Badge, Empty, Field, Loading, Modal } from '../components/ui';
+import { Badge, Empty, Field, Loading, Modal, PasswordInput } from '../components/ui';
 
 /** Pathlab login accounts — reports:create + reports:read only (see Reports page). */
 export default function Pathlabs() {
@@ -159,9 +159,7 @@ function PathlabModal({ lab, onClose }: { lab: User | null; onClose: () => void 
         label={lab ? 'New password (leave blank to keep)' : 'Password'}
         error={!lab && form.password && form.password.length < 8 ? 'Password must be at least 8 characters.' : undefined}
       >
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}
         />

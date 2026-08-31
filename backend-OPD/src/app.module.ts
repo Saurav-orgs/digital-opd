@@ -12,6 +12,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
 import { DoctorsModule } from './doctors/doctors.module';
+import { SettingsModule } from './settings/settings.module';
 import { OpdSchedulesModule } from './opd-schedules/opd-schedules.module';
 import { SlotsModule } from './slots/slots.module';
 import { AppointmentsModule } from './appointments/appointments.module';
@@ -67,6 +68,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     UsersModule,
     RolesModule,
     DoctorsModule,
+    SettingsModule,
     OpdSchedulesModule,
     SlotsModule,
     AppointmentsModule,

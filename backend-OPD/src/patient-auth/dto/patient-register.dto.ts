@@ -1,5 +1,13 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsUUID, Matches, ValidateNested } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PatientDetailsDto } from '../../patient-profiles/dto/patient-profile.dto';
 
@@ -14,6 +22,12 @@ export class PatientRegisterDto {
     message: 'Please enter a valid 10-digit mobile number.',
   })
   mobile: string;
+
+  @ApiProperty({ example: 'Str0ngPass', minLength: 8 })
+  @IsString()
+  @MinLength(8, { message: 'Password must be at least 8 characters.' })
+  @MaxLength(128)
+  password: string;
 
   @ApiProperty({ type: PatientDetailsDto })
   @ValidateNested()

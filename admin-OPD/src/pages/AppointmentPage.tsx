@@ -171,15 +171,6 @@ export default function AppointmentPage() {
           {a?.description && <Field label="Reason for Visit" value={a.description} />}
         </div>
 
-        {/* Consultation outcome row inside patient card */}
-        {a && canUpdate && a.status !== 'rejected' && (
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: 'var(--hairline)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 500 }}>Mark outcome:</span>
-            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>✓ Done</button>
-            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>⏸ On hold</button>
-            <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
-          </div>
-        )}
       </div>
 
       {/* ── 2-Column Clinical Layout ────────────────────────── */}
@@ -417,6 +408,76 @@ export default function AppointmentPage() {
           )}
         </div>
       </div>
+
+      {/*
+        Closing the visit is the last thing the doctor does, so it sits at the
+        end of the page and looks like one: full width, its own card, below the
+        reports, the prescription and the notes.
+
+        It used to be a row of small buttons tucked under the patient details
+        at the very top — read as part of the patient's record rather than an
+        action, and asked for before any of the work it is meant to conclude.
+      */}
+      {a && canUpdate && a.status !== 'rejected' && (
+        <div
+          className="card"
+          style={{
+            marginTop: 16,
+            borderTop: '3px solid var(--primary)',
+          }}
+        >
+          <div
+            className="row"
+            style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}
+          >
+            <div>
+              <div
+                className="muted"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}
+              >
+                Final step
+              </div>
+              <div className="card-title" style={{ margin: '4px 0 4px' }}>
+                Close this consultation
+              </div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                Record how the visit ended. Currently{' '}
+                <Badge value={a.consultation_status} />
+              </div>
+            </div>
+
+            <div className="row outcome-actions" style={{ gap: 8 }}>
+              <button
+                className="btn btn-primary"
+                disabled={consult.isPending || a.consultation_status === 'done'}
+                onClick={() => consult.mutate('done')}
+              >
+                <span className="lbl-full">
+                  {a.consultation_status === 'done' ? '✓ Marked done' : '✓ Mark as done'}
+                </span>
+                <span className="lbl-short">
+                  {a.consultation_status === 'done' ? '✓ Done' : 'Done'}
+                </span>
+              </button>
+              <button
+                className="btn"
+                disabled={consult.isPending || a.consultation_status === 'on_hold'}
+                onClick={() => consult.mutate('on_hold')}
+              >
+                <span className="lbl-full">Put on hold</span>
+                <span className="lbl-short">On hold</span>
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={consult.isPending || a.consultation_status === 'rejected'}
+                onClick={() => consult.mutate('rejected')}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

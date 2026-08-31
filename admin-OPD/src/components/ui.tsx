@@ -21,20 +21,38 @@ export function Modal({
   onClose,
   children,
   large,
+  footer,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   large?: boolean;
+  /**
+   * Controls pinned to the bottom of the dialog, always on screen.
+   *
+   * Without this a modal grows as tall as its content and the page scrolls
+   * behind it, so anything at the end — the action the dialog exists for —
+   * is only found by scrolling past everything else. Passing a footer caps
+   * the height and scrolls the body instead. Modals that pass nothing are
+   * untouched.
+   */
+  footer?: ReactNode;
 }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className={`modal ${large ? 'modal-lg' : ''}`}
+        className={`modal ${large ? 'modal-lg' : ''} ${footer ? 'modal-pinned' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         <h3>{title}</h3>
-        {children}
+        {footer ? (
+          <>
+            <div className="modal-body">{children}</div>
+            <div className="modal-foot">{footer}</div>
+          </>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );
@@ -113,17 +131,114 @@ export function Field({
   label,
   error,
   children,
+  className,
 }: {
   label: string;
   error?: string;
   children: ReactNode;
+  /** Extra classes on the wrapper — lets a flex row give a field its width. */
+  className?: string;
 }) {
   return (
-    <div className="field">
+    <div className={`field ${className ?? ''}`.trim()}>
       <label>{label}</label>
       {children}
       {error && <span className="err">{error}</span>}
     </div>
+  );
+}
+
+/**
+ * A password box with a show/hide toggle.
+ *
+ * Typing a password you cannot see is how people end up locked out of an
+ * account they just created — most of these fields set a password rather than
+ * check one, so a typo is silent until the first failed sign-in. The toggle is
+ * a plain button so it stays out of the tab order's way and never submits a
+ * form by accident.
+ *
+ * Drop-in for `<input className="input" type="password" … />`.
+ */
+export function PasswordInput({
+  value,
+  onChange,
+  placeholder,
+  autoComplete = 'new-password',
+  id,
+  autoFocus,
+  onKeyDown,
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  autoComplete?: string;
+  id?: string;
+  autoFocus?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const [shown, setShown] = useState(false);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        id={id}
+        className="input"
+        type={shown ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        autoFocus={autoFocus}
+        onKeyDown={onKeyDown}
+        style={{ paddingRight: 40 }}
+      />
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        title={shown ? 'Hide password' : 'Show password'}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-pressed={shown}
+        tabIndex={-1}
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 38,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <EyeIcon off={shown} />
+      </button>
+    </div>
+  );
+}
+
+/** Open eye while hidden, struck-through eye while shown. */
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z" />
+      <circle cx="12" cy="12" r="3.2" />
+      {off && <line x1="3.5" y1="20.5" x2="20.5" y2="3.5" />}
+    </svg>
   );
 }
 

@@ -316,9 +316,8 @@ class _UserFormScreenState extends State<UserFormScreen> {
                         ? 'Password'
                         : 'New password (leave blank to keep)',
                     hint: 'Must be at least 8 characters.',
-                    child: TextFormField(
+                    child: PasswordField(
                       controller: _password,
-                      obscureText: true,
                       validator: (v) {
                         final val = v ?? '';
                         if (_user == null && val.length < 8) {

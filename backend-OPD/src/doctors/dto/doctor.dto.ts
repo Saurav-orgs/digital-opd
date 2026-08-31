@@ -5,6 +5,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -58,6 +60,24 @@ export class DoctorProfileDto {
   @IsOptional()
   @IsString()
   profile_base_url?: string;
+
+  // ── Practice licence ───────────────────────────────────────
+  // Self-registering doctors have always had to supply these; a doctor the
+  // super admin creates could not, which left admin-created tenants with no
+  // registration number and no certificate on file.
+
+  @ApiPropertyOptional({ example: 'MCI-12345/2018' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  license_number?: string;
+
+  @ApiPropertyOptional({ example: '9876543210' })
+  @IsOptional()
+  @Matches(/^[6-9]\d{9}$/, {
+    message: 'Please enter a valid 10-digit mobile number.',
+  })
+  contact_mobile?: string;
 }
 
 export class UpdateDoctorDto extends PartialType(DoctorProfileDto) {}

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi, doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { Empty, Field, Loading } from '../components/ui';
+import { Empty, Field, Loading, PasswordInput } from '../components/ui';
 import { ApiError } from '../api/client';
 import { downloadFile } from '../lib/shareFile';
 
@@ -522,17 +522,14 @@ function ChangePasswordCard() {
     <div className="card">
       <div className="card-title">Change password</div>
       <Field label="Current password">
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           value={current}
           onChange={(e) => setCurrent(e.target.value)}
+          autoComplete="current-password"
         />
       </Field>
       <Field label="New password">
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           placeholder="min 8 characters"
           value={next}
           onChange={(e) => setNext(e.target.value)}
@@ -544,9 +541,7 @@ function ChangePasswordCard() {
         </p>
       )}
       <Field label="Confirm new password">
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
         />

@@ -60,6 +60,33 @@ function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
   );
 }
 
+/*
+ * A doctor writes "Dolo 650mg", not a name in one box and a strength in
+ * another. The stored shape keeps the two apart — the prescription PDF, the
+ * medicine catalogue and the AI draft all read `strength` on its own — so the
+ * single field is presentation only: joined for display, split again on every
+ * keystroke.
+ */
+
+/** A trailing dose: a number and a unit, plus anything after it ("weekly"). */
+const DOSE_SUFFIX = /\s+(\d+(?:\.\d+)?\s*(?:mcg|mg|g|ml|iu|units?|%)\b.*)$/i;
+
+function joinMedicine(name: string, strength?: string | null): string {
+  return [name, strength].map((p) => (p ?? '').trim()).filter(Boolean).join(' ');
+}
+
+function splitMedicine(value: string): { medicine_name: string; strength: string } {
+  const match = DOSE_SUFFIX.exec(value);
+  // No recognisable dose yet — mid-typing "Dolo 65" is all name, and becomes
+  // name + strength the moment the unit lands. What is displayed never changes
+  // under the doctor either way, because display is the two joined back up.
+  if (!match) return { medicine_name: value, strength: '' };
+  return {
+    medicine_name: value.slice(0, match.index).trim(),
+    strength: match[1].trim(),
+  };
+}
+
 const blankRow = (): PrescriptionMedicine => ({
   medicine_name: '',
   strength: '',
@@ -435,17 +462,24 @@ function MedicineRow({
         )}
       </div>
 
-      <div className="grid cols-2" style={{ gap: 8 }}>
-        <Field label="Medicine name" error={errors?.medicine_name}>
+      <div className="rx-fields">
+        <Field
+          className="rx-medicine"
+          label="Medicine"
+          error={errors?.medicine_name ?? errors?.strength}
+        >
           <input
             className="input"
             list={`meds-${row.id ?? row.medicine_name}-${index}`}
-            placeholder="e.g. Paracetamol"
+            placeholder="e.g. Dolo 650mg"
             disabled={!canEdit}
-            value={row.medicine_name}
+            value={joinMedicine(row.medicine_name, row.strength)}
             onChange={(e) => {
-              onChange({ medicine_name: e.target.value });
-              setQuery(e.target.value);
+              const parsed = splitMedicine(e.target.value);
+              onChange(parsed);
+              // Suggestions are matched on the name, so the dose must not be
+              // part of the query.
+              setQuery(parsed.medicine_name);
             }}
           />
           <datalist id={`meds-${row.id ?? row.medicine_name}-${index}`}>
@@ -454,27 +488,17 @@ function MedicineRow({
             ))}
           </datalist>
         </Field>
-        <Field label="Strength" error={errors?.strength}>
-          <input
-            className="input"
-            placeholder="e.g. 500mg"
-            disabled={!canEdit}
-            value={row.strength ?? ''}
-            onChange={(e) => onChange({ strength: e.target.value })}
-          />
-        </Field>
-      </div>
 
-      <div className="grid cols-2" style={{ gap: 8 }}>
         <Field label="Frequency" error={errors?.dosage}>
           <input
             className="input"
             disabled={!canEdit}
-            placeholder="e.g. 1-0-1 or 1 tablet"
+            placeholder="1-0-1"
             value={row.dosage ?? ''}
             onChange={(e) => onChange({ dosage: e.target.value })}
           />
         </Field>
+
         <Field label="Timing" error={errors?.timing}>
           <select
             className="select"
@@ -489,15 +513,13 @@ function MedicineRow({
             <option value="bedtime">At bedtime</option>
           </select>
         </Field>
-      </div>
 
-      <div className="grid cols-2" style={{ gap: 8, marginBottom: 0 }}>
-        <Field label="Duration (days)" error={errors?.duration_days}>
+        <Field className="rx-narrow" label="Days" error={errors?.duration_days}>
           <input
             className="input"
             type="number"
             min={1}
-            placeholder="e.g. 5"
+            placeholder="5"
             disabled={!canEdit}
             value={row.duration_days ?? ''}
             onChange={(e) =>
@@ -507,7 +529,12 @@ function MedicineRow({
             }
           />
         </Field>
-        <Field label="Special instructions" error={errors?.instructions}>
+
+        <Field
+          className="rx-instructions"
+          label="Instructions"
+          error={errors?.instructions}
+        >
           <input
             className="input"
             placeholder="e.g. with warm water"

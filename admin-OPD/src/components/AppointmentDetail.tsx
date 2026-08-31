@@ -101,7 +101,77 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
   };
 
   return (
-    <Modal title="Appointment detail" onClose={onClose} large>
+    <Modal
+      title="Appointment detail"
+      onClose={onClose}
+      large
+      footer={
+        a && canUpdate ? (
+          /*
+           * Recording the outcome is what this screen is for, so it stays on
+           * screen instead of sitting under the prescription editor where it
+           * had to be scrolled to and read as three identical grey buttons.
+           * Done is the ordinary ending, so it is the primary one; the current
+           * state is shown beside it so "did I already mark this?" is answered
+           * without scrolling either.
+           */
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <div
+                className="muted"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}
+              >
+                Consultation outcome
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <Badge value={a.consultation_status} />
+              </div>
+            </div>
+
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary"
+                disabled={consult.isPending || a.consultation_status === 'done'}
+                onClick={() => consult.mutate('done')}
+              >
+                {a.consultation_status === 'done' ? 'Marked done ✓' : 'Mark as done'}
+              </button>
+              <button
+                className="btn"
+                disabled={consult.isPending || a.consultation_status === 'on_hold'}
+                onClick={() => consult.mutate('on_hold')}
+              >
+                On hold
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={consult.isPending || a.consultation_status === 'rejected'}
+                onClick={() => consult.mutate('rejected')}
+              >
+                Reject
+              </button>
+              <button className="btn" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="modal-actions" style={{ marginTop: 0 }}>
+            <button className="btn" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        )
+      }
+    >
       {isLoading || !a ? (
         <Loading />
       ) : (
@@ -332,20 +402,6 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
         </div>
       )}
 
-      {a && canUpdate && (
-        <div style={{ marginTop: 20, borderTop: 'var(--hairline)', paddingTop: 16 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Consultation outcome</div>
-          <div className="row">
-            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('done')}>Done</button>
-            <button className="btn btn-sm" disabled={consult.isPending} onClick={() => consult.mutate('on_hold')}>On hold</button>
-            <button className="btn btn-sm btn-danger" disabled={consult.isPending} onClick={() => consult.mutate('rejected')}>Reject</button>
-          </div>
-        </div>
-      )}
-
-      <div className="modal-actions">
-        <button className="btn" onClick={onClose}>Close</button>
-      </div>
     </Modal>
   );
 }

@@ -249,9 +249,8 @@ class _PathlabFormScreenState extends State<PathlabFormScreen> {
             LabeledField(
               label: _lab == null ? 'Password' : 'New password (leave blank to keep)',
               hint: 'Must be at least 8 characters.',
-              child: TextFormField(
+              child: PasswordField(
                 controller: _password,
-                obscureText: true,
                 validator: (v) {
                   final val = v ?? '';
                   if (_lab == null && val.length < 8) {

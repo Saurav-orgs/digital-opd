@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import { AppConfig } from './config';
 import { ApiException } from './types';
 import type {
-  IdentifyResult,
+  AccountCheck,
   PatientAuthUser,
   PatientDetailsInput,
   PatientNotification,
@@ -87,19 +87,31 @@ export interface PatientMe extends PatientAuthUser {
 
 export const patientApi = {
   /**
-   * Booking step 1. The number alone opens the account and tells us who is
-   * already registered on it; no patient is created here.
+   * Step 1. Decides whether the next field is "your password" or "choose a
+   * password". Returns two booleans and no session — the number on its own
+   * used to be enough to read the records of everyone on it.
    */
-  identify: (mobile: string) =>
-    unwrap<IdentifyResult>(client.post('/patient/auth/identify', { mobile })),
+  check: (mobile: string) =>
+    unwrap<AccountCheck>(client.post('/patient/auth/check', { mobile })),
 
-  register: (mobile: string, patient: PatientDetailsInput, doctorId?: string | null) =>
-    unwrap<PatientSession>(client.post('/patient/auth/register', {
-      mobile, patient, ...(doctorId ? { doctor_id: doctorId } : {}),
+  /** Open an account: number + password, no patient details yet. */
+  signup: (mobile: string, password: string, doctorId?: string | null) =>
+    unwrap<PatientSession>(client.post('/patient/auth/signup', {
+      mobile, password, ...(doctorId ? { doctor_id: doctorId } : {}),
     })),
-  login: (mobile: string, doctorId?: string | null) =>
+
+  register: (
+    mobile: string,
+    password: string,
+    patient: PatientDetailsInput,
+    doctorId?: string | null,
+  ) =>
+    unwrap<PatientSession>(client.post('/patient/auth/register', {
+      mobile, password, patient, ...(doctorId ? { doctor_id: doctorId } : {}),
+    })),
+  login: (mobile: string, password: string, doctorId?: string | null) =>
     unwrap<PatientSession>(client.post('/patient/auth/login', {
-      mobile, ...(doctorId ? { doctor_id: doctorId } : {}),
+      mobile, password, ...(doctorId ? { doctor_id: doctorId } : {}),
     })),
   me: () => unwrap<PatientMe>(client.get('/patient/auth/me')),
 

@@ -26,9 +26,12 @@ interface PatientAuthContextValue {
   selectProfile: (id: string) => void;
   refreshProfiles: () => Promise<PatientProfile[]>;
   loading: boolean;
-  login: (mobile: string, doctorId?: string | null) => Promise<void>;
+  login: (mobile: string, password: string, doctorId?: string | null) => Promise<void>;
+  /** Opens an account with just a number and a password; patients come after. */
+  signup: (mobile: string, password: string, doctorId?: string | null) => Promise<void>;
   register: (
     mobile: string,
+    password: string,
     details: PatientDetailsInput,
     doctorId?: string | null,
   ) => Promise<void>;
@@ -89,8 +92,18 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
   }, [selectedId]);
 
   const login = useCallback(
-    async (mobile: string, doctorId?: string | null) => {
-      const res = await patientApi.login(mobile, doctorId);
+    async (mobile: string, password: string, doctorId?: string | null) => {
+      const res = await patientApi.login(mobile, password, doctorId);
+      patientTokenStore.set(res.accessToken);
+      setPatient(res.patient);
+      applyProfiles(res.patients ?? []);
+    },
+    [applyProfiles],
+  );
+
+  const signup = useCallback(
+    async (mobile: string, password: string, doctorId?: string | null) => {
+      const res = await patientApi.signup(mobile, password, doctorId);
       patientTokenStore.set(res.accessToken);
       setPatient(res.patient);
       applyProfiles(res.patients ?? []);
@@ -101,10 +114,11 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(
     async (
       mobile: string,
+      password: string,
       details: PatientDetailsInput,
       doctorId?: string | null,
     ) => {
-      const res = await patientApi.register(mobile, details, doctorId);
+      const res = await patientApi.register(mobile, password, details, doctorId);
       patientTokenStore.set(res.accessToken);
       setPatient(res.patient);
       const list = applyProfiles(res.patients ?? []);
@@ -137,10 +151,11 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
       refreshProfiles,
       loading,
       login,
+      signup,
       register,
       logout,
     }),
-    [patient, profiles, selectedId, refreshProfiles, loading, login, register, logout],
+    [patient, profiles, selectedId, refreshProfiles, loading, login, signup, register, logout],
   );
 
   return <PatientAuthContext.Provider value={value}>{children}</PatientAuthContext.Provider>;

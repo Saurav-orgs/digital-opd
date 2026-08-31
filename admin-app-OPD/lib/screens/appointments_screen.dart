@@ -484,32 +484,57 @@ class _AppointmentDetailScreenState extends State<AppointmentDetailScreen> {
     );
   }
 
+  /// Closing the visit — the last card on the screen, and framed as the last
+  /// thing to do. Three identical outlined buttons gave no hint which one is
+  /// the ordinary ending, so Done is filled and the state already recorded is
+  /// shown and disabled.
   Widget _reviewCard(Appointment a) {
+    final status = a.consultationStatus;
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CardTitle('Consultation outcome'),
+          const Text(
+            'FINAL STEP',
+            style: TextStyle(
+              fontSize: 11,
+              letterSpacing: 0.6,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const CardTitle('Close this consultation'),
+          Row(
+            children: [
+              const Text('Currently',
+                  style: TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(width: 8),
+              StatusBadge(status),
+            ],
+          ),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 10,
             runSpacing: 8,
             children: [
-              OutlinedButton(
-                onPressed: _busy
+              ElevatedButton(
+                onPressed: _busy || status == 'done'
                     ? null
                     : () => _run(() => _api.setConsultation(a.id, 'done'),
                         'Marked as done'),
-                child: const Text('Done'),
+                child: Text(status == 'done' ? 'Marked done' : 'Done'),
               ),
               OutlinedButton(
-                onPressed: _busy
+                onPressed: _busy || status == 'on_hold'
                     ? null
                     : () => _run(() => _api.setConsultation(a.id, 'on_hold'),
                         'Put on hold'),
                 child: const Text('On hold'),
               ),
               OutlinedButton(
-                onPressed: _busy
+                onPressed: _busy || status == 'rejected'
                     ? null
                     : () => _run(() => _api.setConsultation(a.id, 'rejected'),
                         'Consultation rejected'),

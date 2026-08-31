@@ -29,6 +29,16 @@ export class Patient extends Model<Patient> {
   @Column({ type: DataType.STRING, allowNull: true })
   name: string | null;
 
+  /**
+   * bcrypt hash of the account password.
+   *
+   * Nullable: the front desk can create an account for a walk-in who has never
+   * chosen one. Those accounts must set a password before they can sign in —
+   * a null hash is "not set yet", never "any password will do".
+   */
+  @Column({ type: DataType.STRING, allowNull: true })
+  password_hash: string | null;
+
   @HasMany(() => PatientProfile)
   profiles: PatientProfile[];
 }

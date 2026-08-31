@@ -2,8 +2,10 @@ import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { doctorsApi } from '../api/endpoints';
 import type { CreateDoctorResult, Doctor, PendingDoctor } from '../api/types';
-import { Badge, ConfirmDialog, Empty, Loading } from '../components/ui';
+import { Badge, ConfirmDialog, Empty, Loading, PasswordInput } from '../components/ui';
 import { useToast } from '../components/Toast';
+
+const MAX_LICENSE_BYTES = 6 * 1024 * 1024;
 
 export default function DoctorsPage() {
   const qc = useQueryClient();
@@ -12,6 +14,7 @@ export default function DoctorsPage() {
   const [createdResult, setCreatedResult] = useState<CreateDoctorResult | null>(null);
   const [resetDoctor, setResetDoctor] = useState<Doctor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Doctor | null>(null);
+  const [profileDoctor, setProfileDoctor] = useState<Doctor | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['doctors'],
@@ -62,12 +65,20 @@ export default function DoctorsPage() {
               onRotateQr={() => slugMut.mutate(d.id)}
               rotating={slugMut.isPending && slugMut.variables === d.id}
               onEdit={() => setEditDoctor(d)}
+              onViewProfile={() => setProfileDoctor(d)}
               onResetPassword={() => setResetDoctor(d)}
               onDelete={() => setDeleteTarget(d)}
               deleting={deleteMut.isPending && deleteMut.variables === d.id}
             />
           ))}
         </div>
+      )}
+
+      {profileDoctor && (
+        <DoctorProfileModal
+          doctorId={profileDoctor.id}
+          onClose={() => setProfileDoctor(null)}
+        />
       )}
 
       {showCreate && (
@@ -133,6 +144,7 @@ function DoctorCard({
   onRotateQr,
   rotating,
   onEdit,
+  onViewProfile,
   onResetPassword,
   onDelete,
   deleting,
@@ -140,6 +152,7 @@ function DoctorCard({
   doctor: Doctor;
   onToggle: (enable: boolean) => void;
   onRotateQr: () => void;
+  onViewProfile: () => void;
   onResetPassword: () => void;
   rotating: boolean;
   onEdit: () => void;
@@ -186,6 +199,13 @@ function DoctorCard({
         >
           {doctor.is_enabled ? 'Disable' : 'Enable'}
         </button>
+        <button
+          className="btn btn-sm"
+          onClick={onViewProfile}
+          title="Details, registration number and certificate"
+        >
+          View profile
+        </button>
         <button className="btn btn-sm" onClick={onEdit}>
           Edit & QR
         </button>
@@ -218,6 +238,149 @@ function DoctorCard({
         >
           {deleting ? 'Removing…' : 'Delete'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Read-only view of a doctor for the super admin: who they are, how to reach
+ * them, and the certificate they registered with.
+ *
+ * The certificate is the reason this exists — until now an admin could create
+ * a doctor but never look at their credentials again, and a self-registered
+ * doctor's licence was only reachable from the pending-review panel, which
+ * empties as soon as the registration is dealt with.
+ *
+ * Editing stays in Edit & QR. Uploading a certificate is allowed here because
+ * a doctor created before this existed has none, and the profile is where an
+ * admin notices that.
+ */
+function DoctorProfileModal({
+  doctorId,
+  onClose,
+}: {
+  doctorId: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
+
+  const profileQ = useQuery({
+    queryKey: ['doctor-profile', doctorId],
+    queryFn: () => doctorsApi.profile(doctorId),
+  });
+
+  const upload = useMutation({
+    mutationFn: (file: File) => doctorsApi.uploadLicense(doctorId, file),
+    onSuccess: () => {
+      toast.success('Certificate uploaded');
+      qc.invalidateQueries({ queryKey: ['doctor-profile', doctorId] });
+      qc.invalidateQueries({ queryKey: ['doctors'] });
+    },
+    onError: (e: any) => setError(e?.message ?? 'Could not upload the certificate.'),
+  });
+
+  const d = profileQ.data;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginBottom: 4 }}>{d?.name ?? 'Doctor profile'}</h2>
+        {d?.specialization && (
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{d.specialization}</p>
+        )}
+
+        {profileQ.isLoading && <Loading />}
+        {profileQ.isError && (
+          <p style={{ color: 'var(--danger, red)', fontSize: 13 }}>
+            Could not load this profile.
+          </p>
+        )}
+
+        {d && (
+          <>
+            <div style={{ marginTop: 12, borderTop: 'var(--hairline)', paddingTop: 12 }}>
+              <InfoRow label="Login email" value={d.login_email ?? '—'} copyable />
+              <InfoRow label="Mobile" value={d.contact_mobile ?? '—'} />
+              <InfoRow label="Qualifications" value={d.qualifications ?? '—'} />
+              <InfoRow label="Registration no." value={d.license_number ?? '—'} />
+              <InfoRow
+                label="Account"
+                value={`${d.is_enabled ? 'Active' : 'Disabled'} · login ${d.login_active ? 'enabled' : 'disabled'}`}
+              />
+              <InfoRow
+                label="Terms accepted"
+                value={
+                  d.terms_accepted_at
+                    ? `${new Date(d.terms_accepted_at).toLocaleDateString()}${d.terms_version ? ` (v${d.terms_version})` : ''}`
+                    : 'Not recorded'
+                }
+              />
+            </div>
+
+            <div style={{ marginTop: 16, borderTop: 'var(--hairline)', paddingTop: 12 }}>
+              <div className="card-title" style={{ marginBottom: 8 }}>
+                Practice licence / certificate
+              </div>
+
+              {d.license_url ? (
+                <a
+                  className="btn btn-sm btn-primary"
+                  href={d.license_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open certificate
+                </a>
+              ) : (
+                <p className="muted" style={{ fontSize: 13, margin: '0 0 8px' }}>
+                  No certificate on file for this doctor.
+                </p>
+              )}
+
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  if (f.size > MAX_LICENSE_BYTES) {
+                    setError('That file is larger than 6 MB. Please choose a smaller one.');
+                    return;
+                  }
+                  setError('');
+                  upload.mutate(f);
+                }}
+              />
+              <button
+                className="btn btn-sm"
+                style={{ marginTop: 8 }}
+                disabled={upload.isPending}
+                onClick={() => fileRef.current?.click()}
+              >
+                {upload.isPending
+                  ? 'Uploading…'
+                  : d.license_url
+                    ? 'Replace certificate'
+                    : 'Upload certificate'}
+              </button>
+              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                PDF or image, up to 6 MB. The link above expires after 15 minutes.
+              </p>
+            </div>
+          </>
+        )}
+
+        {error && <FieldError>{error}</FieldError>}
+
+        <div className="row" style={{ marginTop: 20, gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );
@@ -266,10 +429,12 @@ function EditDoctorModal({
 
   const removeQrMut = useMutation({
     mutationFn: () => doctorsApi.removeQr(doctor.id),
-    onSuccess: () => {
-      setQrCodeUrl(null);
+    onSuccess: (updated) => {
+      // Drops the custom image and puts the generated one back, so there is
+      // always a QR here rather than an empty slot.
+      setQrCodeUrl(updated.qr_code_url ?? null);
     },
-    onError: (e: any) => setError(e?.message ?? 'Could not remove QR code.'),
+    onError: (e: any) => setError(e?.message ?? 'Could not reset the QR code.'),
   });
 
   const field = (key: keyof typeof form) => ({
@@ -338,11 +503,11 @@ function EditDoctorModal({
                 <button
                   type="button"
                   className="btn btn-sm"
-                  style={{ color: 'var(--danger, #dc2626)' }}
                   onClick={() => removeQrMut.mutate()}
                   disabled={removeQrMut.isPending}
+                  title="Discard a custom image and re-render the QR from the doctor's booking link"
                 >
-                  {removeQrMut.isPending ? 'Removing…' : 'Remove QR'}
+                  {removeQrMut.isPending ? 'Resetting…' : 'Reset to generated QR'}
                 </button>
               )}
             </div>
@@ -395,18 +560,39 @@ function CreateDoctorModal({
     password: '',
     specialization: '',
     qualifications: '',
+    license_number: '',
+    contact_mobile: '',
   });
+  const [license, setLicense] = useState<File | null>(null);
+  const licenseRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
 
   const mut = useMutation({
-    mutationFn: () =>
-      doctorsApi.create({
+    mutationFn: async () => {
+      const created = await doctorsApi.create({
         name: form.name.trim(),
         email: form.email.trim(),
         password: form.password,
         specialization: form.specialization.trim() || undefined,
         qualifications: form.qualifications.trim() || undefined,
-      }),
+        license_number: form.license_number.trim() || undefined,
+        contact_mobile: form.contact_mobile.trim() || undefined,
+      });
+      // Two calls on purpose: creating the tenant is one transaction (doctor,
+      // roles, login) and an S3 upload does not belong inside it. If the
+      // upload fails the doctor still exists — the certificate can be added
+      // afterwards from their profile.
+      if (license) {
+        try {
+          await doctorsApi.uploadLicense(created.doctor.id, license);
+        } catch {
+          setError(
+            'The doctor was created, but the certificate did not upload. Add it from their profile.',
+          );
+        }
+      }
+      return created;
+    },
     onSuccess: onCreated,
     onError: (e: any) => setError(e?.message ?? 'Something went wrong.'),
   });
@@ -429,7 +615,7 @@ function CreateDoctorModal({
         <input className="input" type="email" placeholder="dr.asha@hospital.com" {...field('email')} />
 
         <label className="form-label" style={{ marginTop: 12 }}>Temporary password *</label>
-        <input className="input" type="password" placeholder="min 8 characters" {...field('password')} />
+        <PasswordInput placeholder="min 8 characters" {...field('password')} />
         {form.password.length > 0 && form.password.length < 8 && (
           <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: 4 }}>
             Password must be at least 8 characters.
@@ -441,6 +627,57 @@ function CreateDoctorModal({
 
         <label className="form-label" style={{ marginTop: 12 }}>Qualifications</label>
         <input className="input" placeholder="MD, DM (Cardiology)" {...field('qualifications')} />
+
+        <label className="form-label" style={{ marginTop: 12 }}>Mobile number</label>
+        <input
+          className="input"
+          inputMode="numeric"
+          maxLength={10}
+          placeholder="10-digit number"
+          value={form.contact_mobile}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              contact_mobile: e.target.value.replace(/\D/g, '').slice(0, 10),
+            }))
+          }
+        />
+        {form.contact_mobile.length > 0 && !/^[6-9]\d{9}$/.test(form.contact_mobile) && (
+          <FieldError>Enter a valid 10-digit mobile number.</FieldError>
+        )}
+
+        <label className="form-label" style={{ marginTop: 12 }}>
+          Medical registration number
+        </label>
+        <input className="input" placeholder="e.g. MCI-12345/2018" {...field('license_number')} />
+
+        <label className="form-label" style={{ marginTop: 12 }}>
+          Practice licence / certificate
+        </label>
+        <input
+          ref={licenseRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,application/pdf"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            if (f.size > MAX_LICENSE_BYTES) {
+              setError('That file is larger than 6 MB. Please choose a smaller one.');
+              return;
+            }
+            setLicense(f);
+            setError('');
+          }}
+        />
+        <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-sm" onClick={() => licenseRef.current?.click()}>
+            {license ? 'Choose a different file' : 'Choose file'}
+          </button>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {license ? license.name : 'PDF or image, up to 6 MB'}
+          </span>
+        </div>
 
         {error && <p style={{ color: 'var(--danger, red)', marginTop: 8, fontSize: 13 }}>{error}</p>}
 
@@ -660,9 +897,7 @@ function ResetPasswordModal({
             </p>
 
             <label className="form-label">New password *</label>
-            <input
-              className="input"
-              type="password"
+            <PasswordInput
               autoFocus
               placeholder="min 8 characters"
               value={password}
@@ -673,9 +908,7 @@ function ResetPasswordModal({
             <label className="form-label" style={{ marginTop: 12 }}>
               Confirm password *
             </label>
-            <input
-              className="input"
-              type="password"
+            <PasswordInput
               value={confirm}
               onChange={(e) => { setConfirm(e.target.value); setError(null); }}
             />

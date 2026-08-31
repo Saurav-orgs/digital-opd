@@ -69,6 +69,14 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.DATE, allowNull: true })
   reviewed_at: Date | null;
 
+  /** When the doctor ticked the Provider Terms box, and which wording they
+   *  were shown. Null for doctors created before the terms existed. */
+  @Column({ type: DataType.DATE, allowNull: true })
+  terms_accepted_at: Date | null;
+
+  @Column({ type: DataType.STRING(40), allowNull: true })
+  terms_version: string | null;
+
   // ── Prescription letterhead (per-doctor branding) ──────────
   /** Clinic/practice name shown on the prescription pad. Falls back to the
    *  env clinic, then the doctor's own name, when unset. */

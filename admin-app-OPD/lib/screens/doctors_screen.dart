@@ -692,12 +692,14 @@ class _CreateDoctorDialogState extends State<_CreateDoctorDialog> {
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
-          TextField(
-            controller: ctrl,
-            keyboardType: type,
-            obscureText: obscure,
-            decoration: const InputDecoration(isDense: true),
-          ),
+          if (obscure)
+            PasswordField(controller: ctrl, isDense: true)
+          else
+            TextField(
+              controller: ctrl,
+              keyboardType: type,
+              decoration: const InputDecoration(isDense: true),
+            ),
         ],
       ),
     );

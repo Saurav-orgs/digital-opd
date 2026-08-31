@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SettingsService } from '../settings/settings.service';
 import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
+import * as QRCode from 'qrcode';
 import { Sequelize } from 'sequelize-typescript';
 import { Doctor } from '../database/models/doctor.model';
 import { Permission } from '../database/models/permission.model';
@@ -44,6 +46,8 @@ const TENANT_PATHLAB_PERMS = [
 
 @Injectable()
 export class DoctorsService {
+  private readonly logger = new Logger(DoctorsService.name);
+
   constructor(
     @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
     @InjectModel(Role) private readonly roleModel: typeof Role,
@@ -54,6 +58,7 @@ export class DoctorsService {
     private readonly sequelize: Sequelize,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -79,7 +84,14 @@ export class DoctorsService {
 
   async update(id: string, dto: UpdateDoctorDto) {
     const doctor = await this.getOrFail(id);
+    const baseBefore = doctor.profile_base_url;
     await doctor.update(dto as any);
+
+    // The QR encodes base + slug. Changing the base silently leaves every
+    // printed code pointing at the old host, so re-render when it moves.
+    if ('profile_base_url' in dto && dto.profile_base_url !== baseBefore) {
+      return this.toView(await this.syncQr(id));
+    }
     return this.toView(doctor);
   }
 
@@ -142,12 +154,16 @@ export class DoctorsService {
     };
   }
 
-  /** Remove the custom doctor profile QR code image. */
+  /**
+   * Drop a hand-uploaded QR and fall back to the generated one.
+   *
+   * Not "leave the doctor with no QR": every enabled doctor has a booking
+   * link, so there is always a correct QR to show, and an empty slot here just
+   * meant the admin had to upload something by hand. Uploading remains the way
+   * to override the generated image with a branded one.
+   */
   async removeQr(id: string) {
-    const doctor = await this.getOrFail(id);
-    if (doctor.qr_code_key) await this.storage.delete(doctor.qr_code_key);
-    await doctor.update({ qr_code_key: null } as any);
-    return this.toView(doctor);
+    return this.toView(await this.syncQr(id));
   }
 
   /**
@@ -179,7 +195,7 @@ export class DoctorsService {
     this.storage.validateDocument(license);
     const { key } = await this.storage.uploadDocument(license, 'doctor-licenses');
 
-    return this.sequelize.transaction(async (t) => {
+    const registered = await this.sequelize.transaction(async (t) => {
       const slug = await this.uniqueSlug(dto.name);
       const doctor = await this.doctorModel.create(
         {
@@ -190,9 +206,21 @@ export class DoctorsService {
           license_number: dto.license_number,
           license_file_key: key,
           public_slug: slug,
-          // Both off until a human approves: no bookings, no login.
-          is_enabled: false,
-          verification_status: DoctorVerificationStatus.PENDING,
+          terms_accepted_at: new Date(),
+          terms_version: dto.terms_version ?? null,
+          // ── Licence review is no longer a gate ──────────────────
+          // Registration used to land inert — no login, no booking link —
+          // until a super admin opened the licence. The client asked for that
+          // wait to go, so the account comes up live and the licence is
+          // reviewed after the fact rather than before.
+          //
+          // To put the gate back: set these two to `false` /
+          // `DoctorVerificationStatus.PENDING`, flip `is_active` on the user
+          // below to false, and restore the "we will verify" copy on the
+          // registration page. The approve/reject endpoints and the super
+          // admin's pending panel were left in place for exactly that.
+          is_enabled: true,
+          verification_status: DoctorVerificationStatus.APPROVED,
         } as any,
         { transaction: t },
       );
@@ -220,13 +248,19 @@ export class DoctorsService {
           type: UserType.DOCTOR,
           role_id: doctorRole.id,
           doctor_id: doctor.id,
-          is_active: false,
+          // Live immediately — see the note on the doctor row above.
+          is_active: true,
         } as any,
         { transaction: t },
       );
 
-      return { id: doctor.id, status: DoctorVerificationStatus.PENDING };
+      return { id: doctor.id, status: DoctorVerificationStatus.APPROVED };
     });
+
+    // Same reasoning as createTenant: the tenant exists, the picture of its
+    // booking link follows.
+    await this.syncQr(registered.id);
+    return registered;
   }
 
   /** Registrations waiting on the super admin, with a link to the licence. */
@@ -245,6 +279,60 @@ export class DoctorsService {
           : null,
       })),
     );
+  }
+
+  /**
+   * Attach (or replace) a doctor's practice licence certificate.
+   *
+   * Separate from tenant creation on purpose: creation is one transaction that
+   * makes a doctor, two roles and a login, and an S3 upload has no place
+   * inside it. The admin UI creates first and uploads second, and this is also
+   * how a certificate gets added to a doctor who was created before there was
+   * anywhere to put one.
+   */
+  async uploadLicense(id: string, file: Express.Multer.File) {
+    const doctor = await this.getOrFail(id);
+    this.storage.validateDocument(file);
+    const { key } = await this.storage.uploadDocument(
+      file,
+      `doctors/${id}/license`,
+    );
+    if (doctor.license_file_key) await this.storage.delete(doctor.license_file_key);
+    await doctor.update({ license_file_key: key } as any);
+    return this.adminProfile(id);
+  }
+
+  /**
+   * Everything the super admin needs to look a doctor over: the profile, the
+   * registration details, and a link that actually opens the certificate.
+   *
+   * `toView` cannot carry the licence link — it is synchronous and used on
+   * every list response, while signing an S3 URL is neither cheap nor wanted
+   * on a page that only shows names.
+   */
+  async adminProfile(id: string) {
+    const doctor = await this.getOrFail(id);
+    const user = await this.userModel.findOne({
+      where: { doctor_id: doctor.id, type: UserType.DOCTOR },
+      paranoid: false,
+    });
+
+    return {
+      ...this.toView(doctor),
+      license_number: doctor.license_number,
+      contact_mobile: doctor.contact_mobile,
+      license_url: doctor.license_file_key
+        ? await this.storage.presignedGetUrl(doctor.license_file_key, 900)
+        : null,
+      verification_status: doctor.verification_status,
+      rejection_reason: doctor.rejection_reason,
+      reviewed_at: doctor.reviewed_at,
+      terms_accepted_at: doctor.terms_accepted_at,
+      terms_version: doctor.terms_version,
+      created_at: (doctor as any).created_at ?? null,
+      login_email: user?.email ?? null,
+      login_active: user?.is_active ?? false,
+    };
   }
 
   /** Approve a registration: the tenant and its login both come alive. */
@@ -353,7 +441,7 @@ export class DoctorsService {
       });
     }
 
-    return this.sequelize.transaction(async (t) => {
+    const created = await this.sequelize.transaction(async (t) => {
       // 1 — Doctor profile
       const slug = await this.uniqueSlug(dto.name);
       const doctor = await this.doctorModel.create(
@@ -363,6 +451,8 @@ export class DoctorsService {
           qualifications: dto.qualifications ?? null,
           bio: dto.bio ?? null,
           consultation_fee: dto.consultation_fee ?? null,
+          license_number: dto.license_number ?? null,
+          contact_mobile: dto.contact_mobile ?? null,
           public_slug: slug,
           is_enabled: true,
         } as any,
@@ -406,8 +496,16 @@ export class DoctorsService {
         pathlabRole: { id: pathlabRole.id, name: pathlabRole.name },
         login: { email: dto.email.toLowerCase(), tempPassword: dto.password },
         qrUrl: `${patientWebBase}/d/${slug}`,
+        doctorId: doctor.id,
       };
     });
+
+    // Outside the transaction: an S3 round trip has no business holding a
+    // database transaction open, and an orphaned object is the cheaper leak if
+    // this fails.
+    const withQr = await this.syncQr(created.doctorId);
+    const { doctorId, ...result } = created;
+    return { ...result, doctor: this.toView(withQr) };
   }
 
   /** Creates a named role with given permissions, scoped to a tenant. */
@@ -440,15 +538,84 @@ export class DoctorsService {
     return role;
   }
 
-  /** Rotates the doctor's public_slug (invalidates old QR). */
+  /**
+   * Rotates the doctor's public_slug, which is what you do when a printed QR
+   * has leaked or is being retired. The stored QR is re-rendered to match —
+   * leaving the old image would hand out a picture of a dead link.
+   */
   async regenerateSlug(id: string, patientWebBase: string) {
     const doctor = await this.getOrFail(id);
     const slug = await this.uniqueSlug(doctor.name);
     await doctor.update({ public_slug: slug } as any);
+    const refreshed = await this.syncQr(id);
     return {
-      ...this.toView(doctor),
+      ...this.toView(refreshed),
       qrUrl: `${patientWebBase}/d/${slug}`,
     };
+  }
+
+  /**
+   * The URL a patient lands on: the tenant's own base when set, otherwise the
+   * platform default, plus the doctor's slug.
+   *
+   * One definition, used by `toView` for the link shown in the UI and by the
+   * QR renderer below. Two copies of this would eventually disagree, and a QR
+   * that disagrees with the link beside it is worse than no QR.
+   */
+  bookingUrl(doctor: Doctor): string {
+    // The doctor's own base wins; otherwise the platform setting the super
+    // admin controls, which itself falls back to the deploy's env var.
+    const base = doctor.profile_base_url || this.settings.patientWebBase();
+    const clean = (base || '').replace(/\/+$/, '');
+    return clean ? `${clean}/d/${doctor.public_slug}` : `/d/${doctor.public_slug}`;
+  }
+
+  /**
+   * Render the doctor's booking QR and store it.
+   *
+   * Called wherever the encoded URL is born or changes — creation, self
+   * registration, a slug rotation, an edit to the base URL. A QR is a picture
+   * of a URL, so it is only correct for as long as that URL is, and a printed
+   * code pointing at a dead slug is the failure this guards against.
+   *
+   * Best-effort by design: the caller has already created or updated a real
+   * doctor, and losing the tenant because S3 hiccuped would be a far worse
+   * outcome than a missing image the admin can regenerate.
+   */
+  async syncQr(id: string): Promise<Doctor> {
+    const doctor = await this.getOrFail(id);
+    try {
+      const png = await QRCode.toBuffer(this.bookingUrl(doctor), {
+        type: 'png',
+        width: 512,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+      });
+
+      const { key } = await this.storage.uploadImage(
+        {
+          buffer: png,
+          originalname: `${doctor.public_slug}-booking-qr.png`,
+          mimetype: 'image/png',
+          size: png.length,
+        } as Express.Multer.File,
+        `doctors/${id}/qr`,
+      );
+
+      const previous = doctor.qr_code_key;
+      await doctor.update({ qr_code_key: key } as any);
+      if (previous) await this.storage.delete(previous);
+    } catch (err) {
+      this.logger.warn(
+        `Could not generate the booking QR for doctor ${id}: ${(err as Error).message}`,
+      );
+    }
+    return doctor;
+  }
+
+  /** Re-render the QR on demand — for doctors created before this existed. */
+  async regenerateQr(id: string) {
+    return this.toView(await this.syncQr(id));
   }
 
   /** Slug for the doctor's public booking link, unique across soft-deletes. */
@@ -478,14 +645,14 @@ export class DoctorsService {
   /** Admin/self projection — resolves image keys to loadable URLs. */
   private toView(d: Doctor) {
     const json = d.toJSON() as any;
-    const base = d.profile_base_url || this.config.get<string>('patientWebBase') || '';
-    const cleanBase = base ? base.replace(/\/+$/, '') : '';
     return {
       ...json,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       clinic_logo_url: this.storage.publicUrl(d.clinic_logo_key),
       qr_code_url: this.storage.publicUrl(d.qr_code_key),
-      booking_url: cleanBase ? `${cleanBase}/d/${d.public_slug}` : `/d/${d.public_slug}`,
+      // Same resolver the QR is rendered from — the link shown and the link
+      // encoded must not be able to drift apart.
+      booking_url: this.bookingUrl(d),
     };
   }
 

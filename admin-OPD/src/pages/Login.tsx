@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
-import { Field } from '../components/ui';
+import { Field, PasswordInput } from '../components/ui';
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -55,12 +55,10 @@ export default function Login() {
             />
           </Field>
           <Field label="Password">
-            <input
-              className="input"
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
+              autoComplete="current-password"
             />
           </Field>
           <div className="login-forgot">

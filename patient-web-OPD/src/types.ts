@@ -87,10 +87,11 @@ export interface PatientProfile {
 }
 
 /** What Step 1 of booking returns for a number. */
-export interface IdentifyResult {
-  accessToken: string;
-  mobile: string;
-  patients: PatientProfile[];
+/** Answer to "what should this number be asked for next?" — grants nothing. */
+export interface AccountCheck {
+  exists: boolean;
+  /** False for an account the front desk opened but that never set a password. */
+  has_password: boolean;
 }
 
 /** The details captured when registering a patient, on any path. */

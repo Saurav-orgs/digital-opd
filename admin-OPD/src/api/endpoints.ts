@@ -7,6 +7,7 @@ import type {
   PendingDoctor,
   ConsultationSession,
   CreateDoctorResult,
+  DoctorProfile,
   EPrescription,
   MedicineCatalogEntry,
   DashboardSummary,
@@ -73,7 +74,22 @@ export const doctorsApi = {
     qualifications?: string;
     bio?: string;
     consultation_fee?: number;
+    license_number?: string;
+    contact_mobile?: string;
   }) => api.post<CreateDoctorResult>('/doctors', body).then((r) => r.data),
+  /** Super-admin: full profile including a signed link to the certificate. */
+  profile: (id: string) =>
+    api.get<DoctorProfile>(`/doctors/${id}/profile`).then((r) => r.data),
+  /** Super-admin: attach or replace the practice licence certificate. */
+  uploadLicense: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api
+      .post<DoctorProfile>(`/doctors/${id}/license`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
   /**
    * Super-admin: set a new password on a doctor's own login. Returns it so the
    * super admin can read it out — there is no email delivery here, so a
@@ -132,6 +148,17 @@ function upload(url: string, file: File) {
     .post<Doctor>(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     .then((r) => r.data);
 }
+
+// ── Platform settings (super-admin) ──────────────────────────
+export interface AppSettings {
+  patient_web_base: string;
+}
+
+export const settingsApi = {
+  get: () => api.get<AppSettings>('/settings').then((r) => r.data),
+  update: (body: Partial<AppSettings>) =>
+    api.patch<AppSettings>('/settings', body).then((r) => r.data),
+};
 
 // ── Schedules & leave ────────────────────────────────────────
 export const schedulesApi = {

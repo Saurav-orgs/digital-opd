@@ -1,3 +1,4 @@
+import { AppSetting } from './app-setting.model';
 import { Role } from './role.model';
 import { Permission } from './permission.model';
 import { RolePermission } from './role-permission.model';
@@ -38,9 +39,11 @@ export const models = [
   EPrescriptionMedicine,
   MedicineCatalog,
   AiTrainingSample,
+  AppSetting,
 ];
 
 export {
+  AppSetting,
   Role,
   Permission,
   RolePermission,

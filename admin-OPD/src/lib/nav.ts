@@ -20,6 +20,7 @@ export interface NavItem {
 /** Sidebar config — rendered dynamically from the user's read permissions. */
 export const NAV: NavItem[] = [
   { path: '/doctors', label: 'Doctors', module: 'doctors', icon: '🏥', superAdminOnly: true },
+  { path: '/settings', label: 'Settings', module: 'doctors', icon: '⚙️', superAdminOnly: true },
   // Clinic-side screens: the platform super-admin manages doctors, not patients.
   { path: '/dashboard', label: 'Appointments', module: 'dashboard', icon: '🗓', doctorOnly: true },
   { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: '🧪', doctorOnly: true },

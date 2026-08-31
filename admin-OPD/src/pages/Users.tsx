@@ -4,7 +4,7 @@ import { rolesApi, usersApi } from '../api/endpoints';
 import type { User } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { ActionMenuDropdown, Badge, Empty, Field, Loading, Modal } from '../components/ui';
+import { ActionMenuDropdown, Badge, Empty, Field, Loading, Modal, PasswordInput } from '../components/ui';
 
 export default function Users() {
   const { can } = useAuth();
@@ -213,9 +213,7 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
             : undefined
         }
       >
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}
         />
