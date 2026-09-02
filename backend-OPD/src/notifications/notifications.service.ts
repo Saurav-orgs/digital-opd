@@ -31,6 +31,26 @@ export class NotificationsService {
   }
 
   /**
+   * Remove notifications of one type that point at a given prescription.
+   *
+   * Used when an issued prescription is withdrawn: the patient was told
+   * "your prescription is ready", and leaving that in the bell would send them
+   * looking for a document that is no longer there.
+   */
+  async removeForPrescription(
+    prescriptionId: string,
+    type: NotificationType,
+  ): Promise<number> {
+    return this.notificationModel.destroy({
+      where: {
+        type,
+        // `data` is JSONB; match the key the issuing code writes.
+        data: { prescriptionId } as any,
+      },
+    });
+  }
+
+  /**
    * `profileId` narrows to one family member; omit it for the account-wide
    * feed, which is what the bell icon shows.
    */

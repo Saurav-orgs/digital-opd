@@ -326,14 +326,12 @@ export class PrescriptionPdfService {
 
       const col1Bottom = doc.y;
 
-      // Column 2: Dosage / Frequency (e.g. "X Once Daily", "X 1-0-1")
+      // Column 2: Dosage / Frequency (e.g. "X Once Daily", "X Twice a day")
       //
-      // `dosage` first, not `timing`. In this system `dosage` holds how often
-      // ("1-0-1", "twice a day") and `timing` holds the meal relation ("after
-      // food") — and it is the frequency the client's reference prints here
-      // ("X Once Daily"). Reading `timing` first dropped the frequency from the
-      // sheet entirely, leaving a patient told when to take a drug relative to
-      // food but never how many times a day.
+      // `dosage` holds how often. The meal relation ("after food") used to sit
+      // in `timing`; it is part of `instructions` now and prints on the
+      // sub-line below. `timing` is still read as a fallback so prescriptions
+      // written before that change keep rendering their frequency.
       const dosageVal = m.dosage || m.timing;
       if (dosageVal?.trim()) {
         const dosageStr = formatWithCrossPrefix(dosageVal);
@@ -372,8 +370,10 @@ export class PrescriptionPdfService {
       let rowHeight = Math.max(col1Bottom, doc.y) - y;
 
       // Sub-line below the medicine name (the "sos" line in the reference).
-      // The meal relation joins the instructions here rather than being lost:
-      // column 2 now carries the frequency, and both matter on a prescription.
+      // Carries the meal relation and anything else about how to take it. New
+      // prescriptions put all of that in `instructions`; `timing` is still
+      // joined in for rows written before it was merged, so reprinting an old
+      // prescription does not silently drop "after food".
       const subLineParts = [
         m.dosage ? m.timing?.trim() : null,
         isDurationInstruction ? null : m.instructions?.trim(),

@@ -225,6 +225,79 @@ export class PrescriptionsService {
     };
   }
 
+  /**
+   * Withdraw an issued prescription, putting it back to a draft.
+   *
+   * This is what "delete" means for something the patient has already been
+   * handed: the doctor issued the wrong thing and needs to fix it. Destroying
+   * the row outright would take the medicines with it and leave the visit
+   * looking as though nothing was ever prescribed, so instead the freeze is
+   * lifted and the work is kept for editing.
+   *
+   * What does go: the rendered PDF — it is the copy the patient can open, and
+   * a withdrawn prescription must stop being downloadable — and the "your
+   * prescription is ready" notification, which would otherwise point at a
+   * document that is no longer there. The visit stops showing a prescription
+   * to the patient the moment the status leaves `issued`.
+   */
+  async withdraw(appointmentId: string, user: AuthUser) {
+    await this.assertAccess(appointmentId, user);
+
+    const prescription = await this.prescriptionModel.findOne({
+      where: { appointment_id: appointmentId },
+    });
+    if (!prescription || prescription.status !== PrescriptionStatus.ISSUED) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, {
+        message: 'This visit has no issued prescription to withdraw.',
+      });
+    }
+
+    const pdfKey = prescription.pdf_key;
+    await prescription.update({
+      status: PrescriptionStatus.DRAFT,
+      issued_at: null,
+      pdf_key: null,
+    } as any);
+
+    // Best-effort cleanups: the prescription is already unfrozen, and none of
+    // these failing should hand the doctor an error for work that succeeded.
+    if (pdfKey) {
+      try {
+        await this.storage.delete(pdfKey);
+      } catch (err) {
+        this.logger.warn(`Could not delete withdrawn PDF: ${(err as Error).message}`);
+      }
+    }
+
+    try {
+      await this.notifications.removeForPrescription(
+        prescription.id,
+        NotificationType.PRESCRIPTION_READY,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Could not clear the prescription notification: ${(err as Error).message}`,
+      );
+    }
+
+    // The training pair captured at issue described a prescription the doctor
+    // has just disowned. Keeping it would teach the model from a mistake, and
+    // re-issuing would add a second sample for the same visit.
+    try {
+      await this.trainingModel.destroy({
+        where: {
+          appointment_id: appointmentId,
+          kind: TrainingSampleKind.PRESCRIPTION,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Could not clear the training sample: ${(err as Error).message}`);
+    }
+
+    this.logger.log(`Prescription for appointment ${appointmentId} withdrawn to draft.`);
+    return this.toView(await this.reload(prescription.id));
+  }
+
   // ── patient-facing ─────────────────────────────────────────
 
   /** Issued prescription for a visit, shaped for the patient portal. */
@@ -305,7 +378,7 @@ export class PrescriptionsService {
           strength: m.strength?.trim() || null,
           form: m.form?.trim() || null,
           dosage: m.dosage?.trim() || '',
-          timing: m.timing?.trim() || null,
+          timing: null,
           duration_days: m.duration_days ?? null,
           instructions: m.instructions?.trim() || null,
           source: fromAi ? MedicineSource.AI : MedicineSource.DOCTOR,
@@ -324,7 +397,9 @@ export class PrescriptionsService {
       original.medicine_name !== edited.medicine_name?.trim() ||
       (original.strength || '') !== (edited.strength?.trim() || '') ||
       (original.dosage || '') !== (edited.dosage?.trim() || '') ||
-      (original.timing || '') !== (edited.timing?.trim() || '') ||
+      // Was `timing`; food timing lives in instructions now, and an edit there
+      // is exactly the correction worth capturing as a training sample.
+      (original.instructions || '') !== (edited.instructions?.trim() || '') ||
       (original.duration_days ?? null) !== (edited.duration_days ?? null)
     );
   }
@@ -436,7 +511,6 @@ export class PrescriptionsService {
       strength: m.strength,
       form: m.form,
       dosage: m.dosage,
-      timing: m.timing,
       duration_days: m.duration_days,
       instructions: m.instructions,
       source: m.source,

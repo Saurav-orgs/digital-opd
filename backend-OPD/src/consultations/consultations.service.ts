@@ -213,7 +213,9 @@ export class ConsultationsService {
         // The model is told to leave dosage empty rather than guess; the doctor
         // fills it in, and issuing is blocked until they do.
         dosage: m.dosage || '',
-        timing: m.timing || null,
+        // Dropped from the AI contract — food timing is part of instructions
+        // now. The column stays until a migration can remove it.
+        timing: null,
         duration_days: m.duration_days ?? null,
         instructions: m.instructions || null,
         source: MedicineSource.AI,

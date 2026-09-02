@@ -21,7 +21,6 @@ export interface AiDraftMedicine {
   strength?: string;
   form?: string;
   dosage?: string;
-  timing?: string;
   duration_days?: number | null;
   instructions?: string;
 }
@@ -31,6 +30,12 @@ export interface AiDraftPrescription {
   medicines: AiDraftMedicine[];
   advice: string[];
   follow_up_days?: number | null;
+  /** Set when the doctor named a date ("come on the 25th"). follow_up_days is
+   *  derived from it, so either field alone is enough. */
+  follow_up_date?: string;
+  /** Plausibility flags for the doctor to look at before issuing. Advisory —
+   *  not persisted, since e_prescriptions has no column for them yet. */
+  warnings?: string[];
 }
 
 export interface AiProgressTrend {

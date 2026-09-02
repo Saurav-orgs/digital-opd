@@ -371,6 +371,14 @@ class ApiClient {
           await _post('/appointments/$appointmentId/prescription/issue')
               as Map<String, dynamic>);
 
+  /// Withdraw an issued prescription back to a draft: the PDF is deleted, the
+  /// patient's copy disappears and their "ready" notification is cleared. The
+  /// medicines stay so it can be corrected and issued again.
+  Future<EPrescription> withdrawPrescription(String appointmentId) async =>
+      EPrescription.fromJson(
+          await _delete('/appointments/$appointmentId/prescription')
+              as Map<String, dynamic>);
+
   /// Upload the handwritten prescription image (a transparent PNG drawn on the
   /// tablet). Returns the updated draft, now in handwritten mode.
   Future<EPrescription> saveHandwriting(

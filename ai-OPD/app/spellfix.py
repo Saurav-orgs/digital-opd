@@ -36,6 +36,9 @@ _STRENGTH_TAIL = re.compile(r"\s+\d+\s*(mg|mcg|ml|g|iu)?\.?$", re.IGNORECASE)
 _THRESHOLD = 80
 # Don't try to correct very short fragments — too easy to snap to the wrong drug.
 _MIN_LEN = 4
+# Used when the LLM already normalises drug names itself. Only near-identical
+# spellings pass, so the dictionary can fix a typo but never choose a drug.
+TRUSTED_THRESHOLD = 93
 
 
 def _base(name: str) -> str:
@@ -58,11 +61,20 @@ class MedicineSpeller:
             log.warning("Medicine dictionary not loaded: %s", err)
         log.info("Loaded %d base medicine names.", len(self._base_names))
 
-    def correct(self, name: str, extra: list[str] | None = None) -> str:
+    def correct(
+        self, name: str, extra: list[str] | None = None, threshold: int | None = None
+    ) -> str:
         """Return the best canonical spelling for `name`, or `name` unchanged.
 
         `extra` is the clinic's own catalogue (may carry strengths, stripped
         here). Clinic names are preferred on ties — they reflect this doctor.
+
+        `threshold` raises the bar for a replacement. Pass a high one when the
+        model that produced the name already corrects spellings from real drug
+        knowledge: this dictionary holds a few hundred names, so its "nearest
+        match" for anything outside it is a different drug, not a better
+        spelling. Mounjaro scores 71 against Montair — close enough to look
+        convincing, and a completely unrelated molecule.
         """
         raw = _base(name)
         if len(raw) < _MIN_LEN:
@@ -94,11 +106,17 @@ class MedicineSpeller:
         if not match:
             return raw
         best, score = match[0], match[1]
+        floor = _THRESHOLD if threshold is None else threshold
         # Speech usually gets the first sound right, so require the initial
         # letter to agree — this blocks confident-looking cross-drug snaps.
         same_start = best[:1].lower() == raw[:1].lower()
-        if score >= _THRESHOLD and same_start:
+        if score >= floor and same_start:
             return best
+        if score >= _THRESHOLD and same_start:
+            log.debug(
+                "Kept %r as heard: nearest dictionary match %r scored %.0f, "
+                "below the %d required here.", raw, best, score, floor,
+            )
         # No confident match: keep what was heard.
         return raw
 

@@ -212,12 +212,15 @@ class DraftMedicine(BaseModel):
     name: str
     strength: str = ""
     form: str = Field(default="", description="tablet | syrup | capsule | injection")
-    dosage: str = Field(default="", description="Morning-Afternoon-Night, e.g. '1-0-1'")
-    timing: str = Field(default="", description="before food | after food")
+    # Words, not the 1-0-1 grid: doctors dictate "twice a day", and frequencies
+    # like "every week" or "alternate day" have no slot in a three-slot grid.
+    dosage: str = Field(default="", description="Spoken frequency, e.g. 'Twice a day'")
     duration_days: int | None = None
-    instructions: str = ""
+    # Food timing lives here now — `timing` was dropped, so "after food" and
+    # anything else about how to take the medicine share one field.
+    instructions: str = Field(default="", description="How to take it, e.g. 'After food'")
 
-    @field_validator("strength", "form", "dosage", "timing", "instructions", mode="before")
+    @field_validator("strength", "form", "dosage", "instructions", mode="before")
     @classmethod
     def _coerce_str(cls, v: Any) -> str:
         if v is None:
@@ -229,7 +232,19 @@ class DraftPrescription(BaseModel):
     diagnosis: str = ""
     medicines: list[DraftMedicine] = Field(default_factory=list)
     advice: list[str] = Field(default_factory=list)
+    # For each advice line, the words in the transcript it came from. Asking for
+    # a citation makes a fabricated line falsifiable: main.py checks each span
+    # is really in the transcript and drops the ones that are not. Never
+    # returned to callers — it is dropped once it has done its job.
+    advice_sources: list[str] = Field(default_factory=list, exclude=True)
     follow_up_days: int | None = None
+    # A doctor who names a date ("come on the 25th") loses it through an
+    # integer. Both are returned: the date is what was said, the day count is
+    # derived from it so the backend keeps working unchanged.
+    follow_up_date: str = Field(default="", description="ISO YYYY-MM-DD if a date was spoken")
+    # Plausibility flags for the doctor — never a reason to change a value,
+    # only to look at one. Advisory, not persisted.
+    warnings: list[str] = Field(default_factory=list)
 
     @field_validator("diagnosis", mode="before")
     @classmethod
@@ -240,7 +255,7 @@ class DraftPrescription(BaseModel):
             return ", ".join(str(x).strip() for x in v if str(x).strip())
         return str(v).strip()
 
-    @field_validator("advice", mode="before")
+    @field_validator("advice", "warnings", mode="before")
     @classmethod
     def _coerce_advice(cls, v: Any) -> list[str]:
         if v is None:
@@ -250,6 +265,24 @@ class DraftPrescription(BaseModel):
             return [clean] if clean else []
         if isinstance(v, list):
             return [str(item).strip() for item in v if str(item).strip()]
+        return []
+
+    @field_validator("advice_sources", mode="before")
+    @classmethod
+    def _coerce_advice_sources(cls, v: Any) -> list[str]:
+        """Same coercion as advice, except empties are KEPT.
+
+        Position carries the meaning here — sources[i] is the citation for
+        advice[i]. Dropping an empty span shifts every later index by one, so a
+        line the model failed to cite silently steals its neighbour's citation
+        and passes verification.
+        """
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v]
         return []
 
 
@@ -271,7 +304,6 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
                     "strength": {"type": "string"},
                     "form": {"type": "string"},
                     "dosage": {"type": "string"},
-                    "timing": {"type": "string"},
                     "duration_days": {"type": ["integer", "null"]},
                     "instructions": {"type": "string"},
                 },
@@ -280,16 +312,26 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
                     "strength",
                     "form",
                     "dosage",
-                    "timing",
                     "duration_days",
                     "instructions",
                 ],
             },
         },
         "advice": {"type": "array", "items": {"type": "string"}},
+        "advice_sources": {"type": "array", "items": {"type": "string"}},
         "follow_up_days": {"type": ["integer", "null"]},
+        "follow_up_date": {"type": "string"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["diagnosis", "medicines", "advice", "follow_up_days"],
+    "required": [
+        "diagnosis",
+        "medicines",
+        "advice",
+        "advice_sources",
+        "follow_up_days",
+        "follow_up_date",
+        "warnings",
+    ],
 }
 
 

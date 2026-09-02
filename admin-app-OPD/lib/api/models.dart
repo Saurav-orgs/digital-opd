@@ -693,7 +693,6 @@ class PrescriptionMedicine {
   String? strength;
   String? form;
   String dosage;
-  String? timing;
   int? durationDays;
   String? instructions;
   final String source; // ai | doctor
@@ -704,7 +703,6 @@ class PrescriptionMedicine {
     this.strength,
     this.form,
     this.dosage = '',
-    this.timing,
     this.durationDays,
     this.instructions,
     this.source = 'doctor',
@@ -717,7 +715,6 @@ class PrescriptionMedicine {
         strength: j['strength'] as String?,
         form: j['form'] as String?,
         dosage: j['dosage'] as String? ?? '',
-        timing: j['timing'] as String?,
         durationDays: (j['duration_days'] as num?)?.toInt(),
         instructions: j['instructions'] as String?,
         source: j['source'] as String? ?? 'doctor',
@@ -729,7 +726,6 @@ class PrescriptionMedicine {
         if (strength != null && strength!.isNotEmpty) 'strength': strength,
         if (form != null && form!.isNotEmpty) 'form': form,
         if (dosage.isNotEmpty) 'dosage': dosage.trim(),
-        if (timing != null && timing!.isNotEmpty) 'timing': timing,
         if (durationDays != null) 'duration_days': durationDays,
         if (instructions != null && instructions!.isNotEmpty)
           'instructions': instructions,

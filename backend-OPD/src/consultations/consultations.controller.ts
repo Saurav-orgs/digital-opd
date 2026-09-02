@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -143,6 +144,19 @@ export class ConsultationsController {
       'Access-Control-Expose-Headers': 'Content-Disposition',
     });
     return new StreamableFile(buffer);
+  }
+
+  @Delete('prescription')
+  @ApiOperation({
+    summary:
+      'Withdraw an issued prescription: back to draft, PDF removed, patient notice cleared',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  withdrawPrescription(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prescriptions.withdraw(id, user);
   }
 
   @Post('prescription/issue')

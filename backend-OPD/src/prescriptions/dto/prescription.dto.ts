@@ -48,12 +48,6 @@ export class PrescriptionMedicineDto {
   @MaxLength(40)
   dosage?: string;
 
-  @ApiPropertyOptional({ example: 'after food' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  timing?: string;
-
   @ApiPropertyOptional({ example: 5 })
   @IsOptional()
   @Type(() => Number)

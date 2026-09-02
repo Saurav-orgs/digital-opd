@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi, medicinesApi } from '../api/endpoints';
 import type { PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
-import { Field } from './ui';
+import { ConfirmDialog, Field } from './ui';
 import { ApiError } from '../api/client';
 import { shareFile } from '../lib/shareFile';
 import {
@@ -69,7 +69,7 @@ function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
  */
 
 /** A trailing dose: a number and a unit, plus anything after it ("weekly"). */
-const DOSE_SUFFIX = /\s+(\d+(?:\.\d+)?\s*(?:mcg|mg|g|ml|iu|units?|%)\b.*)$/i;
+const DOSE_SUFFIX = /\s+(\d+(?:\.\d+)?\s*(?:(?:mcg|mg|g|ml|iu|units?)\b|%).*)$/i;
 
 function joinMedicine(name: string, strength?: string | null): string {
   return [name, strength].map((p) => (p ?? '').trim()).filter(Boolean).join(' ');
@@ -91,7 +91,6 @@ const blankRow = (): PrescriptionMedicine => ({
   medicine_name: '',
   strength: '',
   dosage: '',
-  timing: '',
   duration_days: null,
   instructions: '',
   source: 'doctor',
@@ -123,7 +122,31 @@ export function PrescriptionEditor({
   const [rows, setRows] = useState<PrescriptionMedicine[]>([blankRow()]);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<PrescriptionErrors>(noErrors);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const lastLoadedSessionRef = useRef<string | null>(null);
+
+  const withdraw = useMutation({
+    mutationFn: () => consultationApi.withdrawPrescription(appointmentId),
+    onSuccess: () => {
+      setConfirmWithdraw(false);
+      // The editor reloads from the server as a draft; let the adopt effect
+      // pick the medicines back up rather than second-guessing them here.
+      lastLoadedSessionRef.current = null;
+      setDirty(false);
+      qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
+      qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
+      toast.success(
+        'Prescription withdrawn',
+        'It is a draft again and no longer visible to the patient. Correct it and issue again.',
+      );
+    },
+    onError: (err: unknown) => {
+      setConfirmWithdraw(false);
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not withdraw the prescription.',
+      );
+    },
+  });
 
   // Adopt server state when prescription data arrives or when a new AI draft lands
   useEffect(() => {
@@ -164,7 +187,6 @@ export function PrescriptionEditor({
         strength: r.strength || undefined,
         form: r.form || undefined,
         dosage: r.dosage || undefined,
-        timing: r.timing || undefined,
         duration_days: r.duration_days ?? undefined,
         instructions: r.instructions || undefined,
       };
@@ -258,8 +280,41 @@ export function PrescriptionEditor({
               </a>
             )}
             <SharePrescriptionButton appointmentId={appointmentId} />
+            {canEdit && (
+              <button
+                className="btn btn-sm"
+                style={{ color: 'var(--state-error)' }}
+                onClick={() => setConfirmWithdraw(true)}
+                disabled={withdraw.isPending}
+                title="Take this prescription back so it can be corrected"
+              >
+                {withdraw.isPending ? 'Withdrawing…' : 'Withdraw'}
+              </button>
+            )}
           </div>
         </div>
+        {confirmWithdraw && (
+          <ConfirmDialog
+            title="Withdraw this prescription?"
+            destructive
+            busy={withdraw.isPending}
+            confirmLabel="Withdraw"
+            message={
+              <>
+                The patient can already see this prescription. Withdrawing it
+                removes their copy and the PDF, and clears the notification they
+                were sent.
+                <br />
+                <br />
+                The medicines stay here as a draft so you can correct them and
+                issue again.
+              </>
+            }
+            onConfirm={() => withdraw.mutate()}
+            onCancel={() => setConfirmWithdraw(false)}
+          />
+        )}
+
         {data?.diagnosis && (
           <p style={{ marginTop: 10 }}>
             <strong>Diagnosis:</strong> {data.diagnosis}
@@ -275,7 +330,7 @@ export function PrescriptionEditor({
               <span className="muted" style={{ fontSize: 13 }}>
                 {' '}
                 · {m.dosage}
-                {m.timing ? ` · ${m.timing}` : ''}
+                {m.instructions ? ` · ${m.instructions}` : ''}
                 {m.duration_days ? ` · ${m.duration_days} days` : ''}
               </span>
             </li>
@@ -493,25 +548,10 @@ function MedicineRow({
           <input
             className="input"
             disabled={!canEdit}
-            placeholder="1-0-1"
+            placeholder="Twice a day"
             value={row.dosage ?? ''}
             onChange={(e) => onChange({ dosage: e.target.value })}
           />
-        </Field>
-
-        <Field label="Timing" error={errors?.timing}>
-          <select
-            className="select"
-            disabled={!canEdit}
-            value={row.timing ?? ''}
-            onChange={(e) => onChange({ timing: e.target.value })}
-          >
-            <option value="">—</option>
-            <option value="before food">Before food</option>
-            <option value="after food">After food</option>
-            <option value="empty stomach">Empty stomach</option>
-            <option value="bedtime">At bedtime</option>
-          </select>
         </Field>
 
         <Field className="rx-narrow" label="Days" error={errors?.duration_days}>

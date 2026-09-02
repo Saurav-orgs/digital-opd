@@ -265,6 +265,14 @@ export const consultationApi = {
     api
       .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`)
       .then((r) => r.data),
+  /**
+   * Withdraw an issued prescription back to a draft: the PDF goes, the
+   * patient's copy disappears, the medicines stay so it can be corrected.
+   */
+  withdrawPrescription: (appointmentId: string) =>
+    api
+      .delete<EPrescription>(`/appointments/${appointmentId}/prescription`)
+      .then((r) => r.data),
   /** The issued PDF itself, for the share sheet or a download. */
   prescriptionPdf: (appointmentId: string) =>
     api

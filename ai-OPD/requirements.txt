@@ -4,6 +4,8 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pydantic==2.10.4
 httpx==0.28.1
+# Reads ai-OPD/.env into the environment at import time (config.py)
+python-dotenv==1.0.1
 
 # Speech-to-text (CTranslate2 backend — runs on CPU/Metal, no GPU required)
 faster-whisper==1.1.1
@@ -19,3 +21,7 @@ rapidfuzz==3.10.1
 
 # Gemini API (used for prescription extraction when GEMINI_ENABLED=true)
 google-genai>=1.5.0
+
+# Claude API (first-choice backend for extraction and summaries when
+# ANTHROPIC_API_KEY is set; Gemini and Ollama remain as fallbacks)
+anthropic>=1.2.0,<2

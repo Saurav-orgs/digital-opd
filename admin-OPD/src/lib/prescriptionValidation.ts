@@ -5,7 +5,6 @@ export type MedicineField =
   | 'medicine_name'
   | 'strength'
   | 'dosage'
-  | 'timing'
   | 'duration_days'
   | 'instructions';
 
@@ -27,7 +26,6 @@ const MEDICINE_LABELS: Record<MedicineField, string> = {
   // Field stays `dosage` on the wire (the AI returns that key); only the
   // label the client asked for changed.
   dosage: 'Frequency',
-  timing: 'Timing',
   duration_days: 'Duration (days)',
   instructions: 'Special instructions',
 };
@@ -53,7 +51,6 @@ export function rowHasContent(r: PrescriptionMedicine): boolean {
     !!text(r.medicine_name) ||
     !!text(r.strength) ||
     !!text(r.dosage) ||
-    !!text(r.timing) ||
     !!text(r.instructions) ||
     r.duration_days != null
   );
@@ -102,7 +99,7 @@ export function validatePrescription(
     }
 
     if (mode === 'issue' && !text(row.dosage)) {
-      setRow(index, 'dosage', 'Please fill the frequency, e.g. 1-0-1.');
+      setRow(index, 'dosage', 'Please fill the frequency, e.g. Twice a day.');
     }
 
     const days = row.duration_days;

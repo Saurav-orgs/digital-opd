@@ -49,6 +49,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
   bool _loading = true;
   bool _saving = false;
   bool _sharing = false;
+  bool _withdrawing = false;
 
   // Which input method is showing: handwrite | voice | type | upload.
   String _mode = 'voice';
@@ -110,7 +111,6 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                 strength: m.strength,
                 form: m.form,
                 dosage: m.dosage,
-                timing: m.timing,
                 durationDays: m.durationDays,
                 instructions: m.instructions,
                 source: m.source,
@@ -646,6 +646,45 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
     return const SizedBox.shrink();
   }
 
+  /// Takes back an issued prescription so it can be corrected.
+  ///
+  /// Confirmed first: the patient has already been told it was ready, and
+  /// withdrawing removes their copy.
+  Future<void> _withdrawPrescription() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Withdraw this prescription?'),
+        content: const Text(
+          'The patient can already see it. Withdrawing removes their copy and '
+          'the PDF, and clears the notification they were sent. The medicines '
+          'stay here as a draft so you can correct them and issue again.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Withdraw')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _withdrawing = true);
+    try {
+      final updated = await _api.withdrawPrescription(widget.appointmentId);
+      if (!mounted) return;
+      setState(() => _adopt(updated));
+      showSuccessSnack(context, 'Prescription withdrawn — it is a draft again.');
+    } on ApiException catch (e) {
+      if (mounted) showErrorSnack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _withdrawing = false);
+    }
+  }
+
   /// Hands the issued prescription to the system share sheet as the PDF
   /// itself, so the doctor can send it into WhatsApp (or anything else the
   /// phone offers) and the patient receives the document — no link to open, no
@@ -692,6 +731,12 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                 icon: const Icon(Icons.download_outlined, size: 16),
                 label: const Text('PDF'),
               ),
+            TextButton.icon(
+              onPressed: _withdrawing ? null : _withdrawPrescription,
+              icon: const Icon(Icons.undo_outlined, size: 16),
+              label: Text(_withdrawing ? 'Withdrawing…' : 'Withdraw'),
+              style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            ),
             TextButton.icon(
               onPressed: _sharing ? null : _sharePrescription,
               icon: _sharing
@@ -743,7 +788,8 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                   child: Text(
                     [
                       m.dosage,
-                      if (m.timing != null && m.timing!.isNotEmpty) m.timing!,
+                      if (m.instructions != null && m.instructions!.isNotEmpty)
+                        m.instructions!,
                       if (m.durationDays != null) '${m.durationDays} days',
                     ].where((x) => x.isNotEmpty).join(' · '),
                     style: const TextStyle(
@@ -907,7 +953,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
                   decoration: const InputDecoration(
                     // Label only — `m.dosage` stays the wire field the AI fills.
                     labelText: 'Frequency',
-                    hintText: '1-0-1',
+                    hintText: 'Twice a day',
                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
                   onChanged: (v) {
@@ -921,22 +967,6 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(
-                child: TextFormField(
-                  initialValue: m.timing,
-                  enabled: widget.canEdit,
-                  decoration: const InputDecoration(
-                    labelText: 'Timing',
-                    hintText: 'after food',
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  onChanged: (v) {
-                    _dirty = true;
-                    m.timing = v;
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
               Expanded(
                 child: TextFormField(
                   initialValue: m.durationDays?.toString(),
@@ -961,7 +991,7 @@ class _ConsultationPanelState extends State<ConsultationPanel> {
             enabled: widget.canEdit,
             decoration: const InputDecoration(
               labelText: 'Special instructions',
-              hintText: 'e.g. with warm water',
+              hintText: 'e.g. after food, with warm water',
               contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
             onChanged: (v) {

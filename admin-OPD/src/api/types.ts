@@ -273,7 +273,6 @@ export interface PrescriptionMedicine {
   strength?: string | null;
   form?: string | null;
   dosage?: string;
-  timing?: string | null;
   duration_days?: number | null;
   instructions?: string | null;
   source?: 'ai' | 'doctor';

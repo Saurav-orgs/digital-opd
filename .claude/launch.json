@@ -2,6 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "ai",
+      "runtimeExecutable": "ai-OPD/.venv/bin/uvicorn",
+      "runtimeArgs": [
+        "app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--app-dir",
+        "ai-OPD"
+      ],
+      "port": 8000
+    },
+    {
       "name": "backend",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
