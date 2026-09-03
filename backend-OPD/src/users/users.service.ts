@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import * as bcrypt from 'bcrypt';
 import { User } from '../database/models/user.model';
 import { Role } from '../database/models/role.model';
@@ -35,6 +36,7 @@ export class UsersService {
     overrides: { type?: UserType } = {},
   ): Promise<User> {
     await this.assertEmailFree(dto.email);
+    await this.assertAssignableRole(dto.role_id, caller);
     const password_hash = await bcrypt.hash(dto.password, 10);
     const user = await this.userModel.create({
       name: dto.name,
@@ -48,9 +50,18 @@ export class UsersService {
     return this.findOne(user.id);
   }
 
-  /** Returns users in the caller's tenant only (scoped by doctor_id). */
+  /**
+   * Users in the caller's tenant only (scoped by doctor_id).
+   *
+   * Super-admin accounts are left out for a clinic. The clinic's own doctor
+   * login is one of them, and this screen is for managing staff — the doctor
+   * edits themselves under My profile, and cannot be edited or deleted from
+   * here anyway, so the row was only ever a distraction.
+   */
   async findAll(caller: AuthUser): Promise<User[]> {
-    const where: any = caller.doctorId ? { doctor_id: caller.doctorId } : {};
+    const where: any = caller.doctorId
+      ? { doctor_id: caller.doctorId, type: { [Op.ne]: UserType.SUPER_ADMIN } }
+      : {};
     return this.userModel.findAll({
       where,
       include: [this.roleWithPerms, 'doctor'],
@@ -68,10 +79,13 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, dto: UpdateUserDto): Promise<User> {
+  async update(id: string, dto: UpdateUserDto, caller: AuthUser): Promise<User> {
     const user = await this.findOne(id);
     if (dto.email && dto.email.toLowerCase() !== user.email) {
       await this.assertEmailFree(dto.email);
+    }
+    if (dto.role_id && dto.role_id !== user.role_id) {
+      await this.assertAssignableRole(dto.role_id, caller);
     }
     // `type` and `doctor_id` are server-owned — an edit never moves an account
     // between kinds or doctors.
@@ -86,6 +100,36 @@ export class UsersService {
     }
     await user.update(patch as any);
     return this.findOne(id);
+  }
+
+  /**
+   * The caller may only hand out a role they can actually see.
+   *
+   * `role_id` arrives from the client, and nothing here used to check it — so
+   * a clinic admin with `users:create` could name the platform's own SuperAdmin
+   * role and mint an account carrying every permission in the system. The role
+   * must belong to the caller's tenant or be a shared non-system one; the
+   * platform role is the super admin's alone to grant.
+   */
+  private async assertAssignableRole(
+    roleId: string | undefined,
+    caller: AuthUser,
+  ): Promise<void> {
+    if (!roleId) return;
+
+    const role = await this.roleModel.findByPk(roleId);
+    if (!role) {
+      throw new AppException(ErrorCode.NOT_FOUND, { message: 'Role not found.' });
+    }
+    if (caller.type === UserType.SUPER_ADMIN) return;
+
+    const ownedByCaller = role.doctor_id === caller.doctorId;
+    const sharedAndGrantable = role.doctor_id === null && !role.is_system;
+    if (!ownedByCaller && !sharedAndGrantable) {
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'That role cannot be assigned.',
+      });
+    }
   }
 
   /**

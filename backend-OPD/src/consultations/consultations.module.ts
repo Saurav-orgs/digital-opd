@@ -10,6 +10,7 @@ import { ConsultationsService } from './consultations.service';
 import { ConsultationsController } from './consultations.controller';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { PrescriptionPdfService } from '../prescriptions/prescription-pdf.service';
+import { DoctorsModule } from '../doctors/doctors.module';
 import { MedicinesModule } from '../medicines/medicines.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -28,6 +29,11 @@ import { NotificationsModule } from '../notifications/notifications.module';
       EPrescriptionMedicine,
       AiTrainingSample,
     ]),
+    // The prescription PDF prints the doctor's booking QR, and the URL it
+    // encodes has exactly one definition — `DoctorsService.bookingUrl`. A
+    // second copy here would eventually drift, and a QR that disagrees with
+    // the link printed beside it is worse than no QR at all.
+    DoctorsModule,
     MedicinesModule,
     NotificationsModule,
   ],

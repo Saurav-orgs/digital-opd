@@ -63,6 +63,44 @@ export class ReportsController {
     return this.service.create(dto, file, user);
   }
 
+  @Post('appointment/:appointmentId')
+  @ApiOperation({
+    summary: "Clinic uploads a report against a specific visit",
+  })
+  // Gated on appointments:update, not reports:create — this is part of running
+  // the consultation, and it is reached from the appointment screen.
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['title', 'file'],
+      properties: {
+        title: { type: 'string', example: 'Blood Test — CBC' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 6 * 1024 * 1024 },
+    }),
+  )
+  createForAppointment(
+    @Param('appointmentId', ParseUUIDPipe) appointmentId: string,
+    @Body('title') title: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createForAppointment(
+      appointmentId,
+      (title || '').trim() || 'Report',
+      file,
+      user,
+    );
+  }
+
   @Get()
   @ApiOperation({ summary: "One patient's reports, for admin/doctor viewing" })
   @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
@@ -79,7 +117,11 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Re-run the AI summary for a report (after a failure)',
   })
-  @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
+  // Reached from the appointment screen, like the two retry routes below it,
+  // so it is gated the same way. It used to require reports:read, which tied a
+  // button on the consultation page to a module the clinic no longer has a
+  // screen for.
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
   retrySummary(@Param('id', ParseUUIDPipe) id: string) {
     return this.summaries.retry(id);
   }

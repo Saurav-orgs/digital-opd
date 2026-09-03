@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi } from '../api/endpoints';
 import { useToast } from './Toast';
+import { PrescriptionPreviewModal, PrintPrescriptionButton } from './PrescriptionPreview';
 
 type Tool = 'pen' | 'eraser';
 
@@ -37,6 +38,7 @@ export function HandwritingCanvas({
   const [tool, setTool] = useState<Tool>('pen');
   const [dirty, setDirty] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const prescriptionQ = useQuery({
     queryKey: ['prescription', appointmentId],
@@ -152,18 +154,24 @@ export function HandwritingCanvas({
     } catch (_) {}
   };
 
+  /** Push what is on the pad to the server — the step before issue or preview. */
+  const uploadStrokes = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) throw new Error('No canvas');
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Export failed'))), 'image/png'),
+    );
+    const file = new File([blob], 'handwriting.png', { type: 'image/png' });
+    await consultationApi.saveHandwriting(appointmentId, file);
+  };
+
   const issue = useMutation({
     mutationFn: async () => {
-      const canvas = canvasRef.current;
-      if (!canvas) throw new Error('No canvas');
-      const blob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Export failed'))), 'image/png'),
-      );
-      const file = new File([blob], 'handwriting.png', { type: 'image/png' });
-      await consultationApi.saveHandwriting(appointmentId, file);
+      await uploadStrokes();
       await consultationApi.issuePrescription(appointmentId);
     },
     onSuccess: () => {
+      setPreviewing(false);
       qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
       qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
       toast.success('Prescription issued');
@@ -172,17 +180,30 @@ export function HandwritingCanvas({
     onError: (e) => toast.error(e),
   });
 
+  /*
+   * Handwriting is the mode where the finished page is hardest to picture: the
+   * pad shows bare strokes, and the PDF puts them on the letterhead, scaled to
+   * whatever room is left under the header. Worth a look before it goes out.
+   */
+  const loadPreview = async () => {
+    await uploadStrokes();
+    return consultationApi.prescriptionPreview(appointmentId);
+  };
+
   if (issued && prescriptionQ.data) {
     const p = prescriptionQ.data;
     return (
       <div>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
           <span className="badge badge-available">Issued</span>
-          {p.pdf_url && (
-            <a className="btn btn-sm" href={p.pdf_url} target="_blank" rel="noreferrer">
-              Download PDF
-            </a>
-          )}
+          <div className="row" style={{ gap: 8 }}>
+            <PrintPrescriptionButton appointmentId={appointmentId} />
+            {p.pdf_url && (
+              <a className="btn btn-sm" href={p.pdf_url} target="_blank" rel="noreferrer">
+                Download PDF
+              </a>
+            )}
+          </div>
         </div>
         {p.mode === 'handwritten' && p.handwriting_image_url && (
           <img
@@ -262,17 +283,38 @@ export function HandwritingCanvas({
           <div className="row" style={{ gap: 8 }}>
             <button className="btn btn-sm" onClick={() => setIsFullscreen(false)}>Exit Fullscreen</button>
             {canEdit && (
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={issue.isPending || !dirty}
-                onClick={() => issue.mutate()}
-              >
-                {issue.isPending ? 'Issuing…' : 'Issue prescription'}
-              </button>
+              <>
+                <button
+                  className="btn btn-sm"
+                  disabled={issue.isPending || !dirty}
+                  onClick={() => setPreviewing(true)}
+                  title="See it on your letterhead before it goes out"
+                >
+                  👁 Preview
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={issue.isPending || !dirty}
+                  onClick={() => issue.mutate()}
+                >
+                  {issue.isPending ? 'Issuing…' : 'Issue prescription'}
+                </button>
+              </>
             )}
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>{canvasContent}</div>
+
+        {/* Fullscreen is its own return, so the dialog has to be mounted here
+            too — otherwise Preview does nothing from the whiteboard. */}
+        {previewing && (
+          <PrescriptionPreviewModal
+            load={loadPreview}
+            onClose={() => setPreviewing(false)}
+            onIssue={canEdit ? () => issue.mutate() : undefined}
+            issuing={issue.isPending}
+          />
+        )}
       </div>
     );
   }
@@ -304,6 +346,14 @@ export function HandwritingCanvas({
       {canEdit && (
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
           <button
+            className="btn btn-sm"
+            disabled={issue.isPending || !dirty}
+            onClick={() => setPreviewing(true)}
+            title="See it on your letterhead before it goes out"
+          >
+            👁 Preview
+          </button>
+          <button
             className="btn btn-primary btn-sm"
             disabled={issue.isPending || !dirty}
             onClick={() => issue.mutate()}
@@ -311,6 +361,15 @@ export function HandwritingCanvas({
             {issue.isPending ? 'Issuing…' : 'Issue prescription'}
           </button>
         </div>
+      )}
+
+      {previewing && (
+        <PrescriptionPreviewModal
+          load={loadPreview}
+          onClose={() => setPreviewing(false)}
+          onIssue={canEdit ? () => issue.mutate() : undefined}
+          issuing={issue.isPending}
+        />
       )}
     </div>
   );

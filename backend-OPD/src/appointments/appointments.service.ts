@@ -132,14 +132,35 @@ export class AppointmentsService {
       throw new AppException(ErrorCode.DOCTOR_DISABLED);
     }
 
-    // Walk-ins may take the current in-progress slot (allowPast).
-    const { endTime } = await this.slots.assertBookableSlot(
+    /*
+     * No slot check at all, deliberately.
+     *
+     * A walk-in is booked with the patient already in the clinic, and the
+     * doctor is the one deciding when to see them — after hours, between
+     * slots, or squeezed alongside an existing booking. Holding that to the
+     * published grid rejected bookings the doctor had already agreed to make,
+     * so only the visit's length is derived here.
+     */
+    /*
+     * Two people can walk in together, and the desk books both at "now" — the
+     * same minute for the same doctor, which the one-appointment-per-minute
+     * index rejects. That index is worth keeping for online booking, where a
+     * clash really is two patients claiming one slot; here it is just the
+     * clock being coarse. So the second one moves to the next free minute
+     * rather than failing at the desk with "this slot was just taken".
+     */
+    const startTime = await this.firstFreeMinute(
       doctorId,
       dto.appointment_date,
       dto.start_time,
-      { allowPast: true },
     );
-    await this.assertSlotFree(doctorId, dto.appointment_date, dto.start_time);
+    // Derived from the minute actually used, so a nudged start does not
+    // silently shorten the visit.
+    const endTime = await this.slots.walkInEndTime(
+      doctorId,
+      dto.appointment_date,
+      startTime,
+    );
 
     // A walk-in is a full registration: it creates the account and the patient
     // exactly as a self-booking would, so the patient can log in with this
@@ -151,17 +172,17 @@ export class AppointmentsService {
         {
           doctor_id: doctorId,
           appointment_date: dto.appointment_date,
-          start_time: dto.start_time,
+          start_time: startTime,
           end_time: endTime,
           patient_profile_id: profileId,
           patient_name: dto.patient_name,
           patient_mobile: dto.patient_mobile,
           patient_gender: dto.patient_gender,
           patient_age: dto.patient_age,
-          patient_address: dto.patient_address,
-          patient_city: dto.patient_city,
-          patient_state: dto.patient_state,
-          patient_pincode: dto.patient_pincode,
+          patient_address: dto.patient_address || null,
+          patient_city: dto.patient_city || null,
+          patient_state: dto.patient_state || null,
+          patient_pincode: dto.patient_pincode || null,
           description: dto.description ?? null,
           status: AppointmentStatus.CONFIRMED,
           consultation_status: ConsultationStatus.PENDING,
@@ -178,6 +199,43 @@ export class AppointmentsService {
   }
 
   /**
+   * The requested minute, or the first free one after it.
+   *
+   * Only walk-ins use this. Gives up after an hour of occupied minutes and
+   * returns the original time, so an unexpected state surfaces as the ordinary
+   * clash error instead of looping.
+   */
+  private async firstFreeMinute(
+    doctorId: string,
+    date: string,
+    startTime: string,
+  ): Promise<string> {
+    const taken = new Set(
+      (
+        await this.appointmentModel.findAll({
+          where: {
+            doctor_id: doctorId,
+            appointment_date: date,
+            status: { [Op.ne]: AppointmentStatus.CANCELLED },
+          },
+          attributes: ['start_time'],
+        })
+      ).map((a) => a.start_time.slice(0, 5)),
+    );
+
+    const [h, m] = startTime.split(':').map(Number);
+    let minutes = h * 60 + m;
+    for (let i = 0; i < 60; i++, minutes++) {
+      if (minutes > 23 * 60 + 59) break;
+      const candidate = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(
+        minutes % 60,
+      ).padStart(2, '0')}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return startTime;
+  }
+
+  /**
    * Decide which patient this booking is for.
    *
    * Two paths, and only two: the caller picked someone from the number's
@@ -191,10 +249,11 @@ export class AppointmentsService {
     patient_mobile: string;
     patient_name: string;
     patient_gender?: string;
-    patient_address: string;
-    patient_city: string;
-    patient_state: string;
-    patient_pincode: string;
+    // Optional: a walk-in can be booked before the desk has the address.
+    patient_address?: string;
+    patient_city?: string;
+    patient_state?: string;
+    patient_pincode?: string;
   }): Promise<string> {
     const account = await this.profiles.findOrCreateAccount(dto.patient_mobile);
 

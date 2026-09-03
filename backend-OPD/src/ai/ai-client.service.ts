@@ -126,6 +126,8 @@ export class AiClientService {
   async transcribe(
     audio: Express.Multer.File,
     medicineCatalog: string[] = [],
+    /** Aborts the request when the doctor gives up waiting on it. */
+    signal?: AbortSignal,
   ): Promise<AiTranscript> {
     const form = new FormData();
     form.append(
@@ -137,7 +139,7 @@ export class AiClientService {
     );
     form.append('medicine_catalog', JSON.stringify(medicineCatalog));
 
-    return this.postForm<AiTranscript>('/transcribe', form);
+    return this.postForm<AiTranscript>('/transcribe', form, signal);
   }
 
   /** Summarise an uploaded report (PDF or photo). */
@@ -218,7 +220,7 @@ export class AiClientService {
       complaint?: string;
     };
     medicine_catalog: string[];
-  }): Promise<{ prescription: AiDraftPrescription; model_version: string }> {
+  }, signal?: AbortSignal): Promise<{ prescription: AiDraftPrescription; model_version: string }> {
     const res = await this.fetchWithTimeout(
       `${this.baseUrl}/extract-prescription`,
       {
@@ -227,6 +229,7 @@ export class AiClientService {
         body: JSON.stringify(body),
       },
       this.requestTimeoutMs,
+      signal,
     ).catch((err) => {
       throw this.unreachable(err);
     });
@@ -236,11 +239,16 @@ export class AiClientService {
 
   // ── internals ──────────────────────────────────────────────
 
-  private async postForm<T>(path: string, form: FormData): Promise<T> {
+  private async postForm<T>(
+    path: string,
+    form: FormData,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const res = await this.fetchWithTimeout(
       `${this.baseUrl}${path}`,
       { method: 'POST', body: form },
       this.requestTimeoutMs,
+      signal,
     ).catch((err) => {
       throw this.unreachable(err);
     });
@@ -275,7 +283,13 @@ export class AiClientService {
     url: string,
     init: RequestInit,
     timeoutMs: number,
+    /** A caller's own reason to stop, on top of the deadline. */
+    signal?: AbortSignal,
   ): Promise<Response> {
-    return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    const deadline = AbortSignal.timeout(timeoutMs);
+    return fetch(url, {
+      ...init,
+      signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
+    });
   }
 }

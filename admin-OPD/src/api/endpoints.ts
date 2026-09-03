@@ -255,6 +255,15 @@ export const consultationApi = {
     api
       .get<ConsultationSession | null>(`/appointments/${appointmentId}/consultation`)
       .then((r) => r.data),
+  /**
+   * Give up on a recording still being transcribed or drafted. The session is
+   * discarded, so a late result can never overwrite what the doctor typed in
+   * the meantime.
+   */
+  cancelConsultation: (appointmentId: string) =>
+    api
+      .delete<{ cancelled: boolean }>(`/appointments/${appointmentId}/consultation`)
+      .then((r) => r.data),
   prescription: (appointmentId: string) =>
     api.get<EPrescription>(`/appointments/${appointmentId}/prescription`).then((r) => r.data),
   savePrescription: (appointmentId: string, body: Record<string, unknown>) =>
@@ -284,6 +293,17 @@ export const consultationApi = {
           'prescription.pdf',
         ),
       })),
+  /**
+   * The draft rendered as the PDF it would be issued as. Nothing is frozen and
+   * nothing reaches the patient — this is only the doctor looking at the page
+   * before committing to it.
+   */
+  prescriptionPreview: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/prescription/preview`, {
+        responseType: 'blob',
+      })
+      .then((r) => r.data as Blob),
   saveHandwriting: (appointmentId: string, image: Blob) => {
     const fd = new FormData();
     fd.append('file', image, 'handwriting.png');
@@ -298,6 +318,14 @@ export const consultationApi = {
 export const medicinesApi = {
   search: (q: string) =>
     api.get<MedicineCatalogEntry[]>('/medicines', { params: { q } }).then((r) => r.data),
+  /**
+   * The clinic's whole vocabulary, most-prescribed first — what a dictated
+   * medicine name is checked against before it can be issued.
+   */
+  catalog: (limit = 500) =>
+    api
+      .get<MedicineCatalogEntry[]>('/medicines', { params: { q: '', limit } })
+      .then((r) => r.data),
 };
 
 // ── Dashboard ────────────────────────────────────────────────
@@ -329,6 +357,17 @@ export const reportsApi = {
     fd.append('file', file);
     return api
       .post('/reports', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data);
+  },
+  /** File a report against the visit it belongs to, from the appointment page. */
+  uploadForAppointment: (appointmentId: string, title: string, file: File) => {
+    const fd = new FormData();
+    fd.append('title', title);
+    fd.append('file', file);
+    return api
+      .post<PatientReport>(`/reports/appointment/${appointmentId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       .then((r) => r.data);
   },
   remove: (id: string) => api.delete(`/reports/${id}`).then((r) => r.data),

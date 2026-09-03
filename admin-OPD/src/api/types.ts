@@ -265,6 +265,14 @@ export interface ConsultationSession {
   language: string | null;
   duration_seconds: number | null;
   error: string | null;
+  /**
+   * When the recording was handed over — what "taking too long" is measured
+   * from. Both spellings, as `BlockedNumber` does: Sequelize serialises its
+   * timestamps camelCase, but the rest of this payload is snake_case, so a
+   * serialiser change should not silently stop the clock.
+   */
+  createdAt?: string;
+  created_at?: string;
 }
 
 export interface PrescriptionMedicine {

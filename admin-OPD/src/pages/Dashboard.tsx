@@ -6,6 +6,7 @@ import type { Appointment, ConsultationStatus } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { WalkInModal } from '../components/WalkInModal';
 import { Badge, Empty, Loading } from '../components/ui';
+import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 
 type Range = 'previous' | 'today' | 'upcoming';
 type StatusFilter = 'pending' | 'done' | 'all';
@@ -18,7 +19,6 @@ function addDays(base: Date, n: number) {
   d.setDate(d.getDate() + n);
   return d;
 }
-const TODAY_STR = toDateStr(new Date());
 const YESTERDAY_STR = toDateStr(addDays(new Date(), -1));
 const TOMORROW_STR = toDateStr(addDays(new Date(), 1));
 
@@ -77,7 +77,7 @@ export default function Dashboard() {
             disabled={!doctorId}
             onClick={() => setWalkInOpen(true)}
           >
-            + Walk-in
+            + Walk-in Patient
           </button>
         )}
       </div>
@@ -129,7 +129,7 @@ export default function Dashboard() {
                   aria-label="Filter by status"
                 >
                   <option value="pending">Pending</option>
-                  <option value="done">Done</option>
+                  <option value="done">Completed</option>
                   <option value="all">All statuses</option>
                 </select>
               </div>
@@ -175,7 +175,7 @@ export default function Dashboard() {
   );
 }
 
-/** Contextual date narrowing: today is fixed, previous/upcoming are bounded. */
+/** Contextual date narrowing: previous/upcoming are bounded, today has none. */
 function DateFilter({
   range,
   date,
@@ -185,19 +185,10 @@ function DateFilter({
   date: string | undefined;
   onChange: (d: string | undefined) => void;
 }) {
-  if (range === 'today') {
-    return (
-      <input
-        className="input"
-        type="date"
-        value={TODAY_STR}
-        disabled
-        title="Today"
-        style={{ width: 150 }}
-        aria-label="Date"
-      />
-    );
-  }
+  // The Today tab is already one day. A date box there could only ever read
+  // back the day the tab is named after, which is why it was disabled — and a
+  // control that cannot be used is better absent than greyed out.
+  if (range === 'today') return null;
   const bound =
     range === 'previous' ? { max: YESTERDAY_STR } : { min: TOMORROW_STR };
   return (
@@ -263,6 +254,7 @@ function RangeTable({
   status: StatusFilter;
   onSelect: (id: string) => void;
 }) {
+  const narrow = useMediaQuery(NARROW);
   const listQ = useQuery({
     queryKey: ['appointments', { range, search, date }],
     queryFn: () => appointmentsApi.list({ range, search, date }),
@@ -279,6 +271,27 @@ function RangeTable({
   if (!listQ.data?.length) return <Empty>No appointments here.</Empty>;
   if (!filtered.length) return <Empty>No {status} appointments here.</Empty>;
 
+  /*
+   * On a phone the table did not fit, so it scrolled sideways — which hides the
+   * status column exactly when the doctor is scanning for what still needs
+   * doing, and makes tapping a row a two-handed job. A card puts the whole
+   * appointment on screen at once and gives the tap a proper target.
+   */
+  if (narrow) {
+    return (
+      <div className="appt-cards">
+        {filtered.map((a) => (
+          <AppointmentCard
+            key={a.id}
+            a={a}
+            showDate={range !== 'today'}
+            onClick={() => onSelect(a.id)}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="table-wrap">
       <table>
@@ -287,15 +300,21 @@ function RangeTable({
             <th>Patient</th>
             <th>Mobile</th>
             <th>Age / Gender</th>
-            <th>Date &amp; time</th>
-            <th>Reports</th>
-            <th>Source</th>
+            {/* Every row on the Today tab carries today's date, so printing it
+                on each of them says nothing — the time is the part that
+                differs. The other two tabs span days and still need it. */}
+            <th>{range === 'today' ? 'Time' : 'Date & time'}</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {filtered.map((a) => (
-            <AppointmentRow key={a.id} a={a} onClick={() => onSelect(a.id)} />
+            <AppointmentRow
+              key={a.id}
+              a={a}
+              showDate={range !== 'today'}
+              onClick={() => onSelect(a.id)}
+            />
           ))}
         </tbody>
       </table>
@@ -303,7 +322,53 @@ function RangeTable({
   );
 }
 
-function AppointmentRow({ a, onClick }: { a: Appointment; onClick: () => void }) {
+/** One appointment as a card — the phone equivalent of a table row. */
+function AppointmentCard({
+  a,
+  showDate,
+  onClick,
+}: {
+  a: Appointment;
+  showDate: boolean;
+  onClick: () => void;
+}) {
+  const when = `${showDate ? `${a.appointment_date} · ` : ''}${a.start_time?.slice(0, 5)}`;
+  const who = [a.patient_age, a.patient_gender].filter(Boolean).join(' · ');
+
+  return (
+    <button type="button" className="appt-card" onClick={onClick}>
+      <div className="appt-card-top">
+        <span className="appt-card-name">
+          {a.patient_name}
+          {a.on_leave && (
+            <span
+              title="Doctor is on leave this day — reschedule this booking."
+              style={{ marginLeft: 6, color: 'var(--state-on-hold)' }}
+            >
+              ⚠️
+            </span>
+          )}
+        </span>
+        <Badge value={a.consultation_status} />
+      </div>
+      <div className="appt-card-meta">
+        <span>{a.patient_mobile}</span>
+        {who && <span>· {who}</span>}
+      </div>
+      <div className="appt-card-meta">🕑 {when}</div>
+    </button>
+  );
+}
+
+function AppointmentRow({
+  a,
+  showDate,
+  onClick,
+}: {
+  a: Appointment;
+  showDate: boolean;
+  onClick: () => void;
+}) {
   return (
     <tr className="clickable-row" onClick={onClick}>
       <td style={{ fontWeight: 600 }}>
@@ -322,41 +387,11 @@ function AppointmentRow({ a, onClick }: { a: Appointment; onClick: () => void })
         {[a.patient_age, a.patient_gender].filter(Boolean).join(' · ') || '—'}
       </td>
       <td className="muted" style={{ whiteSpace: 'nowrap' }}>
-        {a.appointment_date} · {a.start_time?.slice(0, 5)}
+        {showDate ? `${a.appointment_date} · ` : ''}
+        {a.start_time?.slice(0, 5)}
       </td>
-      <td>
-        <ReportsCell count={a.reports_count ?? 0} />
-      </td>
-      <td>{a.source === 'walk_in' ? <Badge value="walk_in" label="Walk-in" /> : <span className="muted" style={{ textTransform: 'capitalize' }}>{a.source}</span>}</td>
       <td><Badge value={a.consultation_status} /></td>
     </tr>
-  );
-}
-
-/**
- * How many reports the patient attached to this visit. Reads as a quiet dash
- * when there are none, so a row with reports stands out at a glance.
- */
-function ReportsCell({ count }: { count: number }) {
-  if (count === 0) return <span className="muted">—</span>;
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: '2px 9px',
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        background: 'var(--primary-tint)',
-        color: 'var(--primary)',
-        whiteSpace: 'nowrap',
-      }}
-      title={`${count} report${count > 1 ? 's' : ''} uploaded`}
-    >
-      📄 {count}
-    </span>
   );
 }
 

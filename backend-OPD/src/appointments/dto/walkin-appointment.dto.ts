@@ -16,7 +16,12 @@ import {
 /**
  * Doctor-created, in-clinic booking. `doctor_id` is optional: for a doctor
  * account it is forced to their own id; an admin must supply it. `end_time` is
- * derived server-side from the slot.
+ * derived server-side.
+ *
+ * The address fields are optional here, unlike a public self-booking. Someone
+ * standing at the desk with a queue behind them is not the moment to insist on
+ * a PIN code, and the clinic can fill it in later from the patient's record —
+ * whereas a patient booking from home has the time and the details to hand.
  */
 export class WalkInAppointmentDto {
   @ApiPropertyOptional({ format: 'uuid' })
@@ -73,29 +78,31 @@ export class WalkInAppointmentDto {
   @Max(120, { message: 'Please enter a valid age.' })
   patient_age: number;
 
-  @ApiProperty({ example: 'H-42, Nehru Nagar' })
+  @ApiPropertyOptional({ example: 'H-42, Nehru Nagar' })
+  @IsOptional()
   @IsString()
-  @MinLength(3, { message: 'Please enter the address.' })
   @MaxLength(300)
-  patient_address: string;
+  patient_address?: string;
 
-  @ApiProperty({ example: 'Indore' })
+  @ApiPropertyOptional({ example: 'Indore' })
+  @IsOptional()
   @IsString()
-  @MinLength(2, { message: 'Please enter the city.' })
   @MaxLength(80)
-  patient_city: string;
+  patient_city?: string;
 
-  @ApiProperty({ example: 'Madhya Pradesh' })
+  @ApiPropertyOptional({ example: 'Madhya Pradesh' })
+  @IsOptional()
   @IsString()
-  @MinLength(2, { message: 'Please enter the state.' })
   @MaxLength(80)
-  patient_state: string;
+  patient_state?: string;
 
-  @ApiProperty({ example: '452001' })
+  // Still validated when given — a wrong PIN is worse than none.
+  @ApiPropertyOptional({ example: '452001' })
+  @IsOptional()
   @Matches(/^[1-9]\d{5}$/, {
     message: 'Please enter a valid 6-digit PIN code.',
   })
-  patient_pincode: string;
+  patient_pincode?: string;
 
   @ApiPropertyOptional({ description: 'Reason for visit.' })
   @IsOptional()

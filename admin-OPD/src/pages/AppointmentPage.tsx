@@ -10,6 +10,9 @@ import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
 import { CombinedSummaryDetail } from '../components/CombinedSummaryDetail';
+import { CollapseToggle } from '../components/CollapseToggle';
+import { ReportUpload } from '../components/ReportUpload';
+import { useCollapsible } from '../lib/collapsePreference';
 import { appointmentRefetchInterval, hasTrajectory } from '../lib/summaryPolling';
 
 export default function AppointmentPage() {
@@ -100,8 +103,13 @@ export default function AppointmentPage() {
 
   return (
     <div style={{ maxWidth: 1140, margin: '0 auto' }}>
-      {/* ── Page header ─────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      {/*
+        One line, not two. The patient's name used to sit here as a page title
+        and again as the first field of the card directly below it — the same
+        words twice, the top copy costing a whole header row. The card keeps
+        it; this row is now just where you came from and where the visit stands.
+      */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             className="btn btn-sm"
@@ -110,25 +118,29 @@ export default function AppointmentPage() {
           >
             ← Back
           </button>
-          <div>
-            <h1 style={{ fontSize: 20, margin: 0, lineHeight: 1.2 }}>
-              {a?.patient_name ?? 'Appointment'}
-            </h1>
-            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
-              {a?.appointment_date} · {a?.start_time?.slice(0, 5)}–{a?.end_time?.slice(0, 5)}
-            </div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {a?.appointment_date} · {a?.start_time?.slice(0, 5)}–{a?.end_time?.slice(0, 5)}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {a?.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
-          {a && <Badge value={a.status} />}
+          {/* Every appointment reaching this page is confirmed, so the badge
+              only ever said something when it did not. */}
+          {a && a.status !== 'confirmed' && <Badge value={a.status} />}
           {a && <Badge value={a.consultation_status} />}
         </div>
       </div>
 
-      {/* ── 1. Patient details card (Compact 3-4 items per row) ─── */}
-      <div className="card" style={{ marginBottom: 16, padding: '16px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      {/*
+        ── 1. Patient details ──────────────────────────────────
+        Reference data, not the work: it is read once on arrival and then sat
+        under for the rest of the consultation, so it is worth keeping short.
+        Each field is one line — the label beside its value rather than stacked
+        above it — which halves the height of every row, and three to a row on
+        a desktop keeps the whole card to a few lines instead of a block.
+      */}
+      <div className="card" style={{ marginBottom: 14, padding: '14px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
           <div className="card-title" style={{ margin: 0 }}>Patient details</div>
           {a?.doctor?.name && (
             <span className="muted" style={{ fontSize: 12.5 }}>Doctor: <strong style={{ color: 'var(--text)' }}>{a.doctor.name}</strong></span>
@@ -137,21 +149,12 @@ export default function AppointmentPage() {
 
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: '12px 20px',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '6px 24px',
         }}>
-          <Field label="Patient Name" value={a?.patient_name} />
-          <Field label="Mobile Number" value={a?.patient_mobile} />
-          {genderAge && <Field label="Gender & Age" value={genderAge} />}
-          {a?.source && (
-            <Field
-              label="Booking Source"
-              value={a.source === 'app' ? 'Mobile App' : a.source === 'walk_in' ? 'Walk-in' : 'Web Booking'}
-            />
-          )}
-          {a?.appointment_date && (
-            <Field label="Schedule" value={`${a.appointment_date} (${a.start_time?.slice(0, 5)}–${a.end_time?.slice(0, 5)})`} />
-          )}
+          <Field label="Name" value={a?.patient_name} />
+          <Field label="Mobile" value={a?.patient_mobile} />
+          {genderAge && <Field label="Gender & age" value={genderAge} />}
           {a?.patientProfile && (
             <Field
               label="Patient ID"
@@ -160,15 +163,18 @@ export default function AppointmentPage() {
               }`}
             />
           )}
+          {/* The two that run long get the full width rather than forcing
+              every other field's column to be wide enough for them. */}
           {a?.patient_address && (
             <Field
+              wide
               label="Address"
               value={[a.patient_address, a.patient_city, a.patient_state, a.patient_pincode]
                 .filter(Boolean)
                 .join(', ')}
             />
           )}
-          {a?.description && <Field label="Reason for Visit" value={a.description} />}
+          {a?.description && <Field wide label="Reason" value={a.description} />}
         </div>
 
       </div>
@@ -177,12 +183,29 @@ export default function AppointmentPage() {
       <div className="grid cols-2-1" style={{ gap: 16, alignItems: 'start' }}>
         {/* Left / Primary Workspace: Summary then Prescription */}
         <div className="stack" style={{ gap: 16 }}>
-          {/* Reports the patient uploaded for this visit */}
-          {a && a.reports.length > 0 && (
+          {/* This visit's reports — the patient's uploads and the clinic's. */}
+          {a && (
             <div className="card">
-              <div className="card-title" style={{ marginBottom: 12 }}>
-                Reports ({a.reports.length})
+              <div
+                className="row"
+                style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}
+              >
+                <div className="card-title" style={{ margin: 0 }}>
+                  Reports{a.reports.length > 0 ? ` (${a.reports.length})` : ''}
+                </div>
+                {/* Filed here rather than on a separate screen: this is the
+                    visit the report belongs to, and the doctor is already on it. */}
+                {canUpdate && (
+                  <ReportUpload appointmentId={a.id} onUploaded={invalidate} />
+                )}
               </div>
+
+              {a.reports.length === 0 ? (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  No reports for this visit yet.
+                </span>
+              ) : (
+                <>
 
               {/*
                 One combined card, not two. The across-visits comparison wins
@@ -227,6 +250,8 @@ export default function AppointmentPage() {
                   <ReportWithSummary key={r.id} report={r} onRetried={invalidate} />
                 ))}
               </div>
+                </>
+              )}
             </div>
           )}
 
@@ -446,6 +471,9 @@ export default function AppointmentPage() {
               </div>
             </div>
 
+            {/* Two ways a visit ends, and no third: on hold was removed at the
+                client's request. The status itself still exists server-side,
+                so a visit parked before that keeps rendering its badge. */}
             <div className="row outcome-actions" style={{ gap: 8 }}>
               <button
                 className="btn btn-primary"
@@ -453,26 +481,18 @@ export default function AppointmentPage() {
                 onClick={() => consult.mutate('done')}
               >
                 <span className="lbl-full">
-                  {a.consultation_status === 'done' ? '✓ Marked done' : '✓ Mark as done'}
+                  {a.consultation_status === 'done' ? '✓ Completed' : '✓ Complete'}
                 </span>
                 <span className="lbl-short">
-                  {a.consultation_status === 'done' ? '✓ Done' : 'Done'}
+                  {a.consultation_status === 'done' ? '✓ Done' : 'Complete'}
                 </span>
-              </button>
-              <button
-                className="btn"
-                disabled={consult.isPending || a.consultation_status === 'on_hold'}
-                onClick={() => consult.mutate('on_hold')}
-              >
-                <span className="lbl-full">Put on hold</span>
-                <span className="lbl-short">On hold</span>
               </button>
               <button
                 className="btn btn-danger"
                 disabled={consult.isPending || a.consultation_status === 'rejected'}
                 onClick={() => consult.mutate('rejected')}
               >
-                Reject
+                Cancel
               </button>
             </div>
           </div>
@@ -484,12 +504,30 @@ export default function AppointmentPage() {
 
 // ── Shared sub-components ────────────────────────────────────
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({
+  label,
+  value,
+  /** Spans every column — for values long enough to wrap. */
+  wide,
+}: {
+  label: string;
+  value?: string | null;
+  wide?: boolean;
+}) {
   if (!value) return null;
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 500 }}>{value}</div>
+    <div
+      style={{
+        display: 'flex',
+        gap: 8,
+        alignItems: 'baseline',
+        fontSize: 13,
+        lineHeight: 1.5,
+        gridColumn: wide ? '1 / -1' : undefined,
+      }}
+    >
+      <span className="muted" style={{ flex: '0 0 96px', fontSize: 12 }}>{label}</span>
+      <span style={{ fontWeight: 500, minWidth: 0, overflowWrap: 'anywhere' }}>{value}</span>
     </div>
   );
 }
@@ -517,6 +555,7 @@ export function VisitReportSummary({
   onRetried: () => void;
 }) {
   const toast = useToast();
+  const [collapsed, toggleCollapsed] = useCollapsible('visit-summary');
   const retry = useMutation({
     mutationFn: () => reportsApi.retryVisitSummary(appointmentId),
     onSuccess: () => { onRetried(); toast.success('Combining report summaries…'); },
@@ -527,17 +566,23 @@ export function VisitReportSummary({
 
   return (
     <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--primary-tint, #eef4ff)', border: '1px solid var(--primary, #cddffb)' }}>
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-        <strong style={{ fontSize: 13 }}>
-          Combined AI summary{count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
-        </strong>
-        {status === 'ready' && (
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: collapsed ? 0 : 6 }}>
+        <CollapseToggle
+          collapsed={collapsed}
+          onToggle={toggleCollapsed}
+          label="the combined summary"
+        >
+          <strong style={{ fontSize: 13 }}>
+            Combined AI summary{count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
+          </strong>
+        </CollapseToggle>
+        {status === 'ready' && !collapsed && (
           <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
             {retry.isPending ? 'Refreshing…' : 'Refresh'}
           </button>
         )}
       </div>
-      {status === 'processing' ? (
+      {collapsed ? null : status === 'processing' ? (
         <span className="muted" style={{ fontSize: 12.5 }}>Combining the report summaries…</span>
       ) : status === 'failed' ? (
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>

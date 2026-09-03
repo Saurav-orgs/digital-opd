@@ -104,6 +104,69 @@ export class ReportsService {
     return report;
   }
 
+  /**
+   * Clinic-side upload against a specific visit.
+   *
+   * The pathlab route files a report against a patient and leaves it floating;
+   * this one attaches it to the visit the doctor is looking at, which is what
+   * puts it in front of them and feeds the visit's combined summary. Whose
+   * report it is comes from the appointment rather than the request — the visit
+   * already knows, and one mobile number can cover a whole family.
+   *
+   * No "is the visit still open" gate, unlike the patient's own upload: a
+   * report that arrives after the doctor closed the consultation is exactly the
+   * case staff need to file, and they are the authority on their own records.
+   */
+  async createForAppointment(
+    appointmentId: string,
+    title: string,
+    file: Express.Multer.File,
+    user: AuthUser,
+  ): Promise<PatientReport> {
+    const appointment = await this.appointmentModel.findByPk(appointmentId);
+    if (!appointment) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Appointment not found.',
+      });
+    }
+    if (user.doctorId && appointment.doctor_id !== user.doctorId) {
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'You can only add reports to your own appointments.',
+      });
+    }
+
+    this.storage.validateDocument(file);
+    const { key } = await this.storage.uploadDocument(
+      file,
+      `reports/${appointment.patient_mobile}`,
+    );
+
+    const report = await this.reportModel.create({
+      patient_mobile: appointment.patient_mobile,
+      patient_profile_id: appointment.patient_profile_id,
+      appointment_id: appointment.id,
+      title,
+      file_key: key,
+      uploaded_by_user_id: user.id,
+      doctor_id: appointment.doctor_id,
+    } as any);
+
+    // The patient can see it in their portal, so tell them it is there.
+    await this.notifications.create(
+      appointment.patient_mobile,
+      NotificationType.REPORT_AVAILABLE,
+      'Your report is available',
+      `"${title}" has been added to your visit of ${appointment.appointment_date}.`,
+      { reportId: report.id, appointmentId: appointment.id },
+      appointment.doctor_id,
+      appointment.patient_profile_id,
+    );
+
+    void this.summaries.summarizeInBackground(report.id, file);
+
+    return report;
+  }
+
   /** Reports may be added while a visit is pending or on_hold, not once done. */
   private acceptsReports(status: ConsultationStatus): boolean {
     return (

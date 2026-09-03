@@ -1,16 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import PDFDocument from 'pdfkit';
+import * as QRCode from 'qrcode';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { StorageService } from '../uploads/storage.service';
+import { DoctorsService } from '../doctors/doctors.service';
 import { PrescriptionMode } from '../common/enums';
 
 /** Layout constants for an A4 prescription. */
 const PAGE = { width: 595.28, height: 841.89 };
 const MARGIN = 44;
+/**
+ * Height the "book your next visit" QR block needs, including the gap above
+ * it. Reserved by the body renderers so the code always lands on the same page
+ * as the prescription it belongs to rather than being pushed onto a second.
+ */
+const REBOOK_H = 96;
 const CONTENT_W = PAGE.width - MARGIN * 2;
 const COLOR = {
   accent: '#1B6EF3', // vibrant royal blue accent bar
@@ -73,6 +81,7 @@ export class PrescriptionPdfService {
   constructor(
     private readonly config: ConfigService,
     private readonly storage: StorageService,
+    private readonly doctors: DoctorsService,
   ) {}
 
   async render(
@@ -108,6 +117,10 @@ export class PrescriptionPdfService {
       y = this.diagnosis(doc, prescription, y);
       y = this.treatmentAdvice(doc, medicines, prescription, y);
     }
+
+    // The patient leaves with this sheet in hand — the QR is how the next
+    // visit gets booked without them having to find the clinic online again.
+    await this.rebookQr(doc, doctor, y);
 
     // Render footer & furniture on all pages
     this.pageFurniture(doc);
@@ -435,7 +448,9 @@ export class PrescriptionPdfService {
     drawing: Buffer | null,
     y: number,
   ): number {
-    const availH = PAGE.height - 170 - y;
+    // Stop short of the rebook block as well as the footer, so a full-page
+    // drawing is scaled to fit above the QR instead of colliding with it.
+    const availH = PAGE.height - 170 - REBOOK_H - y;
     if (!drawing) {
       doc
         .font('Helvetica-Oblique')
@@ -453,6 +468,105 @@ export class PrescriptionPdfService {
       this.logger.warn(`Could not embed handwriting: ${(err as Error).message}`);
     }
     return y + availH;
+  }
+
+  // ── Book the Next Visit (URL + QR) ─────────────────────────
+  /**
+   * A QR of the doctor's booking page, plus the URL in plain text beside it.
+   *
+   * The URL is printed as well as encoded on purpose: a patient with no camera
+   * to hand, or a fax-quality photocopy of this sheet, can still type it in.
+   *
+   * Best-effort — a prescription must be issued even if the QR cannot be drawn,
+   * so every failure here degrades to no block rather than a failed issue.
+   */
+  private async rebookQr(
+    doc: PDFKit.PDFDocument,
+    doctor: Doctor,
+    y: number,
+  ): Promise<void> {
+    let url: string;
+    try {
+      url = this.doctors.bookingUrl(doctor);
+    } catch (err) {
+      this.logger.warn(`Could not build the booking URL: ${(err as Error).message}`);
+      return;
+    }
+    // A relative path is what `bookingUrl` returns when no portal base is
+    // configured. Nothing can scan that, so print nothing.
+    if (!/^https?:\/\//i.test(url)) return;
+
+    let png: Buffer;
+    try {
+      png = await QRCode.toBuffer(url, {
+        type: 'png',
+        width: 256,
+        margin: 0,
+        errorCorrectionLevel: 'M',
+      });
+    } catch (err) {
+      this.logger.warn(`Could not render the booking QR: ${(err as Error).message}`);
+      return;
+    }
+
+    // Start a page only if the body genuinely left no room. `pageFurniture`
+    // runs after this and covers whichever page we end on.
+    if (y > PAGE.height - 100 - REBOOK_H) {
+      doc.addPage();
+      this.topAccentBar(doc);
+      y = 56;
+    } else {
+      y += 14;
+    }
+
+    const qrSize = 64;
+
+    doc
+      .save()
+      .moveTo(MARGIN, y)
+      .lineTo(PAGE.width - MARGIN, y)
+      .lineWidth(0.5)
+      .strokeColor(COLOR.line)
+      .stroke()
+      .restore();
+
+    y += 12;
+
+    try {
+      doc.image(png, MARGIN, y, { fit: [qrSize, qrSize] });
+    } catch (err) {
+      this.logger.warn(`Could not embed the booking QR: ${(err as Error).message}`);
+      return;
+    }
+
+    const textX = MARGIN + qrSize + 14;
+    const textW = CONTENT_W - qrSize - 14;
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(11.5)
+      .fillColor(COLOR.ink)
+      .text('Book your next appointment', textX, y + 6, { width: textW });
+
+    doc
+      .font('Helvetica')
+      .fontSize(9.5)
+      .fillColor(COLOR.muted)
+      .text('Scan this code, or open the link below.', textX, doc.y + 2, {
+        width: textW,
+      });
+
+    doc
+      .font('Helvetica')
+      .fontSize(9.5)
+      .fillColor(COLOR.accent)
+      .text(url, textX, doc.y + 3, {
+        width: textW,
+        link: url,
+        underline: false,
+        lineBreak: false,
+        ellipsis: true,
+      });
   }
 
   /** Best-effort handwriting fetch. */

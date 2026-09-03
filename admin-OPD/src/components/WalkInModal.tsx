@@ -1,19 +1,36 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, patientProfilesApi } from '../api/endpoints';
-import type { PatientProfile, Slot } from '../api/types';
+import type { PatientProfile } from '../api/types';
 import { useToast } from './Toast';
 import { Field, Modal } from './ui';
-import { InlineSlotPicker } from './InlineSlotPicker';
+
+/** Today in the browser's own timezone — `toISOString` would shift the date. */
+function localToday(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function localTimeNow(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
 
 /**
  * Doctor-created, in-clinic booking — and a full patient registration.
  *
  * A walk-in creates the same account and patient rows a self-booking does, so
  * the patient can log in with this number afterwards and find the visit, its
- * reports and its prescription waiting. That is why the address is required
- * here and why the number is entered first: one number may already carry
- * several family members, and the front desk must say which one this is.
+ * reports and its prescription waiting. The number is entered first because
+ * one number may already carry several family members, and the front desk must
+ * say which one this is.
+ *
+ * No slot picker: the patient is already in the clinic and the doctor decides
+ * when to see them, routinely outside the published grid. The form asks for the
+ * date and time directly and defaults both to now, which is the answer almost
+ * every time. The address is optional for the same reason — a queue at the desk
+ * is not the moment to insist on a PIN code.
  */
 export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -31,8 +48,9 @@ export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: 
   const [stateName, setStateName] = useState('');
   const [pincode, setPincode] = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState<string | null>(null);
-  const [slot, setSlot] = useState<Slot | null>(null);
+  // Defaulted to now: a walk-in is happening as it is being typed.
+  const [date, setDate] = useState(localToday);
+  const [time, setTime] = useState(localTimeNow);
 
   const mobileValid = /^[6-9]\d{9}$/.test(mobile.trim());
 
@@ -64,29 +82,28 @@ export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: 
   const nameValid = name.trim().length >= 2;
   const ageNum = Number(age);
   const ageValid = age.trim() !== '' && Number.isInteger(ageNum) && ageNum >= 0 && ageNum <= 120;
-  const addressValid =
-    address.trim().length >= 3 &&
-    city.trim().length >= 2 &&
-    stateName.trim().length >= 2 &&
-    /^[1-9]\d{5}$/.test(pincode.trim());
+  // A PIN code that is given must still be real — a wrong one is worse than a
+  // blank one, because it silently reaches the patient's record.
+  const pincodeValid = !pincode.trim() || /^[1-9]\d{5}$/.test(pincode.trim());
+  const timeValid = /^([01]\d|2[0-3]):([0-5]\d)$/.test(time);
   const canSubmit =
-    mobileValid && nameValid && !!gender && ageValid && addressValid && !!date && !!slot;
+    mobileValid && nameValid && !!gender && ageValid && pincodeValid && !!date && timeValid;
 
   const book = useMutation({
     mutationFn: () =>
       appointmentsApi.bookWalkIn({
         doctor_id: doctorId,
         appointment_date: date,
-        start_time: slot!.start_time,
+        start_time: time,
         ...(profileId ? { patient_profile_id: profileId } : {}),
         patient_name: name.trim(),
         patient_mobile: mobile.trim(),
         patient_gender: gender,
         patient_age: ageNum,
-        patient_address: address.trim(),
-        patient_city: city.trim(),
-        patient_state: stateName.trim(),
-        patient_pincode: pincode.trim(),
+        patient_address: address.trim() || undefined,
+        patient_city: city.trim() || undefined,
+        patient_state: stateName.trim() || undefined,
+        patient_pincode: pincode.trim() || undefined,
         description: description.trim() || undefined,
       }),
     onSuccess: () => {
@@ -155,21 +172,29 @@ export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: 
           />
         </Field>
       </div>
-      <Field label="Address *">
-        <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
+      <Field label="Address">
+        <input
+          className="input"
+          placeholder="Optional — can be added later"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+        />
       </Field>
       <div className="grid cols-2">
-        <Field label="City *">
+        <Field label="City">
           <input className="input" value={city} onChange={(e) => setCity(e.target.value)} />
         </Field>
-        <Field label="State *">
+        <Field label="State">
           <input
             className="input"
             value={stateName}
             onChange={(e) => setStateName(e.target.value)}
           />
         </Field>
-        <Field label="PIN code *">
+        <Field
+          label="PIN code"
+          error={pincodeValid ? undefined : 'Enter a valid 6-digit PIN code, or leave it blank.'}
+        >
           <input
             className="input"
             inputMode="numeric"
@@ -188,9 +213,26 @@ export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: 
         />
       </Field>
 
-      <div style={{ marginTop: 8 }}>
-        <div className="card-title" style={{ marginBottom: 8 }}>Pick a slot *</div>
-        <InlineSlotPicker doctorId={doctorId} onChange={(d, s) => { setDate(d); setSlot(s); }} />
+      {/* Date and time, not a slot. The doctor may see a walk-in between
+          bookings or after hours, and the grid has no opinion on either. */}
+      <div className="grid cols-2">
+        <Field label="Date *">
+          <input
+            className="input"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </Field>
+        <Field label="Time *">
+          <input
+            className="input"
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+          />
+          <span className="hint">Defaults to now; any time is allowed.</span>
+        </Field>
       </div>
 
       <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>

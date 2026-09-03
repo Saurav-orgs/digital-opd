@@ -215,14 +215,60 @@ export class PrescriptionsService {
       });
     }
 
+    return {
+      buffer: await this.storage.download(prescription.pdf_key),
+      filename: this.pdfFilename(appointment),
+    };
+  }
+
+  /**
+   * The draft rendered exactly as issuing would render it — same service, same
+   * letterhead, same page — but nothing is frozen, stored or sent.
+   *
+   * Issuing is one-way from the patient's side: they are notified and can open
+   * the document. Withdrawing undoes it, but only after they have already seen
+   * it. So the doctor gets to look at the real page first rather than at the
+   * editor's approximation of it.
+   *
+   * Deliberately not `assertIssuable`: a half-written draft is exactly what a
+   * doctor wants to preview, and refusing to render one would make the button
+   * useless at the point it is most wanted.
+   */
+  async previewFile(
+    appointmentId: string,
+    user: AuthUser,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const appointment = await this.assertAccess(appointmentId, user);
+    const prescription = await this.findOrCreate(appointmentId);
+    const medicines = await this.medicinesFor(prescription.id);
+
+    const doctor = await this.doctorModel.findByPk(appointment.doctor_id);
+    if (!doctor) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'Doctor profile not found.',
+      });
+    }
+
+    return {
+      buffer: await this.pdf.render(prescription, medicines, appointment, doctor),
+      filename: this.pdfFilename(appointment, 'preview'),
+    };
+  }
+
+  /** `prescription-ramesh-kulkarni-2026-09-02.pdf` — readable once saved. */
+  private pdfFilename(appointment: Appointment, suffix?: string): string {
     const who = (appointment.patient_name || 'patient')
       .replace(/[^A-Za-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .toLowerCase();
-    return {
-      buffer: await this.storage.download(prescription.pdf_key),
-      filename: `prescription-${who || 'patient'}-${appointment.appointment_date}.pdf`,
-    };
+    return [
+      'prescription',
+      suffix,
+      who || 'patient',
+      appointment.appointment_date,
+    ]
+      .filter(Boolean)
+      .join('-') + '.pdf';
   }
 
   /**

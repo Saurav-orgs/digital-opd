@@ -78,6 +78,19 @@ export class ConsultationsController {
     return this.consultations.get(id, user);
   }
 
+  @Delete('consultation')
+  @ApiOperation({
+    summary:
+      'Give up on a recording that is still transcribing or drafting; the session is discarded',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  cancelConsultation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.consultations.cancel(id, user);
+  }
+
   @Get('prescription')
   @ApiOperation({ summary: 'The draft or issued prescription for this visit' })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
@@ -142,6 +155,30 @@ export class ConsultationsController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
       'Access-Control-Expose-Headers': 'Content-Disposition',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Get('prescription/preview')
+  @ApiOperation({
+    summary:
+      'Render the current draft as the PDF it would be issued as — nothing is frozen or sent',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
+  @RawResponse()
+  async prescriptionPreview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.prescriptions.previewFile(id, user);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition',
+      // A draft changes with every keystroke; a cached preview would show the
+      // doctor the version before the edit they pressed the button to check.
+      'Cache-Control': 'no-store',
     });
     return new StreamableFile(buffer);
   }

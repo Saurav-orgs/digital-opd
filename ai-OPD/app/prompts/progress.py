@@ -20,7 +20,9 @@ Bump VERSION whenever the wording changes.
 
 from __future__ import annotations
 
-VERSION = "progress/v1"
+import re
+
+VERSION = "progress/v2"
 
 SYSTEM = """You are comparing one patient's medical reports between their last
 visit and today's visit. Both sets have already been summarised; you are reading
@@ -105,6 +107,80 @@ def _describe_patient(patient: dict) -> str:
     return ", ".join(bits) if bits else "no demographics given"
 
 
+# Labs name the same analyte differently, and two visits to the same clinic can
+# easily be reported by two labs. "Fasting Blood Sugar" and "Glucose, Fasting,
+# Plasma" are one measurement; matching label strings literally declares them
+# unrelated and silently throws the trend away.
+#
+# Deliberately a short, explicit table of well-established synonyms rather than
+# fuzzy matching. Merging two analytes that are NOT the same — total versus
+# direct bilirubin, urea versus BUN — would invent a trend across different
+# tests, which is far worse than missing one. Anything not listed here still
+# has to match on its own words.
+_SYNONYM_GROUPS: list[tuple[str, ...]] = [
+    (
+        "fasting glucose",
+        "fbs",
+        "fasting blood sugar",
+        "fasting blood glucose",
+        "fasting plasma glucose",
+        "glucose fasting",
+        "glucose fasting plasma",
+        "plasma glucose fasting",
+        "sugar fasting",
+    ),
+    (
+        "random glucose",
+        "rbs",
+        "random blood sugar",
+        "random blood glucose",
+        "random plasma glucose",
+    ),
+    (
+        "postprandial glucose",
+        "ppbs",
+        "post prandial blood sugar",
+        "post prandial glucose",
+        "pp blood sugar",
+    ),
+    ("hba1c", "a1c", "glycated haemoglobin", "glycated hemoglobin",
+     "glycosylated haemoglobin", "glycosylated hemoglobin"),
+    ("haemoglobin", "hemoglobin", "hb"),
+    ("creatinine", "serum creatinine"),
+    ("tsh", "thyroid stimulating hormone"),
+    ("vitamin d", "25 hydroxy vitamin d", "25 oh vitamin d", "vitamin d3"),
+    ("vitamin b12", "b12", "cobalamin"),
+    ("total cholesterol", "cholesterol total"),
+    ("uric acid", "serum uric acid"),
+]
+
+_WORD = re.compile(r"[^a-z0-9]+")
+
+
+def _tokens(label: str) -> str:
+    """Label reduced to its words, order-insensitive.
+
+    Only case, punctuation and word order are treated as noise — "Bilirubin,
+    Total" and "Total Bilirubin" are the same test, while "Bilirubin-Total" and
+    "Bilirubin-Direct" stay firmly apart because no word is ever dropped.
+    """
+    words = [w for w in _WORD.split(label.lower()) if w]
+    return " ".join(sorted(words))
+
+
+_ALIASES: dict[str, str] = {}
+for _group in _SYNONYM_GROUPS:
+    _canonical_name = _group[0]
+    for _alias in _group:
+        _ALIASES[_tokens(_alias)] = _canonical_name
+
+
+def canonical_label(label: str) -> str:
+    """The key two visits' labels must share to count as the same measurement."""
+    key = _tokens(label)
+    return _ALIASES.get(key, key)
+
+
 def _labels(reports: list[dict]) -> dict[str, str]:
     """Measurement label -> value, for one visit."""
     out: dict[str, str] = {}
@@ -125,10 +201,10 @@ def comparable_labels(
     built from, so an invented comparison cannot reach the doctor.
     """
     prev, curr = _labels(previous), _labels(current)
-    lower_prev = {k.lower(): (k, v) for k, v in prev.items()}
+    by_canonical = {canonical_label(k): (k, v) for k, v in prev.items()}
     pairs = []
     for label, current_value in curr.items():
-        hit = lower_prev.get(label.lower())
+        hit = by_canonical.get(canonical_label(label))
         if hit:
             pairs.append((label, hit[1], current_value))
     return pairs
@@ -137,11 +213,11 @@ def comparable_labels(
 def _render_comparability(previous: list[dict], current: list[dict]) -> str:
     """Spell out what may be compared, so the model does not have to infer it."""
     pairs = comparable_labels(previous, current)
-    prev_labels = {k.lower() for k in _labels(previous)}
+    prev_labels = {canonical_label(k) for k in _labels(previous)}
     new_only = [
         f"{label}: {value}"
         for label, value in _labels(current).items()
-        if label.lower() not in prev_labels
+        if canonical_label(label) not in prev_labels
     ]
 
     lines = []

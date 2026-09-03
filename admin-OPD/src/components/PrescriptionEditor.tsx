@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi, medicinesApi } from '../api/endpoints';
 import type { PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
 import { ConfirmDialog, Field } from './ui';
+import { PrescriptionPreviewModal, PrintPrescriptionButton } from './PrescriptionPreview';
 import { ApiError } from '../api/client';
 import { shareFile } from '../lib/shareFile';
+import {
+  buildMedicineIndex,
+  checkMedicine,
+  emptyIndex,
+  suggestNames,
+  type MedicineIndex,
+} from '../lib/medicineCheck';
 import {
   errorsFromApiDetails,
   hasErrors,
@@ -111,6 +119,22 @@ export function PrescriptionEditor({
   const qc = useQueryClient();
   const toast = useToast();
 
+  /*
+   * Loaded once for the editor rather than per row: it is the same list for
+   * every medicine, it changes only when a prescription is issued, and the
+   * check below has to compare against all of it rather than a search result.
+   */
+  const catalogQ = useQuery({
+    queryKey: ['medicine-catalog'],
+    queryFn: () => medicinesApi.catalog(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const medicineIndex: MedicineIndex = useMemo(
+    () =>
+      catalogQ.data ? buildMedicineIndex(catalogQ.data.map((m) => m.name)) : emptyIndex,
+    [catalogQ.data],
+  );
+
   const prescriptionQ = useQuery({
     queryKey: ['prescription', appointmentId],
     queryFn: () => consultationApi.prescription(appointmentId),
@@ -123,6 +147,7 @@ export function PrescriptionEditor({
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<PrescriptionErrors>(noErrors);
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const lastLoadedSessionRef = useRef<string | null>(null);
 
   const withdraw = useMutation({
@@ -241,12 +266,25 @@ export function PrescriptionEditor({
     onSuccess: () => {
       setDirty(false);
       setErrors(noErrors());
+      setPreviewing(false);
       qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
       qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
       toast.success('Prescription issued', 'The patient has been notified.');
     },
     onError: reportFailure,
   });
+
+  /*
+   * The server renders from the stored draft, so the doctor's unsaved edits
+   * have to reach it first — otherwise the preview would show the version
+   * before the change they pressed the button to check. Issue does the same
+   * save for the same reason.
+   */
+  const loadPreview = async () => {
+    if (canEdit) await consultationApi.savePrescription(appointmentId, body());
+    setDirty(false);
+    return consultationApi.prescriptionPreview(appointmentId);
+  };
 
   const patchRow = (i: number, patch: Partial<PrescriptionMedicine>) => {
     setDirty(true);
@@ -279,6 +317,7 @@ export function PrescriptionEditor({
                 Download PDF
               </a>
             )}
+            <PrintPrescriptionButton appointmentId={appointmentId} />
             <SharePrescriptionButton appointmentId={appointmentId} />
             {canEdit && (
               <button
@@ -392,6 +431,7 @@ export function PrescriptionEditor({
             total={rows.length}
             row={row}
             errors={errors.rows[i]}
+            medicineIndex={medicineIndex}
             canEdit={canEdit}
             onChange={(patch) => patchRow(i, patch)}
             onRemove={() => {
@@ -443,6 +483,19 @@ export function PrescriptionEditor({
           >
             {save.isPending ? 'Saving…' : 'Save draft'}
           </button>
+          {/* Only the draft-level checks, not the issue-level ones: a
+              half-written prescription is exactly what a doctor wants to see
+              laid out, and refusing to render one would make the button
+              useless at the moment it is most wanted. Issue still checks in
+              full — from here or from inside the preview. */}
+          <button
+            className="btn btn-sm"
+            disabled={issue.isPending}
+            onClick={() => { if (check('save')) setPreviewing(true); }}
+            title="See the prescription exactly as the patient will receive it"
+          >
+            👁 Preview
+          </button>
           <button
             className="btn btn-primary btn-sm"
             disabled={issue.isPending}
@@ -451,6 +504,17 @@ export function PrescriptionEditor({
             {issue.isPending ? 'Issuing…' : 'Issue prescription'}
           </button>
         </div>
+      )}
+
+      {previewing && (
+        <PrescriptionPreviewModal
+          load={loadPreview}
+          onClose={() => setPreviewing(false)}
+          onIssue={
+            canEdit ? () => { if (check('issue')) issue.mutate(); } : undefined
+          }
+          issuing={issue.isPending}
+        />
       )}
     </div>
   );
@@ -461,6 +525,7 @@ function MedicineRow({
   index,
   total,
   errors,
+  medicineIndex,
   canEdit,
   onChange,
   onRemove,
@@ -469,18 +534,38 @@ function MedicineRow({
   index: number;
   total: number;
   errors?: Partial<Record<MedicineField, string>>;
+  medicineIndex: MedicineIndex;
   canEdit: boolean;
   onChange: (patch: Partial<PrescriptionMedicine>) => void;
   onRemove: () => void;
 }) {
-  const [query, setQuery] = useState('');
-  const suggestionsQ = useQuery({
-    queryKey: ['medicines', query],
-    queryFn: () => medicinesApi.search(query),
-    enabled: query.length >= 2,
-  });
+  /*
+   * Autocomplete comes from the catalogue the editor already holds, not from a
+   * request per keystroke. The old version fired one search per row on mount
+   * and another on every character typed, which on a four-medicine draft was
+   * enough on its own to trip the API's rate limit.
+   */
+  const [query, setQuery] = useState(row.medicine_name ?? '');
+  const suggestions = useMemo(
+    () => (query.length >= 2 ? suggestNames(query, medicineIndex) : []),
+    [query, medicineIndex],
+  );
 
   const fromAi = row.source === 'ai';
+
+  /*
+   * Dictation does not fail by producing gibberish — it produces a real word
+   * that sounds right ("Mounjaro" heard as "Munger"), which reads as perfectly
+   * plausible in a list of medicines. So the name is checked against what this
+   * clinic actually prescribes before it can be issued.
+   *
+   * A name the doctor typed themselves is only questioned when something in
+   * the catalogue sounds exactly like it. Nagging them for prescribing
+   * something new would be wrong — and would train them to ignore the warning
+   * that matters.
+   */
+  const check = checkMedicine(row.medicine_name, medicineIndex);
+  const showWarning = !check.known && (fromAi || check.suggestions.length > 0);
 
   return (
     <div
@@ -538,10 +623,56 @@ function MedicineRow({
             }}
           />
           <datalist id={`meds-${row.id ?? row.medicine_name}-${index}`}>
-            {suggestionsQ.data?.map((m) => (
-              <option key={m.id} value={m.name} />
+            {suggestions.map((name) => (
+              <option key={name} value={name} />
             ))}
           </datalist>
+
+          {showWarning && (
+            <span
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 6,
+                marginTop: 4,
+                fontSize: 11.5,
+                lineHeight: 1.45,
+                color: 'var(--state-on-hold)',
+              }}
+            >
+              {check.suggestions.length > 0 ? (
+                <>
+                  <span>⚠ Sounds like a medicine you prescribe — did you mean:</span>
+                  {check.suggestions.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      disabled={!canEdit}
+                      style={{
+                        padding: '1px 8px',
+                        fontSize: 11.5,
+                        borderRadius: 999,
+                        color: 'var(--state-on-hold)',
+                        border: '1px solid currentColor',
+                      }}
+                      onClick={() => {
+                        onChange({ medicine_name: name });
+                        setQuery(name);
+                      }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <span>
+                  ⚠ Not in your medicine list — check the spelling before issuing.
+                </span>
+              )}
+            </span>
+          )}
         </Field>
 
         <Field label="Frequency" error={errors?.dosage}>

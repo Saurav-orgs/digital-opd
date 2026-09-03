@@ -26,8 +26,12 @@ export class PathlabsController {
 
   @Patch(':id')
   @Permissions({ module: PermissionModule.PATHLABS, action: PermissionAction.UPDATE })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePathlabDto) {
-    return this.service.update(id, dto);
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePathlabDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')

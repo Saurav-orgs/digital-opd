@@ -6,15 +6,17 @@ import { useToast } from './Toast';
 import { ConsultationRecorder } from './ConsultationRecorder';
 import { PrescriptionEditor } from './PrescriptionEditor';
 import { HandwritingCanvas } from './HandwritingCanvas';
+import { CameraCapture, cameraAvailable } from './CameraCapture';
 
-type Mode = 'handwrite' | 'voice' | 'type' | 'upload';
+type Mode = 'voice' | 'upload' | 'type' | 'handwrite';
 
 /**
- * The four ways a doctor/clinic can handle prescriptions for an appointment:
- *   ✍️ Handwrite — e-pen on tablet/stylus/touchscreen
+ * The four ways a doctor/clinic can handle prescriptions for an appointment,
+ * listed in the order they are actually reached for:
  *   🎙 Voice     — dictate/record; system drafts; doctor reviews
+ *   📷 Upload    — upload physical prescription photos/scans
  *   ⌨️ Type      — fill the structured prescription editor directly
- *   📷 Upload Rx — upload physical prescription photos/scans
+ *   ✍️ Handwrite — e-pen on tablet/stylus/touchscreen
  */
 export function PrescriptionTabs({
   appointmentId,
@@ -26,6 +28,7 @@ export function PrescriptionTabs({
   disabled?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>('voice');
+  const [cameraOpen, setCameraOpen] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +51,7 @@ export function PrescriptionTabs({
     mutationFn: (files: File[]) => appointmentsApi.addPrescriptions(appointmentId, files),
     onSuccess: (_data, files) => {
       invalidate();
+      setCameraOpen(false);
       toast.success(`Prescription${files.length > 1 ? 's' : ''} uploaded`);
     },
     onError: (e) => toast.error(e),
@@ -65,14 +69,18 @@ export function PrescriptionTabs({
   return (
     <div>
       <div className="row" style={{ gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-        <TabBtn label="✍️ Handwrite" active={mode === 'handwrite'} onClick={() => setMode('handwrite')} />
         <TabBtn label="🎙 Voice" active={mode === 'voice'} onClick={() => setMode('voice')} />
-        <TabBtn label="⌨️ Type" active={mode === 'type'} onClick={() => setMode('type')} />
         <TabBtn
-          label={prescriptions.length > 0 ? `📷 Upload Rx (${prescriptions.length})` : '📷 Upload Rx'}
+          label={
+            prescriptions.length > 0
+              ? `📷 Upload Prescription (${prescriptions.length})`
+              : '📷 Upload Prescription'
+          }
           active={mode === 'upload'}
           onClick={() => setMode('upload')}
         />
+        <TabBtn label="⌨️ Type" active={mode === 'type'} onClick={() => setMode('type')} />
+        <TabBtn label="✍️ Handwrite" active={mode === 'handwrite'} onClick={() => setMode('handwrite')} />
       </div>
 
       {mode === 'handwrite' && (
@@ -110,7 +118,7 @@ export function PrescriptionTabs({
       {mode === 'upload' && (
         <div className="stack" style={{ gap: 14 }}>
           <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-            Upload photos or scanned copies of the physical prescription.
+            Photograph the prescription, or upload a scan you already have.
           </p>
 
           {prescriptions.length === 0 ? (
@@ -202,15 +210,38 @@ export function PrescriptionTabs({
                   e.target.value = '';
                 }}
               />
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                disabled={addRx.isPending}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {addRx.isPending ? 'Uploading…' : '+ Upload prescription images'}
-              </button>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                {/* Taking the photo here is the common case in a clinic — the
+                    paper is on the desk. Choosing a file is for a scan that
+                    already exists, so it is the quieter of the two. */}
+                {cameraAvailable() && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={addRx.isPending}
+                    onClick={() => setCameraOpen(true)}
+                  >
+                    📷 Take photo
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={addRx.isPending}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {addRx.isPending ? 'Uploading…' : 'Choose files'}
+                </button>
+              </div>
             </div>
+          )}
+
+          {cameraOpen && (
+            <CameraCapture
+              busy={addRx.isPending}
+              onCapture={(file) => addRx.mutate([file])}
+              onClose={() => setCameraOpen(false)}
+            />
           )}
         </div>
       )}

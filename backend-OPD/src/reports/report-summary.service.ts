@@ -28,6 +28,13 @@ import {
  * unfinished. That is adequate for a single-clinic deployment; a multi-instance
  * one would want a real queue here.
  */
+/**
+ * How many earlier visits feed one trajectory. Enough that a visit with a thin
+ * or unreadable report cannot hide the history behind it; small enough that the
+ * comparison prompt stays short.
+ */
+const HISTORY_VISITS = 3;
+
 @Injectable()
 export class ReportSummaryService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ReportSummaryService.name);
@@ -225,18 +232,13 @@ export class ReportSummaryService implements OnApplicationBootstrap {
       return;
     }
 
-    const previous = await this.previousVisit(appointment);
-    if (!previous) {
+    const earlier = await this.previousVisitInput(appointment);
+    if (!earlier) {
       // A first visit has no trajectory — the UI shows the visit summary alone.
       await this.clearProgress(appointmentId);
       return;
     }
-
-    const previousInput = this.visitInputFromStored(previous);
-    if (!previousInput) {
-      await this.clearProgress(appointmentId);
-      return;
-    }
+    const { visit: previous, input: previousInput } = earlier;
 
     await this.appointmentModel.update(
       {
@@ -318,7 +320,9 @@ export class ReportSummaryService implements OnApplicationBootstrap {
       { where: { id: appointmentId } },
     );
 
-    const previous = await this.previousVisit(appointment);
+    // The same selection the comparison itself made, so the training pair
+    // records the input the model was actually given.
+    const earlier = await this.previousVisitInput(appointment);
     const current = await this.visitInput(appointment);
     await this.trainingModel.create({
       kind: TrainingSampleKind.PROGRESS_SUMMARY,
@@ -329,7 +333,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
           age: appointment.patient_age,
           gender: appointment.patient_gender,
         },
-        previous: previous ? this.visitInputFromStored(previous) : null,
+        previous: earlier?.input ?? null,
         current,
       },
       ai_output: original as unknown as Record<string, unknown> | null,
@@ -351,16 +355,32 @@ export class ReportSummaryService implements OnApplicationBootstrap {
    * The one visit to compare against: same patient, same doctor, strictly
    * earlier, not cancelled, and carrying a summary worth reading.
    */
-  private async previousVisit(
+  /**
+   * The most recent earlier visit that has something to compare against, and
+   * the input built from it.
+   *
+   * This used to be one query that demanded `reports_summary_status = READY`,
+   * which quietly threw away visits it should have used. A consolidation is a
+   * separate AI call from the per-report summaries, so it can fail on its own —
+   * the sidecar being down for a minute is enough — and when it did, a visit
+   * with four perfectly good report summaries became invisible to every future
+   * comparison, permanently. The trajectory then either compared against
+   * something much older or reported no history at all.
+   *
+   * So candidates are walked newest-first and the first one that yields usable
+   * input wins. Still one visit, as designed — the chain carries anything older
+   * forward — but "usable" is now decided by what the visit actually holds
+   * rather than by whether one derived field happened to succeed.
+   */
+  private async previousVisitInput(
     appointment: Appointment,
-  ): Promise<Appointment | null> {
-    return this.appointmentModel.findOne({
+  ): Promise<{ visit: Appointment; input: AiVisitInput } | null> {
+    const candidates = await this.appointmentModel.findAll({
       where: {
         patient_profile_id: appointment.patient_profile_id,
         doctor_id: appointment.doctor_id,
         id: { [Op.ne]: appointment.id },
         status: { [Op.ne]: AppointmentStatus.CANCELLED },
-        reports_summary_status: AiJobStatus.READY,
         [Op.or]: [
           { appointment_date: { [Op.lt]: appointment.appointment_date } },
           {
@@ -373,7 +393,42 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         ['appointment_date', 'DESC'],
         ['start_time', 'DESC'],
       ],
+      // Enough to step over a couple of visits that carried no reports at all;
+      // not so many that a long-dormant patient drags in ancient history.
+      limit: 5,
     });
+
+    /*
+     * Several visits, not one.
+     *
+     * The chain was meant to make one hop enough: each visit's trajectory
+     * carries everything before it forward. That holds right up until a visit
+     * has nothing to compare against — then its trajectory is empty, it
+     * carries nothing, and every earlier visit vanishes behind it. Exactly
+     * that happened here: one visit with a single thin report sat between two
+     * visits that both recorded the same fasting glucose, and the repeat was
+     * invisible.
+     *
+     * Reading a few visits back costs a handful of condensed lines in the
+     * prompt and removes the whole failure mode.
+     */
+    const reports: AiVisitInput['reports'] = [];
+    let mostRecent: Appointment | null = null;
+    let contributed = 0;
+
+    for (const visit of candidates) {
+      const input = await this.visitInputFor(visit);
+      if (!input) continue;
+      mostRecent ??= visit;
+      reports.push(...input.reports);
+      if (++contributed >= HISTORY_VISITS) break;
+    }
+
+    if (!mostRecent || reports.length === 0) return null;
+    return {
+      visit: mostRecent,
+      input: { visit_date: mostRecent.appointment_date, reports },
+    };
   }
 
   /** This visit's own reports, as the comparison input. */
@@ -400,50 +455,87 @@ export class ReportSummaryService implements OnApplicationBootstrap {
   }
 
   /**
+   * An earlier visit as comparison input, best source first.
+   *
+   * Its trajectory beats its consolidated summary — that is what carries
+   * everything before it forward — and both beat its raw reports. The last
+   * fallback is what makes a failed consolidation survivable: the per-report
+   * summaries are the real content, and the consolidated one is only a
+   * convenience built on top of them.
+   */
+  private async visitInputFor(previous: Appointment): Promise<AiVisitInput | null> {
+    return (
+      this.visitInputFromStored(previous) ??
+      // Consolidation is its own AI call and fails on its own — usually a
+      // transient outage. The reports it was summarising are still here.
+      (await this.visitInput(previous))
+    );
+  }
+
+  /**
    * The earlier visit as a single condensed "report". Its trajectory is
    * preferred over its raw report summary: that is what carries everything
    * before it forward.
    */
   private visitInputFromStored(previous: Appointment): AiVisitInput | null {
-    if (previous.progress_summary) {
-      const p = previous.progress_summary;
-      return {
-        visit_date: previous.appointment_date,
-        reports: [
-          {
-            title: `Visit of ${previous.appointment_date} (including earlier visits)`,
-            summary: [p.summary, p.current_status].filter(Boolean).join(' '),
-            key_findings: [
-              ...p.improvements,
-              ...p.deteriorations,
-              ...p.unchanged,
-            ],
-            // Carry the last known value of each tracked measurement, so the
-            // next comparison still has something concrete to match on.
-            abnormal_values: (p.trends ?? []).map((t) => ({
-              label: t.label,
-              value: t.current_value,
-              direction: 'abnormal' as const,
-            })),
-          },
-        ],
-      };
+    const reports: AiVisitInput['reports'] = [];
+    const p = previous.progress_summary;
+
+    // The condensed history, but only when it actually says something. An
+    // empty trajectory is not a summary of anything — it is a visit that had
+    // nothing to compare against — and passing it on as though it were is how
+    // a real measurement disappears.
+    if (p && this.saysSomething(p)) {
+      reports.push({
+        title: `Visit of ${previous.appointment_date} (including earlier visits)`,
+        summary: [p.summary, p.current_status].filter(Boolean).join(' '),
+        key_findings: [...p.improvements, ...p.deteriorations, ...p.unchanged],
+        // Carry the last known value of each tracked measurement, so the
+        // next comparison still has something concrete to match on.
+        abnormal_values: (p.trends ?? []).map((t) => ({
+          label: t.label,
+          value: t.current_value,
+          direction: 'abnormal' as const,
+        })),
+      });
     }
-    if (previous.reports_summary) {
+
+    /*
+     * And this visit's own measurements, always.
+     *
+     * A trajectory describes *change*, not what was measured — its values come
+     * from `trends`, which is empty whenever that visit found nothing to
+     * compare against. Sending it alone therefore handed the next comparison
+     * prose and no numbers at all, so a fasting glucose recorded two visits ago
+     * was invisible to the visit that repeated it. The two are complementary:
+     * one says where the patient has been, the other what was actually on the
+     * page last time.
+     */
+    if (
+      previous.reports_summary &&
+      previous.reports_summary_status === AiJobStatus.READY
+    ) {
       const r = previous.reports_summary;
-      return {
-        visit_date: previous.appointment_date,
-        reports: [
-          {
-            title: `Visit of ${previous.appointment_date}`,
-            summary: r.summary,
-            key_findings: r.key_findings ?? [],
-            abnormal_values: r.abnormal_values ?? [],
-          },
-        ],
-      };
+      reports.push({
+        title: `Visit of ${previous.appointment_date}`,
+        summary: r.summary,
+        key_findings: r.key_findings ?? [],
+        abnormal_values: r.abnormal_values ?? [],
+      });
     }
-    return null;
+
+    if (reports.length === 0) return null;
+    return { visit_date: previous.appointment_date, reports };
+  }
+
+  /** A trajectory with every list empty is a placeholder, not a finding. */
+  private saysSomething(p: ProgressSummary): boolean {
+    return (
+      (p.trends?.length ?? 0) > 0 ||
+      (p.improvements?.length ?? 0) > 0 ||
+      (p.deteriorations?.length ?? 0) > 0 ||
+      (p.unchanged?.length ?? 0) > 0
+    );
   }
 
   private async clearProgress(appointmentId: string): Promise<void> {

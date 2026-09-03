@@ -26,11 +26,22 @@ export class RolesService {
     });
   }
 
-  /** Returns global (system) roles + the caller's tenant roles. */
+  /**
+   * Global roles + the caller's tenant roles.
+   *
+   * The platform's own SuperAdmin role is withheld from a clinic: it is not
+   * theirs to read, assign or reason about, and showing a role nobody at the
+   * clinic can be given only invites the attempt.
+   */
   findAll(user: AuthUser): Promise<Role[]> {
     const where: any = user.doctorId
-      ? { [Op.or]: [{ doctor_id: user.doctorId }, { doctor_id: null }] }
-      : { doctor_id: null }; // super admin sees only global roles
+      ? {
+          [Op.and]: [
+            { [Op.or]: [{ doctor_id: user.doctorId }, { doctor_id: null }] },
+            { is_system: false },
+          ],
+        }
+      : { doctor_id: null }; // super admin sees every global role, system included
     return this.roleModel.findAll({
       where,
       include: [Permission],

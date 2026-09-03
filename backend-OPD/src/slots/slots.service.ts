@@ -35,6 +35,9 @@ export interface DaySlots {
   slots: Slot[];
 }
 
+/** Visit length for a walk-in when the doctor has no schedule for that day. */
+const DEFAULT_WALK_IN_MINUTES = 15;
+
 interface SessionBlock {
   start: number; // minutes
   end: number; // minutes
@@ -121,6 +124,35 @@ export class SlotsService {
       throw new AppException(ErrorCode.SLOT_IN_PAST);
     }
     return { endTime: toHHMM(match.end) };
+  }
+
+  /**
+   * End time for a walk-in.
+   *
+   * A walk-in is not booked from the grid — the patient is already in the room,
+   * and the doctor decides when to see them, which is routinely outside any
+   * published slot. So nothing here validates the time; it only works out how
+   * long the visit should be, preferring the doctor's own configured slot
+   * length for that day so a walk-in looks like every other appointment in the
+   * list.
+   */
+  async walkInEndTime(
+    doctorId: string,
+    date: string,
+    startTime: string,
+  ): Promise<string> {
+    let duration = DEFAULT_WALK_IN_MINUTES;
+    try {
+      const sessions = await this.resolveSessions(doctorId, date);
+      if (sessions !== 'leave' && sessions.length > 0) {
+        duration = sessions[0].duration || duration;
+      }
+    } catch {
+      // No schedule for that day is normal for a walk-in; the default stands.
+    }
+    // Never roll past midnight into an earlier-looking end time.
+    const end = Math.min(toMinutes(startTime) + duration, 23 * 60 + 59);
+    return toHHMM(end);
   }
 
   /**

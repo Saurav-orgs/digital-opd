@@ -111,9 +111,9 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
            * Recording the outcome is what this screen is for, so it stays on
            * screen instead of sitting under the prescription editor where it
            * had to be scrolled to and read as three identical grey buttons.
-           * Done is the ordinary ending, so it is the primary one; the current
-           * state is shown beside it so "did I already mark this?" is answered
-           * without scrolling either.
+           * Complete is the ordinary ending, so it is the primary one; the
+           * current state is shown beside it so "did I already mark this?" is
+           * answered without scrolling either.
            */
           <div
             style={{
@@ -142,21 +142,14 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
                 disabled={consult.isPending || a.consultation_status === 'done'}
                 onClick={() => consult.mutate('done')}
               >
-                {a.consultation_status === 'done' ? 'Marked done ✓' : 'Mark as done'}
-              </button>
-              <button
-                className="btn"
-                disabled={consult.isPending || a.consultation_status === 'on_hold'}
-                onClick={() => consult.mutate('on_hold')}
-              >
-                On hold
+                {a.consultation_status === 'done' ? 'Completed ✓' : 'Complete'}
               </button>
               <button
                 className="btn btn-danger"
                 disabled={consult.isPending || a.consultation_status === 'rejected'}
                 onClick={() => consult.mutate('rejected')}
               >
-                Reject
+                Cancel
               </button>
               <button className="btn" onClick={onClose}>
                 Close
@@ -193,7 +186,9 @@ export function AppointmentDetail({ id, onClose }: { id: string; onClose: () => 
           )}
           <div className="row" style={{ gridColumn: '1 / -1', marginTop: 4 }}>
             {a.source === 'walk_in' && <Badge value="walk_in" label="Walk-in" />}
-            <Badge value={a.status} />
+            {/* Confirmed is the only state an appointment reaches this screen
+                in, so the badge only ever said something when it did not. */}
+            {a.status !== 'confirmed' && <Badge value={a.status} />}
             <Badge value={a.consultation_status} />
           </div>
         </div>

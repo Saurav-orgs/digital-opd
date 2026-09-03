@@ -1063,3 +1063,52 @@ tr.clickable-row:hover {
 .leave-item:last-child {
   border-bottom: none;
 }
+
+
+/* ── Appointment cards (phone) ──────────────────────────────
+   The table scrolls sideways below 760px, which hides the status column just
+   when it is being scanned for. These replace it there; the table is untouched
+   from 760px up. */
+.appt-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.appt-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 11px 13px;
+  cursor: pointer;
+  /* A whole card is the tap target, so it must not feel like a button. */
+  box-shadow: none;
+}
+.appt-card:active {
+  background: var(--page);
+}
+.appt-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.appt-card-name {
+  font-weight: 600;
+  font-size: 14.5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appt-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--muted);
+}

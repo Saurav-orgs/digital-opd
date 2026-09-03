@@ -43,6 +43,25 @@ export interface PatientProfileSummary {
  * picking a card. Fuzzy matching here would silently merge two people, which is
  * the failure this whole design avoids.
  */
+/**
+ * What creating a profile actually needs.
+ *
+ * Looser than `PatientDetailsDto` on purpose: that DTO guards the public
+ * booking form, where the patient has their address to hand and should give
+ * it. A walk-in is registered at the desk with a queue waiting, so the address
+ * can arrive later — the columns are nullable and the next booking fills them
+ * in. Validation stays where it belongs, at the request boundary.
+ */
+export interface NewProfileDetails {
+  name: string;
+  relation?: string | null;
+  gender?: string | null;
+  address_line?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+}
+
 @Injectable()
 export class PatientProfilesService {
   private readonly logger = new Logger(PatientProfilesService.name);
@@ -117,7 +136,7 @@ export class PatientProfilesService {
    */
   async createForAccount(
     patientId: string,
-    dto: PatientDetailsDto,
+    dto: NewProfileDetails,
   ): Promise<PatientProfile> {
     return this.profileModel.create({
       patient_id: patientId,
@@ -125,10 +144,12 @@ export class PatientProfilesService {
       name: dto.name.trim(),
       relation: dto.relation ?? null,
       gender: dto.gender ?? null,
-      address_line: dto.address_line.trim(),
-      city: dto.city.trim(),
-      state: dto.state.trim(),
-      pincode: dto.pincode,
+      // A walk-in may be registered before the desk has the address; the
+      // columns are nullable and the next booking fills them in.
+      address_line: dto.address_line?.trim() || null,
+      city: dto.city?.trim() || null,
+      state: dto.state?.trim() || null,
+      pincode: dto.pincode || null,
     } as any);
   }
 

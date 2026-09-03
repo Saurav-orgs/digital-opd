@@ -49,8 +49,12 @@ export class PathlabsService {
     );
   }
 
-  async update(id: string, dto: UpdatePathlabDto): Promise<User> {
-    return this.usersService.update(id, dto as any);
+  async update(
+    id: string,
+    dto: UpdatePathlabDto,
+    caller: AuthUser,
+  ): Promise<User> {
+    return this.usersService.update(id, dto as any, caller);
   }
 
   async remove(id: string): Promise<void> {

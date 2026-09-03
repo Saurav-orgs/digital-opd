@@ -5,6 +5,7 @@ import type { Permission, Role } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { ActionMenuDropdown, Empty, Field, Loading, Modal } from '../components/ui';
+import { MODULES_HIDDEN_FROM_ROLES } from '../lib/nav';
 
 const ACTIONS = ['create', 'read', 'update', 'delete'] as const;
 
@@ -167,10 +168,13 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
     new Set(role?.permissions?.map((p) => p.id) ?? []),
   );
 
-  // Group permissions by module for the checkbox grid.
+  // Group permissions by module for the checkbox grid, skipping modules with
+  // no screen a clinic role can reach — a row nobody can act on is only a
+  // question the admin has to answer wrongly.
   const byModule = useMemo(() => {
     const map: Record<string, Record<string, Permission>> = {};
     for (const p of permsQ.data ?? []) {
+      if ((MODULES_HIDDEN_FROM_ROLES as string[]).includes(p.module)) continue;
       (map[p.module] ??= {})[p.action] = p;
     }
     return map;

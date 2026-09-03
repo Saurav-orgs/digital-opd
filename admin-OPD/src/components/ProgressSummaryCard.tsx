@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { reportsApi } from '../api/endpoints';
 import { useToast } from '../components/Toast';
+import { useCollapsible } from '../lib/collapsePreference';
+import { CollapseToggle } from './CollapseToggle';
 import type {
   AiJobStatus,
   ProgressStatus,
@@ -41,6 +43,7 @@ export function ProgressSummaryCard({
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapsible('progress-summary');
 
   const retry = useMutation({
     mutationFn: () => reportsApi.retryProgress(appointmentId),
@@ -63,8 +66,20 @@ export function ProgressSummaryCard({
         border: '1px solid var(--primary, #cddffb)',
       }}
     >
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+      {/*
+        The verdict stays on the header, so folding the card away costs the
+        doctor the detail but never the answer — a collapsed card still says
+        "Worsening" at a glance.
+      */}
+      <div
+        className="row"
+        style={{ justifyContent: 'space-between', marginBottom: collapsed ? 0 : 8 }}
+      >
+        <CollapseToggle
+          collapsed={collapsed}
+          onToggle={toggleCollapsed}
+          label="the comparison with the last visit"
+        >
           <strong style={{ fontSize: 13 }}>Since the last visit</strong>
           {status === 'ready' && summary && (
             <span
@@ -85,9 +100,9 @@ export function ProgressSummaryCard({
               across {visitCount} visits
             </span>
           )}
-        </div>
+        </CollapseToggle>
 
-        {status === 'ready' && !editing && (
+        {status === 'ready' && !editing && !collapsed && (
           <div className="row" style={{ gap: 6 }}>
             <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
               Edit
@@ -102,6 +117,9 @@ export function ProgressSummaryCard({
           </div>
         )}
       </div>
+
+      {collapsed ? null : (
+        <>
 
       {status === 'processing' || status === 'pending' ? (
         <span className="muted" style={{ fontSize: 12.5 }}>
@@ -136,6 +154,8 @@ export function ProgressSummaryCard({
         />
       ) : (
         <ProgressBody summary={summary} />
+      )}
+        </>
       )}
     </div>
   );

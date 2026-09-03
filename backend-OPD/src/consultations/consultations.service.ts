@@ -31,6 +31,17 @@ export class ConsultationsService {
   private readonly logger = new Logger(ConsultationsService.name);
   private readonly aiEnabled: boolean;
 
+  /**
+   * Sessions currently being transcribed or drafted, so `cancel` can stop the
+   * request rather than only forgetting about it.
+   *
+   * In-process by design: a cancel served by a different instance still works,
+   * because the session row is deleted either way and the pipeline checks for
+   * it before writing anything. The controller is the optimisation — it frees
+   * the machine instead of leaving a model chewing on audio nobody wants.
+   */
+  private readonly inFlight = new Map<string, AbortController>();
+
   constructor(
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
     @InjectModel(ConsultationSession)
@@ -93,6 +104,45 @@ export class ConsultationsService {
     });
   }
 
+  /**
+   * Give up on a recording that is taking too long.
+   *
+   * On this hardware transcription is measured in minutes, and a wedged model
+   * looks exactly like a slow one — so the doctor is the only one who can say
+   * when it has gone on long enough. Cancelling has to leave them able to work:
+   * the session goes, the recorder resets, and the prescription editor is free
+   * for them to type into.
+   *
+   * The session row is deleted rather than marked, because that is already the
+   * "no recording yet" state the recorder and `startFromAudio` both handle.
+   */
+  async cancel(appointmentId: string, user: AuthUser): Promise<{ cancelled: boolean }> {
+    await this.getAppointment(appointmentId, user);
+
+    const session = await this.sessionModel.findOne({
+      where: { appointment_id: appointmentId },
+      order: [['created_at', 'DESC']],
+    });
+    if (!session) return { cancelled: false };
+
+    // Deleting first is what actually stops the pipeline: every stage checks
+    // the row still exists before writing, so the work is discarded even when
+    // the abort below lands too late or on another instance.
+    await this.sessionModel.destroy({ where: { id: session.id } });
+
+    const controller = this.inFlight.get(session.id);
+    if (controller) {
+      controller.abort();
+      this.inFlight.delete(session.id);
+    }
+
+    this.logger.log(
+      `Consultation session ${session.id} cancelled by the doctor ` +
+        `(was ${session.status}).`,
+    );
+    return { cancelled: true };
+  }
+
   // ── pipeline ───────────────────────────────────────────────
 
   private async process(
@@ -103,65 +153,98 @@ export class ConsultationsService {
     let transcript = '';
     let modelVersion: string | null = null;
 
-    // 1. Speech → text, biased toward the tenant's medicine vocabulary.
+    const controller = new AbortController();
+    this.inFlight.set(sessionId, controller);
+
     try {
-      const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 60);
-      const result = await this.ai.transcribe(audio, vocabulary);
-      transcript = result.text;
-      modelVersion = result.model_version;
+      // 1. Speech → text, biased toward the tenant's medicine vocabulary.
+      try {
+        const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 60);
+        const result = await this.ai.transcribe(audio, vocabulary, controller.signal);
+        transcript = result.text;
+        modelVersion = result.model_version;
 
-      await this.sessionModel.update(
-        {
-          transcript,
-          language: result.language,
-          duration_seconds: Math.round(result.duration_seconds),
-          model_version: modelVersion,
-          status: ConsultationSessionStatus.DRAFTING,
-        } as any,
-        { where: { id: sessionId } },
-      );
-    } catch (err) {
-      await this.fail(sessionId, (err as Error).message);
-      return;
+        if (await this.wasCancelled(sessionId)) return;
+
+        await this.sessionModel.update(
+          {
+            transcript,
+            language: result.language,
+            duration_seconds: Math.round(result.duration_seconds),
+            model_version: modelVersion,
+            status: ConsultationSessionStatus.DRAFTING,
+          } as any,
+          { where: { id: sessionId } },
+        );
+      } catch (err) {
+        if (await this.wasCancelled(sessionId)) return;
+        await this.fail(sessionId, (err as Error).message);
+        return;
+      }
+
+      if (!transcript.trim()) {
+        await this.fail(
+          sessionId,
+          'Nothing could be heard in the recording. Please check the microphone and try again.',
+        );
+        return;
+      }
+
+      // 2. Transcript → structured draft prescription.
+      try {
+        const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
+        const { prescription, model_version } = await this.ai.extractPrescription(
+          {
+            transcript,
+            patient: {
+              name: appointment.patient_name,
+              age: appointment.patient_age,
+              gender: appointment.patient_gender ?? '',
+              complaint: appointment.description ?? '',
+            },
+            medicine_catalog: vocabulary,
+          },
+          controller.signal,
+        );
+
+        // The last and most important check: past this line the draft would
+        // land in the editor, and a doctor who cancelled has very likely
+        // started typing their own prescription into it.
+        if (await this.wasCancelled(sessionId)) return;
+
+        await this.saveDraft(appointment.id, sessionId, prescription);
+        await this.sessionModel.update(
+          {
+            status: ConsultationSessionStatus.DRAFT_READY,
+            model_version: model_version || modelVersion,
+            error: null,
+          } as any,
+          { where: { id: sessionId } },
+        );
+        this.logger.log(`Draft prescription ready for appointment ${appointment.id}.`);
+      } catch (err) {
+        if (await this.wasCancelled(sessionId)) return;
+        // The transcript survives even when drafting fails, so the doctor can
+        // still read what was said and write the prescription by hand.
+        await this.fail(sessionId, (err as Error).message);
+      }
+    } finally {
+      this.inFlight.delete(sessionId);
     }
+  }
 
-    if (!transcript.trim()) {
-      await this.fail(
-        sessionId,
-        'Nothing could be heard in the recording. Please check the microphone and try again.',
-      );
-      return;
-    }
-
-    // 2. Transcript → structured draft prescription.
-    try {
-      const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
-      const { prescription, model_version } = await this.ai.extractPrescription({
-        transcript,
-        patient: {
-          name: appointment.patient_name,
-          age: appointment.patient_age,
-          gender: appointment.patient_gender ?? '',
-          complaint: appointment.description ?? '',
-        },
-        medicine_catalog: vocabulary,
-      });
-
-      await this.saveDraft(appointment.id, sessionId, prescription);
-      await this.sessionModel.update(
-        {
-          status: ConsultationSessionStatus.DRAFT_READY,
-          model_version: model_version || modelVersion,
-          error: null,
-        } as any,
-        { where: { id: sessionId } },
-      );
-      this.logger.log(`Draft prescription ready for appointment ${appointment.id}.`);
-    } catch (err) {
-      // The transcript survives even when drafting fails, so the doctor can
-      // still read what was said and write the prescription by hand.
-      await this.fail(sessionId, (err as Error).message);
-    }
+  /**
+   * Whether the doctor pulled the plug while this stage was running.
+   *
+   * Asks the database rather than the abort signal, because the row is the
+   * thing both sides agree on: cancelling deletes it, and a cancel handled by
+   * another instance never touches this process's controller at all.
+   */
+  private async wasCancelled(sessionId: string): Promise<boolean> {
+    const still = await this.sessionModel.count({ where: { id: sessionId } });
+    if (still > 0) return false;
+    this.logger.log(`Consultation session ${sessionId} was cancelled; discarding.`);
+    return true;
   }
 
   /** Replace the appointment's draft with the AI's suggestion. */

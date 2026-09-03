@@ -83,8 +83,18 @@ export default (): AppConfig => ({
     baseFolder: process.env.AWS_S3_BASE_FOLDER || '',
     appFolder: process.env.AWS_S3_APP_FOLDER || 'opd',
   },
+  /**
+   * The ceiling for ordinary signed-in traffic, counted per session.
+   *
+   * One appointment screen legitimately makes half a dozen requests as it
+   * opens, and then polls while an AI summary or a transcription is running —
+   * so the old 20/minute was tripped by using the product as intended, not by
+   * abusing it. The routes that actually need a tight limit (public booking,
+   * patient OTP) set their own `@Throttle` of 10/minute and are unaffected by
+   * this number.
+   */
   throttle: {
     ttl: parseInt(process.env.THROTTLE_TTL_SECONDS || '60', 10),
-    limit: parseInt(process.env.THROTTLE_LIMIT || '20', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT || '300', 10),
   },
 });

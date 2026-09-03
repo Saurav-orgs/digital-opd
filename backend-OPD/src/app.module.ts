@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { SessionThrottlerGuard } from './common/guards/session-throttler.guard';
 import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
@@ -86,7 +87,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
   controllers: [HealthController],
   providers: [
     // Order matters: throttle → authenticate → authorize.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: SessionThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },

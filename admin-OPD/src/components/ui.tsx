@@ -114,7 +114,13 @@ export function ConfirmDialog({
 
 const STATUS_LABEL: Record<string, string> = {
   paid_unverified: 'Paid · unverified',
+  // The stored values stay `done`/`rejected`; the words the doctor sees follow
+  // the outcome buttons, so "Currently …" never disagrees with what was
+  // pressed. `on_hold` is legacy — nothing sets it any more, but visits parked
+  // before the button was removed still have to render.
   on_hold: 'On hold',
+  done: 'Completed',
+  rejected: 'Cancelled',
 };
 
 /**
