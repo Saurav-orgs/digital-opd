@@ -23,6 +23,8 @@ class LlmError(RuntimeError):
 
 
 async def is_reachable() -> bool:
+    if not settings.local_llm_enabled:
+        return False
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(f"{settings.ollama_url}/api/tags")
@@ -37,6 +39,15 @@ async def generate_json(
     schema: dict[str, Any],
 ) -> dict[str, Any]:
     """Run a chat completion whose output is constrained to `schema`."""
+    # Refused here rather than at each call site: every caller already handles
+    # LlmError, so one guard turns "no Ollama on this host" into the same
+    # orderly 503 as any other local-model failure — and says which of the two
+    # it was, instead of surfacing a bare connection error.
+    if not settings.local_llm_enabled:
+        raise LlmError(
+            "No LLM produced a result: the hosted backends did not answer and "
+            "the local Ollama fallback is turned off (LOCAL_LLM_ENABLED=false)."
+        )
     payload = {
         "model": settings.llm_model,
         "messages": [

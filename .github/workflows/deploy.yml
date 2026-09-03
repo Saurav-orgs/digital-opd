@@ -1,0 +1,493 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-digital-opd
+  cancel-in-progress: false
+
+env:
+  ROOT: /var/www/digital-opd
+  BACKEND_DIR: backend
+  DOCTOR_DIR: doctor-fe
+  PATIENT_DIR: patient-fe
+  AI_DIR: ai
+  PM2_API: opd-api
+  PM2_AI: opd-ai
+  BACKEND_PORT: 3000
+  AI_PORT: 8000
+  HEALTH_PATH: /api/docs
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The frontends bake this in at BUILD time — it is compiled into the
+      # bundle, not read on the server. Unset, both apps ship pointing at
+      # localhost and every request from a user's browser fails, with nothing
+      # in any server log to say why. Cheaper to fail here.
+      - name: Check frontend API URL is set
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "ERROR: repository variable VITE_API_BASE_URL is empty or unset."
+            echo "Set it under Settings -> Secrets and variables -> Actions -> Variables."
+            echo "It must include the /api prefix and no trailing slash, e.g."
+            echo "  https://api.yourclinic.com/api"
+            exit 1
+          fi
+          echo "Building both frontends against: $VITE_API_BASE_URL"
+
+      # ---------- Backend (NestJS) ----------
+      - name: Install backend deps
+        working-directory: backend-OPD
+        run: npm ci
+
+      - name: Build backend
+        working-directory: backend-OPD
+        run: npm run build
+
+      - name: Zip backend dist
+        working-directory: backend-OPD/dist
+        run: zip -r ../../backend-dist.zip .
+
+      # Migrations are plain .js under database/migrations and are NOT compiled
+      # into dist by `nest build`. The app loads them at boot from
+      # `path.join(process.cwd(), 'database', 'migrations')` — so if this folder
+      # is missing on the server, umzug finds zero pending migrations and the
+      # API starts happily against a schema that was never updated. Ships
+      # separately for exactly that reason.
+      - name: Zip backend database (migrations + seeders)
+        working-directory: backend-OPD
+        run: zip -r ../backend-database.zip database
+
+      # ---------- Doctor web (admin-OPD) ----------
+      - name: Install doctor-fe deps
+        working-directory: admin-OPD
+        run: npm ci
+
+      - name: Build doctor-fe
+        working-directory: admin-OPD
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: npm run build
+
+      - name: Zip doctor-fe dist
+        working-directory: admin-OPD/dist
+        run: zip -r ../../doctor-dist.zip .
+
+      # ---------- Patient web ----------
+      - name: Install patient-fe deps
+        working-directory: patient-web-OPD
+        run: npm ci
+
+      - name: Build patient-fe
+        working-directory: patient-web-OPD
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: npm run build
+
+      - name: Zip patient-fe dist
+        working-directory: patient-web-OPD/dist
+        run: zip -r ../../patient-dist.zip .
+
+      # ---------- AI sidecar (Python) ----------
+      # Nothing to build: Python is not compiled. What must NOT happen is
+      # shipping a venv — the wheels in it (ctranslate2, Pillow, numpy) are
+      # built for the machine that made them, so one built on a laptop will
+      # not import on the server. Source only; the venv is built there.
+      - name: Zip AI source
+        working-directory: ai-OPD
+        run: zip -r ../ai-dist.zip app requirements.txt -x '*__pycache__*' '*.pyc'
+
+      - name: Stage backend package files
+        run: |
+          cp backend-OPD/package.json backend-package.json
+          cp backend-OPD/package-lock.json backend-package-lock.json
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-bundle
+          path: |
+            backend-dist.zip
+            backend-database.zip
+            doctor-dist.zip
+            patient-dist.zip
+            ai-dist.zip
+            backend-package.json
+            backend-package-lock.json
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-bundle
+
+      - name: Configure SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          # Fail with a readable message rather than a bare exit code when a
+          # secret is missing (org secrets not shared with this repo, typo in
+          # the name, etc.).
+          missing=""
+          [ -n "$SSH_HOST" ]        || missing="$missing SSH_HOST"
+          [ -n "$SSH_USER" ]        || missing="$missing SSH_USER"
+          [ -n "$SSH_PRIVATE_KEY" ] || missing="$missing SSH_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            echo "ERROR: empty or unset secret(s):$missing"
+            echo "Check Settings -> Secrets and variables -> Actions. If they are"
+            echo "org-level secrets, this repo must be in their 'Selected"
+            echo "repositories' list."
+            exit 1
+          fi
+
+          # Strip anything that is not a bare hostname: whitespace/newlines from
+          # pasting the secret, a URL scheme, a user@ prefix, a :port or /path.
+          HOST="$(printf '%s' "$SSH_HOST" | tr -d '[:space:]')"
+          HOST="${HOST#ssh://}"; HOST="${HOST#https://}"; HOST="${HOST#http://}"
+          HOST="${HOST##*@}"; HOST="${HOST%%/*}"; HOST="${HOST%%:*}"
+          echo "SSH_HOST_CLEAN=$HOST" >> "$GITHUB_ENV"
+
+          # Values are masked in logs, so report shape instead of content.
+          echo "SSH_HOST: ${#SSH_HOST} chars raw, ${#HOST} after cleaning"
+
+          if ! getent hosts "$HOST" >/dev/null 2>&1; then
+            echo "ERROR: SSH_HOST does not resolve from the GitHub runner."
+            echo "It must be a PUBLIC address reachable from the internet:"
+            echo "  - the public IP        e.g. 13.234.56.78"
+            echo "  - the public EC2 DNS   e.g. ec2-13-234-56-78.ap-south-1.compute.amazonaws.com"
+            echo "  - or a domain that points at the box"
+            echo "These do NOT work: ip-172-31-41-148 (the shell-prompt name),"
+            echo "172.31.x.x / 10.x.x.x (VPC-private), *.ec2.internal."
+            exit 1
+          fi
+
+          case "$HOST" in
+            10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+              echo "ERROR: $HOST is a private VPC address — unreachable from GitHub."
+              exit 1 ;;
+          esac
+
+          mkdir -p ~/.ssh
+
+          # Must happen BEFORE any ssh/scp: without a known_hosts entry those
+          # abort with "Host key verification failed" rather than connecting.
+          if ! ssh-keyscan -T 10 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+            echo "WARNING: ssh-keyscan got nothing from $HOST:22 — port 22 may"
+            echo "be closed to GitHub runners. Falling back to accept-new."
+          fi
+
+          # tr -d '\r': a key stored with CRLF endings still LOOKS correct but
+          # makes OpenSSH fail with "error in libcrypto".
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          # GitHub masks every line of a multi-line secret, so the key's own
+          # text is unreadable in logs. Report counts instead — those are not
+          # secret-derived and come through unmasked.
+          lines=$(wc -l < ~/.ssh/deploy_key)
+          begins=$(grep -c -- '-----BEGIN' ~/.ssh/deploy_key || true)
+          ends=$(grep -c -- '-----END' ~/.ssh/deploy_key || true)
+          crs=$(printf '%s' "$SSH_PRIVATE_KEY" | grep -c $'\r' || true)
+          echo "deploy_key: lines=$lines begin_markers=$begins end_markers=$ends crlf_lines_in_secret=$crs"
+
+          # ssh-keygen is the authority on whether the key is usable.
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null 2>/tmp/keygen.err; then
+            echo "ERROR: OpenSSH cannot use this private key."
+            sed 's/^/  ssh-keygen: /' /tmp/keygen.err
+            if [ "$begins" -eq 0 ] || [ "$ends" -eq 0 ]; then
+              echo "  -> No BEGIN/END markers found: the secret is not a PEM"
+              echo "     private key (a .pub file? truncated paste?)."
+            elif [ "$lines" -lt 3 ]; then
+              echo "  -> Only $lines line(s): the newlines were flattened."
+            else
+              echo "  -> Markers and line count look right, so the body is"
+              echo "     altered or the key has a passphrase (not supported)."
+            fi
+            echo "  Re-add it straight from the file, never via copy/paste:"
+            echo "    gh secret set SSH_PRIVATE_KEY < /path/to/key.pem"
+            exit 1
+          fi
+          echo "private key: parses OK"
+
+          # Public keys are not secret, and printing this one means the exact
+          # line needed in authorized_keys is available straight from the log.
+          echo "--- public key for this deploy key ---"
+          ssh-keygen -y -f ~/.ssh/deploy_key
+          ssh-keygen -lf ~/.ssh/deploy_key
+          echo "--------------------------------------"
+          echo "connecting as a ${#SSH_USER}-character username (ubuntu = 6)"
+
+          # A swapped pair of secrets is otherwise invisible: both are masked.
+          if [ "$SSH_USER" = "$HOST" ] || [ "$SSH_USER" = "$SSH_HOST" ]; then
+            echo "ERROR: SSH_USER holds the same value as SSH_HOST."
+            echo "SSH_USER must be the login name (e.g. 'ubuntu'), not the address."
+            exit 1
+          fi
+
+          # One clear failure point instead of scp's terse exit 255.
+          if ! ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+                   -o StrictHostKeyChecking=accept-new \
+                   -o ConnectTimeout=15 "$SSH_USER@$HOST" 'echo ok' \
+                   >/dev/null 2>/tmp/ssh.err; then
+            echo "ERROR: could not open an SSH session."
+            sed 's/^/  ssh: /' /tmp/ssh.err
+            if grep -qi 'host key verification' /tmp/ssh.err; then
+              echo "  -> known_hosts problem, not authentication."
+            elif grep -qi 'permission denied' /tmp/ssh.err; then
+              echo "  -> The server refused the key. Either:"
+              echo "     1. its public half is not in ~<user>/.ssh/authorized_keys"
+              echo "        copy the public key printed above onto the server:"
+              echo "          echo '<that line>' >> ~/.ssh/authorized_keys"
+              echo "          chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+              echo "     2. SSH_USER is wrong (should be 'ubuntu' on Ubuntu AMIs)"
+            elif grep -qi 'timed out\|refused' /tmp/ssh.err; then
+              echo "  -> Network: open port 22 to GitHub runners in the"
+              echo "     EC2 security group."
+            fi
+            exit 1
+          fi
+          echo "ssh: authenticated OK"
+
+      - name: Upload release
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          RELEASE: digital-opd-${{ github.sha }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+            backend-dist.zip backend-database.zip doctor-dist.zip patient-dist.zip ai-dist.zip \
+            backend-package.json backend-package-lock.json \
+            "$SSH_USER@$SSH_HOST_CLEAN:/tmp/"
+
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST_CLEAN" \
+            "mkdir -p /tmp/$RELEASE && mv /tmp/backend-dist.zip /tmp/backend-database.zip /tmp/doctor-dist.zip /tmp/patient-dist.zip /tmp/ai-dist.zip /tmp/backend-package.json /tmp/backend-package-lock.json /tmp/$RELEASE/"
+
+      - name: Deploy on server
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          RELEASE: digital-opd-${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST_CLEAN" \
+            "ROOT='${{ env.ROOT }}' BACKEND_DIR='${{ env.BACKEND_DIR }}' DOCTOR_DIR='${{ env.DOCTOR_DIR }}' PATIENT_DIR='${{ env.PATIENT_DIR }}' AI_DIR='${{ env.AI_DIR }}' PM2_API='${{ env.PM2_API }}' PM2_AI='${{ env.PM2_AI }}' BACKEND_PORT='${{ env.BACKEND_PORT }}' AI_PORT='${{ env.AI_PORT }}' HEALTH_PATH='${{ env.HEALTH_PATH }}' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; fi
+
+          # Guard rail: every rm -rf below is derived from these vars, so
+          # refuse to run at all if they aren't exactly what's expected.
+          case "$ROOT" in
+            /var/www/digital-opd) : ;;
+            *) echo "REFUSING TO DEPLOY: unexpected ROOT '$ROOT'"; exit 1 ;;
+          esac
+          case "$BACKEND_DIR/$DOCTOR_DIR/$PATIENT_DIR/$AI_DIR" in
+            backend/doctor-fe/patient-fe/ai) : ;;
+            *) echo "REFUSING TO DEPLOY: unexpected app dir names"; exit 1 ;;
+          esac
+
+          command -v unzip     >/dev/null || { echo "unzip is not installed (sudo apt install unzip)"; exit 1; }
+          command -v pm2       >/dev/null || { echo "pm2 is not on PATH for this ssh session"; exit 1; }
+          command -v curl      >/dev/null || { echo "curl is not installed"; exit 1; }
+          command -v python3.12>/dev/null || { echo "python3.12 is not installed (needed by the AI sidecar)"; exit 1; }
+
+          RELDIR="/tmp/$RELEASE"
+
+          deploy_frontend () {
+            local name="$1"
+            local zip="$2"
+
+            rm -rf "$ROOT/${name}-new"
+            mkdir -p "$ROOT/${name}-new"
+            unzip -q "$RELDIR/$zip" -d "$ROOT/${name}-new"
+
+            # Previous version kept as "${name}-old" (overwritten next deploy)
+            # for a manual rollback if a bad frontend build ever ships:
+            #   rm -rf $ROOT/<name> && mv $ROOT/<name>-old $ROOT/<name>
+            rm -rf "$ROOT/${name}-old"
+            if [ -d "$ROOT/$name" ]; then
+              mv "$ROOT/$name" "$ROOT/${name}-old"
+            fi
+            mv "$ROOT/${name}-new" "$ROOT/$name"
+          }
+
+          # Waits for a service to answer, then rolls it back if it never does.
+          # Returns 0 healthy, 1 not — the caller decides what to restore.
+          wait_healthy () {
+            local url="$1" tries="$2" label="$3"
+            for attempt in $(seq 1 "$tries"); do
+              sleep 2
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || echo "000")
+              if [ "$code" = "200" ]; then
+                echo "$label healthy."
+                return 0
+              fi
+              echo "$label health attempt $attempt failed (status: $code), retrying..."
+            done
+            return 1
+          }
+
+          # ---------- Frontends ----------
+          # Static files, no process to restart: nginx serves whatever the
+          # directory holds, so the move is the whole deploy.
+          deploy_frontend "$DOCTOR_DIR" "doctor-dist.zip"
+          deploy_frontend "$PATIENT_DIR" "patient-dist.zip"
+
+          # ---------- AI sidecar ----------
+          # Deployed before the backend so the backend's own health check runs
+          # against an AI service that is already up.
+          rm -rf "$ROOT/$AI_DIR-new"
+          mkdir -p "$ROOT/$AI_DIR-new"
+          unzip -q "$RELDIR/ai-dist.zip" -d "$ROOT/$AI_DIR-new"
+
+          # .env holds the API keys and is never part of a build.
+          if [ -f "$ROOT/$AI_DIR/.env" ]; then
+            cp "$ROOT/$AI_DIR/.env" "$ROOT/$AI_DIR-new/.env"
+          fi
+
+          # The venv lives outside the release dirs on purpose. It is ~2GB of
+          # native wheels that only change when requirements.txt does, so
+          # rebuilding it every push would turn a ten-second deploy into a
+          # several-minute one. Hash-gated instead.
+          NEWHASH=$(sha256sum "$ROOT/$AI_DIR-new/requirements.txt" | cut -d' ' -f1)
+          OLDHASH=$(cat "$ROOT/.ai-reqhash" 2>/dev/null || echo none)
+          if [ ! -x "$ROOT/ai-venv/bin/uvicorn" ] || [ "$NEWHASH" != "$OLDHASH" ]; then
+            echo "AI dependencies changed (or no venv yet) — building it."
+            rm -rf "$ROOT/ai-venv"
+            python3.12 -m venv "$ROOT/ai-venv"
+            "$ROOT/ai-venv/bin/pip" install --upgrade pip
+            "$ROOT/ai-venv/bin/pip" install -r "$ROOT/$AI_DIR-new/requirements.txt"
+            echo "$NEWHASH" > "$ROOT/.ai-reqhash"
+          else
+            echo "AI requirements.txt unchanged — reusing the existing venv."
+          fi
+
+          rm -rf "$ROOT/$AI_DIR-old"
+          if [ -d "$ROOT/$AI_DIR" ]; then
+            mv "$ROOT/$AI_DIR" "$ROOT/$AI_DIR-old"
+          fi
+          mv "$ROOT/$AI_DIR-new" "$ROOT/$AI_DIR"
+
+          # Whisper weights are ~250MB and download on first start. Kept
+          # outside the release dirs so a deploy never re-downloads them.
+          export HF_HOME="$ROOT/ai-cache"
+          mkdir -p "$HF_HOME"
+
+          # One worker: each would load its own copy of every Whisper model.
+          # Concurrency comes from WHISPER_POOL_SIZE inside the process instead.
+          # --interpreter none: uvicorn is a native binary with a venv shebang,
+          # not something for pm2 to hand to node.
+          if pm2 describe "$PM2_AI" >/dev/null 2>&1; then
+            pm2 restart "$PM2_AI" --update-env
+          else
+            pm2 start "$ROOT/ai-venv/bin/uvicorn" --name "$PM2_AI" \
+              --cwd "$ROOT/$AI_DIR" --interpreter none -- \
+              app.main:app --host 127.0.0.1 --port "$AI_PORT" --workers 1
+          fi
+          pm2 save
+
+          # Generous: a first-ever start also downloads the Whisper weights,
+          # and loading a pool of 3 models takes a few seconds on top.
+          if wait_healthy "http://127.0.0.1:${AI_PORT}/health" 45 "AI sidecar"; then
+            rm -rf "$ROOT/$AI_DIR-old"
+            # Up but degraded is worth saying out loud — it still serves, but
+            # the backend skips its startup sweep of unfinished summaries.
+            ai_status=$(curl -s "http://127.0.0.1:${AI_PORT}/health" || echo "")
+            case "$ai_status" in
+              *'"status":"ok"'*) echo "AI status: ok" ;;
+              *) echo "WARNING: AI is answering but reports degraded: $ai_status" ;;
+            esac
+          else
+            echo "AI health check failed."
+            pm2 logs "$PM2_AI" --lines 50 --nostream || true
+            if [ -d "$ROOT/$AI_DIR-old" ]; then
+              echo "Rolling back the AI sidecar..."
+              rm -rf "$ROOT/$AI_DIR"
+              mv "$ROOT/$AI_DIR-old" "$ROOT/$AI_DIR"
+              pm2 restart "$PM2_AI" --update-env
+              pm2 save
+            else
+              echo "No previous AI release to roll back to — leaving this one in place."
+            fi
+            exit 1
+          fi
+
+          # ---------- Backend ----------
+          rm -rf "$ROOT/$BACKEND_DIR-new"
+          mkdir -p "$ROOT/$BACKEND_DIR-new"
+          unzip -q "$RELDIR/backend-dist.zip" -d "$ROOT/$BACKEND_DIR-new"
+
+          # Migrations live outside dist and are read from process.cwd() at
+          # boot. Without this the API starts against an un-migrated schema
+          # and reports nothing wrong.
+          unzip -q "$RELDIR/backend-database.zip" -d "$ROOT/$BACKEND_DIR-new"
+
+          cp "$RELDIR/backend-package.json" "$ROOT/$BACKEND_DIR-new/package.json"
+          cp "$RELDIR/backend-package-lock.json" "$ROOT/$BACKEND_DIR-new/package-lock.json"
+
+          # .env and uploads/ are never part of the build — carry the live
+          # ones forward so a deploy never touches secrets or user files.
+          if [ -f "$ROOT/$BACKEND_DIR/.env" ]; then
+            cp "$ROOT/$BACKEND_DIR/.env" "$ROOT/$BACKEND_DIR-new/.env"
+          fi
+          if [ -d "$ROOT/$BACKEND_DIR/uploads" ]; then
+            cp -r "$ROOT/$BACKEND_DIR/uploads" "$ROOT/$BACKEND_DIR-new/uploads"
+          fi
+
+          cd "$ROOT/$BACKEND_DIR-new"
+          npm ci --omit=dev
+
+          rm -rf "$ROOT/$BACKEND_DIR-old"
+          if [ -d "$ROOT/$BACKEND_DIR" ]; then
+            mv "$ROOT/$BACKEND_DIR" "$ROOT/$BACKEND_DIR-old"
+          fi
+          mv "$ROOT/$BACKEND_DIR-new" "$ROOT/$BACKEND_DIR"
+
+          if pm2 describe "$PM2_API" >/dev/null 2>&1; then
+            pm2 restart "$PM2_API" --update-env
+          else
+            pm2 start main.js --name "$PM2_API" --cwd "$ROOT/$BACKEND_DIR"
+          fi
+          pm2 save
+
+          # ---------- Health check + auto-rollback ----------
+          if wait_healthy "http://127.0.0.1:${BACKEND_PORT}${HEALTH_PATH}" 15 "Backend"; then
+            echo "Deployment successful."
+            rm -rf "$ROOT/$BACKEND_DIR-old"
+          else
+            echo "Backend health check failed."
+            pm2 logs "$PM2_API" --lines 50 --nostream || true
+            if [ -d "$ROOT/$BACKEND_DIR-old" ]; then
+              echo "Rolling back to the previous backend release..."
+              rm -rf "$ROOT/$BACKEND_DIR"
+              mv "$ROOT/$BACKEND_DIR-old" "$ROOT/$BACKEND_DIR"
+              cd "$ROOT/$BACKEND_DIR"
+              pm2 restart "$PM2_API" --update-env
+              pm2 save
+            else
+              echo "No previous release to roll back to — leaving this one in place."
+            fi
+            exit 1
+          fi
+
+          rm -rf "$RELDIR"
+          echo "Deployment complete: $RELEASE"
+          REMOTE

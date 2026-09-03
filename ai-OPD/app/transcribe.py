@@ -12,38 +12,69 @@ Two things do most of the accuracy work here, neither of which is training:
 from __future__ import annotations
 
 import logging
+import os
+import queue
 from typing import Any
 
 from .config import settings
 
 log = logging.getLogger(__name__)
 
-_model: Any = None
+# One model object cannot serve two transcriptions at once — the CTranslate2
+# state inside it is not safe for concurrent calls, which is why every
+# consultation used to queue behind the one before it. With several doctors
+# recording at the same time that queue, not the model, was the wait.
+#
+# So we hold a small pool and check a model out per request. The Queue *is* the
+# checkout: get() blocks until one is free, and transcribe() already runs in a
+# worker thread, so blocking here never touches the event loop. Size 1 (the
+# default) behaves exactly as the single shared model did.
+_pool: queue.Queue = queue.Queue()
+_pool_size = 0
 
 
 def load_model() -> None:
-    """Load the Whisper model. Called once on startup."""
-    global _model
-    if _model is not None:
+    """Load the Whisper pool. Called once on startup."""
+    global _pool_size
+    if _pool_size:
         return
     from faster_whisper import WhisperModel  # imported lazily: heavy
 
+    size = max(1, settings.whisper_pool_size)
+    # Threads per model, and it matters more than it looks. Measured on a
+    # 20s clip, 8-core box, one model: the library's own default took 3.9s,
+    # 2 and 4 threads took 2.2s, and 8 threads went back to 4.0s. Whisper
+    # stops scaling a few threads in, and past that the threads mostly
+    # contend — so cap at 4 and divide the rest across the pool, and never
+    # hand one model the whole machine. Output is unaffected either way;
+    # the transcripts came back byte-identical. WHISPER_CPU_THREADS overrides.
+    threads = settings.whisper_cpu_threads or min(4, max(1, (os.cpu_count() or 1) // size))
+
     log.info(
-        "Loading Whisper model=%s device=%s compute=%s",
+        "Loading %d Whisper model(s) model=%s device=%s compute=%s cpu_threads=%d",
+        size,
         settings.whisper_model,
         settings.whisper_device,
         settings.whisper_compute_type,
+        threads,
     )
-    _model = WhisperModel(
-        settings.whisper_model,
-        device=settings.whisper_device,
-        compute_type=settings.whisper_compute_type,
-    )
-    log.info("Whisper model ready.")
+    for _ in range(size):
+        _pool.put(
+            WhisperModel(
+                settings.whisper_model,
+                device=settings.whisper_device,
+                compute_type=settings.whisper_compute_type,
+                cpu_threads=threads,
+            )
+        )
+        # Counted as each one lands, so a pool that only half-loads still
+        # serves on what it got instead of reporting itself ready for more.
+        _pool_size += 1
+    log.info("Whisper pool ready (%d model(s)).", _pool_size)
 
 
 def is_loaded() -> bool:
-    return _model is not None
+    return _pool_size > 0
 
 
 def _vocabulary_prompt(medicine_catalog: list[str] | None) -> str:
@@ -105,26 +136,42 @@ def transcribe(
 
     Always transcribes in Roman script (English / Romanized Hinglish).
     """
-    if _model is None:
+    if not _pool_size:
         raise RuntimeError("Whisper model is not loaded.")
 
     lang = settings.whisper_language.strip() if settings.whisper_language.strip() else "en"
 
-    segments, info = _model.transcribe(
-        audio_path,
-        language=lang,
-        initial_prompt=_vocabulary_prompt(medicine_catalog),
-        # VAD drops the silence between doctor and patient turns
-        vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500),
-        beam_size=5,
-        best_of=5,
-        condition_on_previous_text=False,
-        repetition_penalty=1.2,
-        no_speech_threshold=0.6,
-        compression_ratio_threshold=2.2,
-    )
+    # Waits for a free model rather than failing when all are busy, so a third
+    # doctor on a pool of two is delayed, never turned away.
+    model = _pool.get()
+    try:
+        segments, info = model.transcribe(
+            audio_path,
+            language=lang,
+            initial_prompt=_vocabulary_prompt(medicine_catalog),
+            # VAD drops the silence between doctor and patient turns
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+            # Stays at 5 — see the note in config.py. Greedy decoding halved
+            # the time and dropped the dosage sentence with it.
+            beam_size=settings.whisper_beam_size,
+            # Only consulted on temperature fallback, so it stays at 5: when a
+            # segment is hard enough to need the fallback, the extra candidates
+            # are exactly what rescues it.
+            best_of=5,
+            condition_on_previous_text=False,
+            repetition_penalty=1.2,
+            no_speech_threshold=0.6,
+            compression_ratio_threshold=2.2,
+        )
 
-    # `segments` is a generator — consuming it is what actually runs inference.
-    text = " ".join(segment.text.strip() for segment in segments).strip()
-    return text, info.language, float(info.duration)
+        # `segments` is a generator — consuming it is what actually runs
+        # inference, so it has to happen before the model goes back.
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+        language, duration = info.language, float(info.duration)
+    finally:
+        # Returned even when inference raised; a model lost here would shrink
+        # the pool permanently and eventually deadlock every transcription.
+        _pool.put(model)
+
+    return text, language, duration

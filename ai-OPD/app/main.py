@@ -80,12 +80,15 @@ app = FastAPI(title="OPD AI sidecar", version="1.0.0", lifespan=lifespan)
 #
 # Threads alone are not enough, so both are also bounded:
 #
-#   * faster-whisper keeps ONE shared model object and concurrent calls into it
-#     are not safe, so transcriptions are serialised — one at a time, but off
-#     the loop, so everything else still answers while one runs.
+#   * a faster-whisper model object cannot take concurrent calls, so
+#     transcriptions are admitted one per model in the pool (WHISPER_POOL_SIZE,
+#     default 1) — off the loop, so everything else still answers while they
+#     run. transcribe.py checks a model out per request and is the real guard;
+#     this semaphore just parks the waiting requests on the event loop instead
+#     of tying up a worker thread each.
 #   * OCR is CPU-bound; a couple in parallel saturates the machine, and more
 #     just makes every one of them slower.
-_TRANSCRIBE_SLOT = asyncio.Semaphore(1)
+_TRANSCRIBE_SLOT = asyncio.Semaphore(max(1, settings.whisper_pool_size))
 _OCR_SLOTS = asyncio.Semaphore(2)
 
 
@@ -115,14 +118,25 @@ def _save_upload(upload: UploadFile) -> str:
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    llm_ok = await llm.is_reachable()
+    # "Can this service run an LLM request?" — which is not the same question
+    # as "is Ollama up". Asked the old way, a deployment running on Claude with
+    # no Ollama installed reported itself degraded forever, and the backend
+    # gates its startup sweep of unfinished report summaries on status == "ok",
+    # so those were never retried on a host that was in fact perfectly healthy.
+    #
+    # Ollama is probed only when it is the backend actually being relied on,
+    # which also keeps a dead OLLAMA_URL from spending the caller's timeout.
+    llm_ok = settings.cloud_llm_configured or await llm.is_reachable()
     whisper_ok = transcribe.is_loaded()
     return HealthResponse(
         status="ok" if (llm_ok and whisper_ok) else "degraded",
         whisper_loaded=whisper_ok,
         whisper_model=settings.whisper_model,
         llm_reachable=llm_ok,
-        llm_model=settings.llm_model,
+        # The model that will actually serve a request, not the Ollama name it
+        # would have used: reporting qwen while Claude does the work made this
+        # field actively misleading when debugging a deployment.
+        llm_model=settings.active_llm,
         ocr_available=documents.ocr_available(),
         model_version=settings.model_version,
     )
@@ -1277,21 +1291,52 @@ async def extract_prescription(
         # is the least informative thing to do — and its free tier allows only
         # 20 requests a day, which a doubled call burns through fast. The local
         # model is a genuinely different opinion and costs nothing.
+        async def second_opinion() -> tuple[dict, str]:
+            if settings.local_llm_enabled:
+                return (
+                    await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA),
+                    "ollama",
+                )
+            # No local model on this host. Rather than let the safety net
+            # quietly disappear along with Ollama, ask Claude again: the
+            # failure this retry was written for is sampling non-determinism —
+            # the same transcript returning nothing once and both medicines the
+            # next time — so a second call is still the right move, even to the
+            # same backend. An empty draft the doctor cannot tell from a real
+            # "no medication today" is the outcome worth spending a call to avoid.
+            if settings.claude_enabled and settings.claude_api_key:
+                claude_system, claude_user = prompt_for(prescription_claude_prompt)
+                return (
+                    await claude_llm.generate_json(
+                        claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA
+                    ),
+                    "claude",
+                )
+            raise llm.LlmError("No backend available for a second opinion.")
+
         try:
-            retry = DraftPrescription.model_validate(
-                await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA)
-            )
-        except llm.LlmError as retry_err:
-            log.warning("Local retry failed (%s); returning the empty draft.", retry_err)
+            retry_raw, retry_provider = await second_opinion()
+            retry = DraftPrescription.model_validate(retry_raw)
+        # Broad on purpose: this is a best-effort net over a request that has
+        # already failed, so nothing it raises may replace the draft we hold.
+        except Exception as retry_err:
+            log.warning("Retry failed (%s); returning the empty draft.", retry_err)
         else:
             if retry.medicines:
                 log.info(
-                    "Local retry recovered %d medicine(s).", len(retry.medicines)
+                    "Retry on %s recovered %d medicine(s).",
+                    retry_provider,
+                    len(retry.medicines),
                 )
                 draft = retry
-                provider = "ollama"
+                # Stamped with whichever backend actually produced this draft:
+                # `provider` decides below whether the regex grounding guards
+                # run, and those were written to catch a 3B model. Leaving it
+                # reading "ollama" after Claude answered would apply them to
+                # frontier output, where they subtract more than they add.
+                provider = retry_provider
             else:
-                log.warning("Local retry also found none; returning an empty draft.")
+                log.warning("Retry also found none; returning an empty draft.")
 
     # Both regex passes here — this one and _drop_ungrounded_fields below —
     # exist to catch a 3B model. One overwrites the model's dosage from a

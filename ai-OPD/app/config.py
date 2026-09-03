@@ -47,7 +47,33 @@ class Settings:
     # language is left to auto-detect with a rich medical prompt.
     whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "")
 
+    # How many Whisper models to hold, i.e. how many consultations can transcribe
+    # at once. 1 keeps the original behaviour exactly: one at a time, everyone
+    # else queued. Raise it on a multi-doctor box — each model is a further
+    # ~1GB of RAM and wants its own core or two, so 2-3 on a 4-8 core server.
+    whisper_pool_size: int = _int("WHISPER_POOL_SIZE", 1)
+    # Threads per model. 0 divides the box's cores across the pool, which is
+    # what you want; set it only to override that.
+    whisper_cpu_threads: int = _int("WHISPER_CPU_THREADS", 0)
+    # Left at 5 deliberately. Greedy (1) is twice as fast, but measured on
+    # dictated prescription audio it silently dropped the entire dosage
+    # sentence — "Patient has fever since 3 days." and nothing after it. A
+    # transcript that loses the medicine is worse than a slow one, and 2 buys
+    # back the text for only ~10% off 5, so there is no speed here worth
+    # taking. Exposed as an env var so it can be measured again, not tuned.
+    whisper_beam_size: int = _int("WHISPER_BEAM_SIZE", 5)
+
     # ── LLM (Ollama) ─────────────────────────────────────────
+    # Ollama is the last-resort fallback, not a requirement. A deployment that
+    # runs on Claude has no reason to install it, and setting this false says
+    # so out loud: /health stops probing for it and stops calling the service
+    # degraded over its absence, and the fallback chain skips it with a message
+    # that names the real problem instead of "connection refused".
+    local_llm_enabled: bool = os.environ.get("LOCAL_LLM_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     llm_model: str = os.environ.get("LLM_MODEL", "qwen2.5:3b-instruct")
     llm_timeout_seconds: int = _int("LLM_TIMEOUT_SECONDS", 300)
@@ -93,6 +119,19 @@ class Settings:
 
     # Guard against a pathological report blowing up the context window.
     max_document_chars: int = _int("MAX_DOCUMENT_CHARS", 150000)
+
+    @property
+    def cloud_llm_configured(self) -> bool:
+        """True when a hosted backend can serve LLM calls on its own.
+
+        The question /health actually needs to answer is "can this service run
+        an LLM request", which used to be asked as "is Ollama up" — so a box
+        deliberately running on Claude reported itself degraded forever.
+        """
+        return bool(
+            (self.claude_enabled and self.claude_api_key)
+            or (self.gemini_enabled and self.gemini_api_key)
+        )
 
     @property
     def active_llm(self) -> str:
