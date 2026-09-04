@@ -94,6 +94,28 @@ export function ConsultationRecorder({
     },
   });
 
+  const retry = useMutation({
+    mutationFn: () => consultationApi.retryDraft(appointmentId),
+    onSuccess: async (session) => {
+      /*
+       * Same reasoning as the cancel above: a poll issued before this request
+       * is very likely still in flight, and it would answer "failed" — putting
+       * the error box straight back over a retry that is actually running.
+       * Cancel those first, then write the session the server just returned.
+       */
+      await qc.cancelQueries({ queryKey: sessionKey });
+      qc.setQueryData(sessionKey, session);
+      toast.success(
+        'Trying again',
+        'Writing the prescription from what was already heard.',
+      );
+    },
+    onError: (e) => toast.error(e),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: sessionKey });
+    },
+  });
+
   // Invalidate prescription query immediately when draft is ready
   useEffect(() => {
     if (sessionQ.data?.status === 'draft_ready') {
@@ -297,6 +319,38 @@ export function ConsultationRecorder({
           }}
         >
           Couldn’t process the recording: {session.error}
+          {/*
+            * Offered only when there is a transcript to draft from. These
+            * failures are usually transient — the AI service restarting, a
+            * deploy, a timeout — and the recording has already been
+            * transcribed by the time this shows, so re-running the draft
+            * costs seconds. Without it the doctor's only route is to ask the
+            * patient to say the whole consultation again, with what was heard
+            * visible on the very same screen.
+            */}
+          {session.transcript?.trim() ? (
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={retry.isPending || disabled}
+                onClick={() => retry.mutate()}
+                title="Draft the prescription again from what was already heard"
+              >
+                {retry.isPending ? 'Trying again…' : '↻ Try again'}
+              </button>
+              <span style={{ color: 'var(--text)' }}>
+                Uses what was already heard — no need to record again.
+              </span>
+            </div>
+          ) : null}
           <div style={{ marginTop: 4, color: 'var(--text)' }}>
             You can still write the prescription by hand below.
           </div>

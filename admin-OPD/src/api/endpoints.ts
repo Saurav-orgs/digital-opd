@@ -264,6 +264,15 @@ export const consultationApi = {
     api
       .delete<{ cancelled: boolean }>(`/appointments/${appointmentId}/consultation`)
       .then((r) => r.data),
+  /**
+   * Draft again from the transcript the server already holds. Only valid after
+   * a failed attempt; transcription is not repeated, so this is fast and costs
+   * the doctor nothing but a click.
+   */
+  retryDraft: (appointmentId: string) =>
+    api
+      .post<ConsultationSession>(`/appointments/${appointmentId}/consultation/retry`)
+      .then((r) => r.data),
   prescription: (appointmentId: string) =>
     api.get<EPrescription>(`/appointments/${appointmentId}/prescription`).then((r) => r.data),
   savePrescription: (appointmentId: string, body: Record<string, unknown>) =>

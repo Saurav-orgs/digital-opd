@@ -68,7 +68,22 @@ export class ReportSummaryService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     if (!this.enabled) return;
     // Deliberately not awaited: a slow sweep must not hold up boot.
-    void this.sweepUnfinished();
+    //
+    // The catch is not optional. Unawaited, anything this throws becomes an
+    // unhandled promise rejection, which Node treats as fatal — so a failed
+    // sweep took the entire API down with it, before the log buffer had even
+    // been flushed, leaving a stack trace and not one line of context. That
+    // is exactly what a fresh database did: this query runs against
+    // `patient_reports` before master setup has created it.
+    //
+    // Nothing here is worth failing a boot for. The work it looks for is
+    // already waiting by definition, and the next start picks it up.
+    void this.sweepUnfinished().catch((err) =>
+      this.logger.warn(
+        `Could not sweep unfinished report summaries: ${(err as Error).message}. ` +
+          'They will be retried on the next start.',
+      ),
+    );
   }
 
   /**

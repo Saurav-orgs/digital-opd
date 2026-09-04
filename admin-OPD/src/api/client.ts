@@ -22,7 +22,7 @@ export class ApiError extends Error {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: 'https://api-digital-opd.devenvironment.space/api',
 });
 
 api.interceptors.request.use((config) => {

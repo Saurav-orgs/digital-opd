@@ -10,11 +10,19 @@ concurrency:
 
 env:
   ROOT: /var/www/digital-opd
-  BACKEND_DIR: backend
+  # Must match the folder that already exists on the server and that pm2
+  # was started from — /var/www/digital-opd/backend-OPD.
+  BACKEND_DIR: backend-OPD
   DOCTOR_DIR: doctor-fe
   PATIENT_DIR: patient-fe
   AI_DIR: ai
-  PM2_API: opd-api
+  # Must match the pm2 process that is already running, not a name we would
+  # like it to have. This box hosts many unrelated apps — including one
+  # already called plain `backend` — so a mismatch here does not fail
+  # loudly: pm2 would start a SECOND process, it would die on EADDRINUSE,
+  # and the health check would be answered by the old one still serving
+  # port 3000. The deploy would report success having changed nothing.
+  PM2_API: backend-OPD
   PM2_AI: opd-ai
   BACKEND_PORT: 3000
   AI_PORT: 8000
@@ -31,23 +39,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      # The frontends bake this in at BUILD time — it is compiled into the
-      # bundle, not read on the server. Unset, both apps ship pointing at
-      # localhost and every request from a user's browser fails, with nothing
-      # in any server log to say why. Cheaper to fail here.
-      - name: Check frontend API URL is set
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-        run: |
-          if [ -z "$VITE_API_BASE_URL" ]; then
-            echo "ERROR: repository variable VITE_API_BASE_URL is empty or unset."
-            echo "Set it under Settings -> Secrets and variables -> Actions -> Variables."
-            echo "It must include the /api prefix and no trailing slash, e.g."
-            echo "  https://api.yourclinic.com/api"
-            exit 1
-          fi
-          echo "Building both frontends against: $VITE_API_BASE_URL"
 
       # ---------- Backend (NestJS) ----------
       - name: Install backend deps
@@ -77,10 +68,12 @@ jobs:
         working-directory: admin-OPD
         run: npm ci
 
+      # The API URL is hardcoded in the source — admin in
+      # src/api/client.ts, patient in src/config.ts — and is not read
+      # from the environment, so there is nothing to inject here.
+      # Change the URL in those files; setting it in CI does nothing.
       - name: Build doctor-fe
         working-directory: admin-OPD
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
 
       - name: Zip doctor-fe dist
@@ -92,10 +85,12 @@ jobs:
         working-directory: patient-web-OPD
         run: npm ci
 
+      # The API URL is hardcoded in the source — admin in
+      # src/api/client.ts, patient in src/config.ts — and is not read
+      # from the environment, so there is nothing to inject here.
+      # Change the URL in those files; setting it in CI does nothing.
       - name: Build patient-fe
         working-directory: patient-web-OPD
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
 
       - name: Zip patient-fe dist
@@ -300,7 +295,7 @@ jobs:
             *) echo "REFUSING TO DEPLOY: unexpected ROOT '$ROOT'"; exit 1 ;;
           esac
           case "$BACKEND_DIR/$DOCTOR_DIR/$PATIENT_DIR/$AI_DIR" in
-            backend/doctor-fe/patient-fe/ai) : ;;
+            backend-OPD/doctor-fe/patient-fe/ai) : ;;
             *) echo "REFUSING TO DEPLOY: unexpected app dir names"; exit 1 ;;
           esac
 

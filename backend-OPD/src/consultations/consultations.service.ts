@@ -143,6 +143,91 @@ export class ConsultationsService {
     return { cancelled: true };
   }
 
+  /**
+   * Draft again from the transcript already on the row.
+   *
+   * The failures this recovers from are transient — the sidecar restarting, a
+   * deploy, a timeout — and by the time the doctor reads the error the
+   * consultation has already been transcribed. The audio is discarded after
+   * transcription, so without this the only way forward is to ask the patient
+   * to say it all again; the transcript is right there on screen under "what
+   * the system heard", which makes that especially hard to justify.
+   *
+   * Only re-runs drafting. Transcription is not repeated and cannot be.
+   */
+  async retryDraft(
+    appointmentId: string,
+    user: AuthUser,
+  ): Promise<ConsultationSession> {
+    const appointment = await this.getAppointment(appointmentId, user);
+
+    if (!this.aiEnabled) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'Voice prescriptions are turned off on this server. You can still ' +
+          'write the prescription by hand.',
+      });
+    }
+
+    const session = await this.sessionModel.findOne({
+      where: { appointment_id: appointmentId },
+      order: [['created_at', 'DESC']],
+    });
+    if (!session) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'There is no recording to retry. Please record the consultation again.',
+      });
+    }
+
+    // Only a failed attempt may be retried. Starting a second run over one
+    // still in flight would put two drafts in a race for the same prescription
+    // row, and the loser's medicines would overwrite the winner's.
+    if (session.status !== ConsultationSessionStatus.FAILED) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          session.status === ConsultationSessionStatus.DRAFT_READY
+            ? 'This recording has already produced a draft prescription.'
+            : 'This recording is still being processed. Please wait for it to finish.',
+      });
+    }
+
+    // Nothing was heard, so there is nothing to draft from. Saying so is more
+    // use than a retry button that can only fail the same way again.
+    if (!session.transcript?.trim()) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'Nothing could be heard in that recording, so there is nothing to ' +
+          'retry. Please record the consultation again.',
+      });
+    }
+
+    await this.sessionModel.update(
+      { status: ConsultationSessionStatus.DRAFTING, error: null } as any,
+      { where: { id: session.id } },
+    );
+
+    // Registered in `inFlight` like any other run, so Cancel still works while
+    // a retry is going and a cancelled retry is discarded the same way.
+    const controller = new AbortController();
+    this.inFlight.set(session.id, controller);
+
+    // Not awaited, exactly as startFromAudio does it: the client polls.
+    void this.draftFromTranscript(
+      session.id,
+      appointment,
+      session.transcript,
+      session.model_version ?? null,
+      controller,
+    ).finally(() => this.inFlight.delete(session.id));
+
+    this.logger.log(
+      `Retrying the prescription draft for appointment ${appointmentId} ` +
+        `from the stored transcript (session ${session.id}).`,
+    );
+
+    return (await this.sessionModel.findByPk(session.id))!;
+  }
+
   // ── pipeline ───────────────────────────────────────────────
 
   private async process(
@@ -191,45 +276,68 @@ export class ConsultationsService {
       }
 
       // 2. Transcript → structured draft prescription.
-      try {
-        const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
-        const { prescription, model_version } = await this.ai.extractPrescription(
-          {
-            transcript,
-            patient: {
-              name: appointment.patient_name,
-              age: appointment.patient_age,
-              gender: appointment.patient_gender ?? '',
-              complaint: appointment.description ?? '',
-            },
-            medicine_catalog: vocabulary,
-          },
-          controller.signal,
-        );
-
-        // The last and most important check: past this line the draft would
-        // land in the editor, and a doctor who cancelled has very likely
-        // started typing their own prescription into it.
-        if (await this.wasCancelled(sessionId)) return;
-
-        await this.saveDraft(appointment.id, sessionId, prescription);
-        await this.sessionModel.update(
-          {
-            status: ConsultationSessionStatus.DRAFT_READY,
-            model_version: model_version || modelVersion,
-            error: null,
-          } as any,
-          { where: { id: sessionId } },
-        );
-        this.logger.log(`Draft prescription ready for appointment ${appointment.id}.`);
-      } catch (err) {
-        if (await this.wasCancelled(sessionId)) return;
-        // The transcript survives even when drafting fails, so the doctor can
-        // still read what was said and write the prescription by hand.
-        await this.fail(sessionId, (err as Error).message);
-      }
+      await this.draftFromTranscript(
+        sessionId,
+        appointment,
+        transcript,
+        modelVersion,
+        controller,
+      );
     } finally {
       this.inFlight.delete(sessionId);
+    }
+  }
+
+  /**
+   * Stage 2 on its own: a transcript that is already stored → a draft.
+   *
+   * Split out of `process` so `retryDraft` can re-run exactly this half and
+   * nothing else. Transcription is the expensive part — minutes of CPU, and
+   * the audio is gone afterwards — so drafting must be retryable without it.
+   */
+  private async draftFromTranscript(
+    sessionId: string,
+    appointment: Appointment,
+    transcript: string,
+    modelVersion: string | null,
+    controller: AbortController,
+  ): Promise<void> {
+    try {
+      const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
+      const { prescription, model_version } = await this.ai.extractPrescription(
+        {
+          transcript,
+          patient: {
+            name: appointment.patient_name,
+            age: appointment.patient_age,
+            gender: appointment.patient_gender ?? '',
+            complaint: appointment.description ?? '',
+          },
+          medicine_catalog: vocabulary,
+        },
+        controller.signal,
+      );
+
+      // The last and most important check: past this line the draft would
+      // land in the editor, and a doctor who cancelled has very likely
+      // started typing their own prescription into it.
+      if (await this.wasCancelled(sessionId)) return;
+
+      await this.saveDraft(appointment.id, sessionId, prescription);
+      await this.sessionModel.update(
+        {
+          status: ConsultationSessionStatus.DRAFT_READY,
+          model_version: model_version || modelVersion,
+          error: null,
+        } as any,
+        { where: { id: sessionId } },
+      );
+      this.logger.log(`Draft prescription ready for appointment ${appointment.id}.`);
+    } catch (err) {
+      if (await this.wasCancelled(sessionId)) return;
+      // The transcript survives even when drafting fails, so the doctor can
+      // still read what was said, retry, or write the prescription by hand.
+      await this.fail(sessionId, (err as Error).message);
     }
   }
 

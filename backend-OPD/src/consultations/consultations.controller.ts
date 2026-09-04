@@ -112,6 +112,19 @@ export class ConsultationsController {
     return this.prescriptions.update(id, dto, user);
   }
 
+  @Post('consultation/retry')
+  @ApiOperation({
+    summary:
+      'Draft the prescription again from the transcript already stored, after a failed attempt',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  retryConsultation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.consultations.retryDraft(id, user);
+  }
+
   @Post('prescription/handwriting')
   @ApiOperation({
     summary: 'Save a handwritten prescription image (drawn on a tablet)',
