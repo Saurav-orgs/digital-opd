@@ -21,10 +21,10 @@ env:
   # already called plain `backend` — so a mismatch here does not fail
   # loudly: pm2 would start a SECOND process, it would die on EADDRINUSE,
   # and the health check would be answered by the old one still serving
-  # port 3000. The deploy would report success having changed nothing.
+  # port 3305. The deploy would report success having changed nothing.
   PM2_API: backend-OPD
   PM2_AI: opd-ai
-  BACKEND_PORT: 3000
+  BACKEND_PORT: 3305
   AI_PORT: 8000
   HEALTH_PATH: /api/docs
 
