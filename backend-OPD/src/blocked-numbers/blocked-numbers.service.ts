@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { BlockedNumber } from '../database/models/blocked-number.model';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AuthUser } from '../common/decorators/current-user.decorator';
@@ -20,6 +22,7 @@ export class BlockedNumbersService {
   constructor(
     @InjectModel(BlockedNumber)
     private readonly model: typeof BlockedNumber,
+    private readonly activity: ActivityLogService,
   ) {}
 
   /**
@@ -63,12 +66,23 @@ export class BlockedNumbersService {
       return existing;
     }
 
-    return this.model.create({
+    const created = await this.model.create({
       doctor_id: doctorId,
       mobile: dto.mobile,
       reason: dto.reason?.trim() || null,
       blocked_by_user_id: user.id,
     } as any);
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.NUMBER_BLOCKED,
+      summary: `Blocked ${dto.mobile} from booking.`,
+      entity_type: 'blocked_number',
+      entity_id: created.id,
+      doctor_id: doctorId,
+      metadata: { mobile: dto.mobile, reason: dto.reason?.trim() || null },
+    });
+
+    return created;
   }
 
   async unblock(id: string, user: AuthUser): Promise<void> {
@@ -79,6 +93,15 @@ export class BlockedNumbersService {
       });
     }
     await row.destroy();
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.NUMBER_UNBLOCKED,
+      summary: `Unblocked ${row.mobile}.`,
+      entity_type: 'blocked_number',
+      entity_id: row.id,
+      doctor_id: row.doctor_id,
+      metadata: { mobile: row.mobile },
+    });
   }
 
   /** Every clinical row belongs to one doctor; the super admin has no tenant. */

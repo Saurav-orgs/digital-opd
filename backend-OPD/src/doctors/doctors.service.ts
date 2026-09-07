@@ -13,6 +13,7 @@ import { User } from '../database/models/user.model';
 import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
 import { RegisterDoctorDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
+import { ActivityLogService } from '../activity/activity-log.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import {
@@ -20,6 +21,8 @@ import {
   PermissionAction,
   PermissionModule,
   UserType,
+  ActivityAction,
+  ActivityActor,
 } from '../common/enums';
 
 // Modules the tenant Doctor role receives (all clinical modules).
@@ -59,6 +62,7 @@ export class DoctorsService {
     private readonly storage: StorageService,
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   /**
@@ -353,6 +357,19 @@ export class DoctorsService {
       { where: { doctor_id: doctor.id, type: UserType.DOCTOR } },
     );
 
+    // Platform-level act by the super admin, so doctor_id names the clinic
+    // that was approved rather than the actor's own tenant.
+    this.activity.record({
+      action: ActivityAction.DOCTOR_APPROVED,
+      actor_type: ActivityActor.USER,
+      actor_label: 'Super admin',
+      doctor_id: doctor.id,
+      entity_type: 'doctor',
+      entity_id: doctor.id,
+      summary: `Approved Dr. ${doctor.name}'s registration.`,
+      metadata: { specialization: doctor.specialization ?? null },
+    });
+
     return this.toView(doctor);
   }
 
@@ -373,6 +390,18 @@ export class DoctorsService {
       { is_active: false } as any,
       { where: { doctor_id: doctor.id, type: UserType.DOCTOR } },
     );
+
+    this.activity.record({
+      action: ActivityAction.DOCTOR_REJECTED,
+      actor_type: ActivityActor.USER,
+      actor_label: 'Super admin',
+      doctor_id: doctor.id,
+      entity_type: 'doctor',
+      entity_id: doctor.id,
+      summary: `Rejected Dr. ${doctor.name}'s registration.`,
+      metadata: { reason: reason?.trim() || null },
+    });
+
     return this.toView(doctor);
   }
 

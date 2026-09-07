@@ -7,6 +7,7 @@ import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { MasterSetupModule } from './bootstrap/master-setup.module';
+import { ActivityModule } from './activity/activity.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
@@ -62,6 +63,8 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     // Ensures a full-access SuperAdmin login exists on every start (see
     // MasterSetupService) — before the request-handling modules below.
     MasterSetupModule,
+    // Global: every module records activity through it.
+    ActivityModule,
     UploadsModule,
     // Global: the local inference sidecar is used by reports and consultations.
     AiModule,

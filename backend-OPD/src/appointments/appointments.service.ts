@@ -22,6 +22,8 @@ import {
   ConsultationDto,
   ListAppointmentsQueryDto,
 } from './dto/manage-appointment.dto';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction, ActivityActor } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import {
@@ -48,6 +50,7 @@ export class AppointmentsService {
     private readonly profiles: PatientProfilesService,
     private readonly blocked: BlockedNumbersService,
     private readonly config: ConfigService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   /**
@@ -100,6 +103,23 @@ export class AppointmentsService {
         consultation_status: ConsultationStatus.PENDING,
         source,
       } as any);
+
+      // Booked by a patient or a guest, so there is no staff principal to
+      // attribute this to — the mobile number is the identity.
+      this.activity.record({
+        action: ActivityAction.APPOINTMENT_BOOKED,
+        actor_type: ActivityActor.PATIENT,
+        actor_id: appointment.patient_profile_id ?? null,
+        actor_label: appointment.patient_mobile,
+        doctor_id: appointment.doctor_id,
+        entity_type: 'appointment',
+        entity_id: appointment.id,
+        summary:
+          `${appointment.patient_name} booked ${appointment.appointment_date} ` +
+          `at ${appointment.start_time}.`,
+        metadata: { source, start_time: appointment.start_time },
+      });
+
       return this.withDoctor(appointment.id);
     } catch (err) {
       if (err instanceof UniqueConstraintError) {
@@ -189,6 +209,18 @@ export class AppointmentsService {
           source: BookingSource.WALK_IN,
         } as any,
       );
+
+      this.activity.recordForUser(user, {
+        action: ActivityAction.APPOINTMENT_WALK_IN,
+        summary:
+          `Booked a walk-in for ${appointment.patient_name} on ` +
+          `${appointment.appointment_date} at ${appointment.start_time}.`,
+        entity_type: 'appointment',
+        entity_id: appointment.id,
+        doctor_id: appointment.doctor_id,
+        metadata: { patient_mobile: appointment.patient_mobile },
+      });
+
       return this.withDoctor(appointment.id);
     } catch (err) {
       if (err instanceof UniqueConstraintError) {
@@ -359,6 +391,24 @@ export class AppointmentsService {
       appointment.patient_profile_id,
     );
 
+    // `cancel` is reached from both sides — the clinic and the patient portal —
+    // and only the caller knows which, so the side is inferred from the scope
+    // it passed rather than invented here.
+    const byClinic = Boolean(opts.doctorId);
+    this.activity.record({
+      action: ActivityAction.APPOINTMENT_CANCELLED,
+      actor_type: byClinic ? ActivityActor.USER : ActivityActor.PATIENT,
+      actor_id: byClinic ? null : appointment.patient_profile_id,
+      actor_label: byClinic ? 'Clinic' : appointment.patient_mobile,
+      doctor_id: appointment.doctor_id,
+      entity_type: 'appointment',
+      entity_id: appointment.id,
+      summary:
+        `${byClinic ? 'The clinic' : appointment.patient_name} cancelled the ` +
+        `booking on ${appointment.appointment_date}.`,
+      metadata: { cancelled_by: byClinic ? 'clinic' : 'patient' },
+    });
+
     return appointment;
   }
 
@@ -524,6 +574,18 @@ export class AppointmentsService {
       }
       throw err;
     }
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.APPOINTMENT_RESCHEDULED,
+      summary:
+        `Moved ${appointment.patient_name}'s visit to ` +
+        `${dto.appointment_date} at ${dto.start_time}.`,
+      entity_type: 'appointment',
+      entity_id: appointment.id,
+      doctor_id: appointment.doctor_id,
+      metadata: { to_date: dto.appointment_date, to_time: dto.start_time },
+    });
+
     return this.withDoctor(id);
   }
 
@@ -672,7 +734,20 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
+    const previous = appointment.consultation_status;
     await appointment.update({ consultation_status: dto.status } as any);
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.APPOINTMENT_CONSULTATION_SET,
+      summary:
+        `Marked ${appointment.patient_name}'s visit on ` +
+        `${appointment.appointment_date} as ${dto.status}.`,
+      entity_type: 'appointment',
+      entity_id: appointment.id,
+      doctor_id: appointment.doctor_id,
+      metadata: { from: previous, to: dto.status },
+    });
+
     return this.withDoctor(id);
   }
 

@@ -18,6 +18,7 @@ import { EPrescription } from './e-prescription.model';
 import { EPrescriptionMedicine } from './e-prescription-medicine.model';
 import { MedicineCatalog } from './medicine-catalog.model';
 import { AiTrainingSample } from './ai-training-sample.model';
+import { ActivityLog } from './activity-log.model';
 
 export const models = [
   Role,
@@ -40,6 +41,7 @@ export const models = [
   MedicineCatalog,
   AiTrainingSample,
   AppSetting,
+  ActivityLog,
 ];
 
 export {
@@ -63,4 +65,5 @@ export {
   EPrescriptionMedicine,
   MedicineCatalog,
   AiTrainingSample,
+  ActivityLog,
 };

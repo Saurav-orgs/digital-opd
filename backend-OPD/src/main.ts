@@ -53,6 +53,10 @@ async function bootstrap() {
     swaggerOptions: { persistAuthorization: true },
   });
 
+  // Without this, onApplicationShutdown never fires and pm2's SIGINT kills
+  // the process outright — taking any buffered activity rows with it.
+  app.enableShutdownHooks();
+
   const port = config.get<number>('port') ?? 3000;
   await app.listen(port);
   const logger = app.get(Logger);

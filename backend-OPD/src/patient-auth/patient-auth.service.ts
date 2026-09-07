@@ -7,6 +7,8 @@ import { PatientRegisterDto } from './dto/patient-register.dto';
 import { PatientCheckDto } from './dto/patient-check.dto';
 import { PatientSignupDto } from './dto/patient-signup.dto';
 import { AuthPatient } from './current-patient.decorator';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction, ActivityActor } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
@@ -16,6 +18,7 @@ export class PatientAuthService {
   constructor(
     private readonly profiles: PatientProfilesService,
     private readonly jwtService: JwtService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   /**
@@ -62,6 +65,17 @@ export class PatientAuthService {
     } as any);
 
     const session = await this.issueSession(account);
+
+    this.activity.record({
+      action: ActivityAction.PATIENT_SIGNUP,
+      actor_type: ActivityActor.PATIENT,
+      actor_id: account.id,
+      actor_label: dto.mobile,
+      entity_type: 'patient_account',
+      entity_id: account.id,
+      summary: `Patient account created for ${dto.mobile}.`,
+    });
+
     return {
       ...session,
       patients: await this.profiles.listForAccount(account.id),
@@ -91,6 +105,18 @@ export class PatientAuthService {
       dto.patient,
     );
     const session = await this.issueSession(account);
+
+    this.activity.record({
+      action: ActivityAction.PATIENT_SIGNUP,
+      actor_type: ActivityActor.PATIENT,
+      actor_id: account.id,
+      actor_label: dto.mobile,
+      entity_type: 'patient_account',
+      entity_id: account.id,
+      summary: `Patient account registered for ${dto.mobile} with one patient.`,
+      metadata: { patient_profile_id: profile.id },
+    });
+
     return {
       ...session,
       patients: await this.profiles.listForAccount(account.id),

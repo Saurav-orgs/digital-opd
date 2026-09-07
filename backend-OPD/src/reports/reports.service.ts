@@ -7,6 +7,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { AuthPatient } from '../patient-auth/current-patient.decorator';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction, ActivityActor } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AiJobStatus, ConsultationStatus, NotificationType } from '../common/enums';
@@ -20,6 +22,7 @@ export class ReportsService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly summaries: ReportSummaryService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   async create(
@@ -52,6 +55,14 @@ export class ReportsService {
     // Summarising takes tens of seconds — let the upload return now and fill the
     // summary in behind it.
     void this.summaries.summarizeInBackground(report.id, file);
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.REPORT_UPLOADED,
+      summary: `Uploaded report "${dto.title}" for ${dto.mobile}.`,
+      entity_type: 'report',
+      entity_id: report.id,
+      metadata: { patient_mobile: dto.mobile, file_key: key },
+    });
 
     return report;
   }
@@ -263,6 +274,15 @@ export class ReportsService {
     const appointmentId = report.appointment_id;
     await this.storage.delete(report.file_key).catch(() => undefined);
     await report.destroy();
+
+    this.activity.recordForPatient(patient, {
+      action: ActivityAction.REPORT_DELETED,
+      doctor_id: report.doctor_id,
+      entity_type: 'report',
+      entity_id: report.id,
+      summary: `Patient deleted their report "${report.title}".`,
+      metadata: { appointment_id: appointmentId },
+    });
     if (appointmentId) {
       void this.summaries.consolidateForAppointment(appointmentId);
     }
@@ -298,6 +318,19 @@ export class ReportsService {
     const appointmentId = row.appointment_id;
     await this.storage.delete(row.file_key);
     await row.destroy();
+
+    // The file is gone from S3 and the row from the database; this line is
+    // the only remaining evidence the report ever existed.
+    this.activity.record({
+      action: ActivityAction.REPORT_DELETED,
+      actor_type: ActivityActor.USER,
+      actor_label: 'Clinic',
+      doctor_id: row.doctor_id,
+      entity_type: 'report',
+      entity_id: row.id,
+      summary: `Deleted report "${row.title}" for ${row.patient_mobile}.`,
+      metadata: { appointment_id: appointmentId, file_key: row.file_key },
+    });
     // The visit's combined summary must no longer cover a report that's gone.
     if (appointmentId) {
       void this.summaries.consolidateForAppointment(appointmentId);

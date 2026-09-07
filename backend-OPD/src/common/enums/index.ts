@@ -16,6 +16,7 @@ export enum PermissionModule {
   DASHBOARD = 'dashboard',
   PATHLABS = 'pathlabs',
   REPORTS = 'reports',
+  ACTIVITY = 'activity',
 }
 
 /**
@@ -122,4 +123,66 @@ export enum TrainingSampleKind {
   REPORT_SUMMARY = 'report_summary',
   /** Doctor's correction to the across-visits combined summary. */
   PROGRESS_SUMMARY = 'progress_summary',
+}
+
+
+/** Who performed a logged activity. */
+export enum ActivityActor {
+  /** Staff: super admin, doctor, or pathlab login. */
+  USER = 'user',
+  /** A patient account, which is a mobile number rather than a person. */
+  PATIENT = 'patient',
+  /** No human: a background job or the AI pipeline acting on its own. */
+  SYSTEM = 'system',
+}
+
+/**
+ * The activities worth a permanent record.
+ *
+ * Deliberately a curated list rather than every write the API accepts. A log
+ * nobody can read is not an audit trail, and the fastest way to make one
+ * unreadable is to fill it with rows that carry no meaning — a saved draft
+ * matters far less than an issued prescription, and burying the second under
+ * thousands of the first is how audit tables stop being consulted.
+ *
+ * Named `subject.verb` so a prefix match reads as a category, and stored as
+ * strings so a new action never needs a migration.
+ */
+export enum ActivityAction {
+  // ── Security. Always written straight through. ──
+  LOGIN = 'auth.login',
+  LOGIN_FAILED = 'auth.login_failed',
+  PASSWORD_CHANGED = 'auth.password_changed',
+  PATIENT_SIGNUP = 'patient.signup',
+  PATIENT_LOGIN = 'patient.login',
+
+  // ── Medical record. Always written straight through. ──
+  PRESCRIPTION_ISSUED = 'prescription.issued',
+  PRESCRIPTION_DELETED = 'prescription.deleted',
+  REPORT_UPLOADED = 'report.uploaded',
+  REPORT_DELETED = 'report.deleted',
+
+  // ── Tenant administration. Always written straight through. ──
+  DOCTOR_REGISTERED = 'doctor.registered',
+  DOCTOR_APPROVED = 'doctor.approved',
+  DOCTOR_REJECTED = 'doctor.rejected',
+  DOCTOR_CREATED = 'doctor.created',
+  DOCTOR_DELETED = 'doctor.deleted',
+  USER_CREATED = 'user.created',
+  USER_DELETED = 'user.deleted',
+
+  // ── Routine clinic activity. Batched. ──
+  APPOINTMENT_BOOKED = 'appointment.booked',
+  APPOINTMENT_WALK_IN = 'appointment.walk_in',
+  APPOINTMENT_CANCELLED = 'appointment.cancelled',
+  APPOINTMENT_RESCHEDULED = 'appointment.rescheduled',
+  APPOINTMENT_CONSULTATION_SET = 'appointment.consultation_set',
+  CONSULTATION_RECORDED = 'consultation.recorded',
+  CONSULTATION_CANCELLED = 'consultation.cancelled',
+  PRESCRIPTION_SAVED = 'prescription.saved',
+  SCHEDULE_UPDATED = 'schedule.updated',
+  LEAVE_ADDED = 'schedule.leave_added',
+  LEAVE_REMOVED = 'schedule.leave_removed',
+  NUMBER_BLOCKED = 'number.blocked',
+  NUMBER_UNBLOCKED = 'number.unblocked',
 }

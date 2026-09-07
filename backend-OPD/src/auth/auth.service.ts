@@ -6,6 +6,8 @@ import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction, ActivityActor } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { DoctorVerificationStatus } from '../common/enums';
 
@@ -14,15 +16,37 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   async login(dto: LoginDto) {
     const user = await this.usersService.findForAuth(dto.email);
     // Uniform message whether email is unknown or password is wrong.
-    if (!user) throw new AppException(ErrorCode.INVALID_CREDENTIALS);
+    if (!user) {
+      // Logged with the address that was tried, not a user id — there is no
+      // user. A run of these against one address is what a break-in attempt
+      // looks like, and it is invisible unless the failures are recorded too.
+      this.activity.record({
+        action: ActivityAction.LOGIN_FAILED,
+        actor_type: ActivityActor.SYSTEM,
+        actor_label: dto.email.toLowerCase(),
+        summary: `Failed sign-in for ${dto.email.toLowerCase()} — no such account.`,
+      });
+      throw new AppException(ErrorCode.INVALID_CREDENTIALS);
+    }
 
     const ok = await bcrypt.compare(dto.password, user.password_hash);
-    if (!ok) throw new AppException(ErrorCode.INVALID_CREDENTIALS);
+    if (!ok) {
+      this.activity.record({
+        action: ActivityAction.LOGIN_FAILED,
+        actor_type: ActivityActor.USER,
+        actor_id: user.id,
+        actor_label: `${user.name} (${user.email})`,
+        doctor_id: user.doctor_id ?? null,
+        summary: `Failed sign-in for ${user.email} — wrong password.`,
+      });
+      throw new AppException(ErrorCode.INVALID_CREDENTIALS);
+    }
 
     if (!user.is_active) {
       // A doctor who registered themselves is inactive for a reason they can
@@ -46,6 +70,14 @@ export class AuthService {
     }
 
     const principal = UsersService.toAuthUser(user);
+
+    this.activity.recordForUser(principal, {
+      action: ActivityAction.LOGIN,
+      summary: `${principal.name} signed in.`,
+      entity_type: 'user',
+      entity_id: principal.id,
+      metadata: { type: principal.type },
+    });
 
     const token = await this.jwtService.signAsync({
       sub: user.id,
@@ -83,6 +115,13 @@ export class AuthService {
     }
 
     await this.usersService.setPassword(row.id, dto.new_password);
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.PASSWORD_CHANGED,
+      summary: `${user.name} changed their own password.`,
+      entity_type: 'user',
+      entity_id: user.id,
+    });
   }
 
   me(user: AuthUser): AuthUser {

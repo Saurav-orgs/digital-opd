@@ -11,6 +11,8 @@ import { MedicinesService } from '../medicines/medicines.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UpdatePrescriptionDto } from './dto/prescription.dto';
+import { ActivityLogService } from '../activity/activity-log.service';
+import { ActivityAction } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import {
@@ -48,6 +50,7 @@ export class PrescriptionsService {
     private readonly medicines: MedicinesService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   /** The appointment's prescription, creating an empty draft on first open. */
@@ -183,6 +186,24 @@ export class PrescriptionsService {
       { appointmentId: appointment.id, prescriptionId: prescription.id },
       appointment.doctor_id,
     );
+
+    // Written straight through, not batched: this is the moment a document
+    // reached a patient, and it is the row someone would later ask to see.
+    this.activity.recordForUser(user, {
+      action: ActivityAction.PRESCRIPTION_ISSUED,
+      summary:
+        `Issued a prescription for ${appointment.patient_name} ` +
+        `(${appointment.appointment_date}) with ${medicines.length} medicine(s).`,
+      entity_type: 'prescription',
+      entity_id: prescription.id,
+      doctor_id: appointment.doctor_id,
+      metadata: {
+        appointment_id: appointment.id,
+        patient_mobile: appointment.patient_mobile,
+        medicine_count: medicines.length,
+        medicines: medicines.map((m) => m.medicine_name),
+      },
+    });
 
     return this.toView(await this.reload(prescription.id));
   }
