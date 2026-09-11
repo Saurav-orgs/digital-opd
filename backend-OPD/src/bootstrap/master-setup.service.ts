@@ -59,6 +59,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     try {
       await this.runPendingMigrations();
+      await this.runPendingSeeders();
       const permissionIds = await this.ensurePermissionCatalog();
       const role = await this.ensureSuperAdminRole(permissionIds);
       // Super admin is the platform owner only — no doctor profile attached.
@@ -104,6 +105,49 @@ export class MasterSetupService implements OnApplicationBootstrap {
     );
     await umzug.up();
     this.logger.log('Master setup: schema is now up to date.');
+  }
+
+  /**
+   * Runs reference-data seeders that have not run yet, recorded in
+   * `SequelizeData` exactly as `sequelize-cli db:seed:all` would record them.
+   *
+   * Migrations have run at boot for a while; seeders never did, and the
+   * deploy does not run them either — so production had the schema for the
+   * medicine reference list and none of the names in it. The editor then had
+   * one medicine to autocomplete from and flagged every dictated drug as
+   * unknown. The superadmin seeder is left to the CLI: this service already
+   * creates that login itself, below, and a second path to it would be a
+   * second thing to keep in step.
+   */
+  private async runPendingSeeders(): Promise<void> {
+    const umzug = new Umzug({
+      storage: 'sequelize',
+      // `modelName` matters: umzug reuses a model the connection already has
+      // under that name, and the migrations runner above has defined
+      // `SequelizeMeta`. Without a name of its own this storage would read
+      // and write the migrations table and never see a seeder as pending.
+      storageOptions: {
+        sequelize: this.sequelize,
+        modelName: 'SequelizeData',
+        tableName: 'SequelizeData',
+      },
+      migrations: {
+        params: [this.sequelize.getQueryInterface(), SequelizeStatic],
+        path: path.join(process.cwd(), 'database', 'seeders'),
+        pattern: /^(?!.*superadmin).*\.js$/,
+      },
+      logging: false,
+    });
+
+    const pending = await umzug.pending();
+    if (pending.length === 0) return;
+
+    this.logger.log(
+      `Master setup: running ${pending.length} pending seeder(s): ` +
+        pending.map((m: any) => m.file).join(', '),
+    );
+    await umzug.up();
+    this.logger.log('Master setup: reference data is now up to date.');
   }
 
   /** Ensures every (module, action) pair exists. Returns all permission ids. */

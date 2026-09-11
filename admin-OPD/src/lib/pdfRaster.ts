@@ -1,19 +1,22 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
 
 /*
  * pdf.js is a third of the app's size and only the preview and print paths
  * need it, so it is fetched the first time a document is drawn rather than
- * with the app. The worker is a separate file, pointed at explicitly so Vite
- * bundles it alongside rather than leaving pdf.js to fetch it from a path
- * that does not exist in the build.
+ * with the app.
+ *
+ * The worker is handed over as a running Worker, not as a URL. Given a URL,
+ * pdf.js would start a *module* worker from it, and the file pdf.js ships is
+ * `.mjs` — which the production nginx serves as `application/octet-stream`,
+ * a type browsers refuse to run as a module. Vite's `?worker` import emits
+ * the worker as a plain `.js` chunk and constructs it the right way, so it
+ * loads wherever the rest of the app does.
  */
 let loader: Promise<typeof import('pdfjs-dist')> | null = null;
 export function loadPdfjs() {
   loader ??= import('pdfjs-dist').then((pdfjs) => {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
+    pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker();
     return pdfjs;
   });
   return loader;

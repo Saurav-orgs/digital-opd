@@ -625,7 +625,7 @@ export function PrescriptionEditor({
         {rows.map((row, i) => (
           <MedicineRow
             key={row._key}
-            index={i}
+            listId={`meds-${row._key}`}
             total={rows.length}
             row={row}
             errors={errors.rows[i]}
@@ -748,7 +748,7 @@ export function PrescriptionEditor({
 
 function MedicineRow({
   row,
-  index,
+  listId,
   total,
   errors,
   medicineIndex,
@@ -757,7 +757,12 @@ function MedicineRow({
   onRemove,
 }: {
   row: PrescriptionMedicine;
-  index: number;
+  /**
+   * Stable for the life of the row. The datalist used to be keyed on the
+   * medicine name, so it was a different element after every keystroke and
+   * the browser closed the suggestions as fast as it opened them.
+   */
+  listId: string;
   total: number;
   errors?: Partial<Record<MedicineField, string>>;
   medicineIndex: MedicineIndex;
@@ -772,6 +777,22 @@ function MedicineRow({
    * enough on its own to trip the API's rate limit.
    */
   const [query, setQuery] = useState(row.medicine_name ?? '');
+
+  /*
+   * The field's text is the row's own while it is being typed. The stored
+   * shape is name + strength, joined for display — and joining trims, so a
+   * controlled input showing the join would lose the space the doctor just
+   * typed after "Dolo" and turn the next keystroke into "Dolo6". The text is
+   * only rewritten from the fields when they change underneath it: an AI
+   * draft landing, a "did you mean" pick, Clear all.
+   */
+  const [nameText, setNameText] = useState(joinMedicine(row.medicine_name, row.strength));
+  useEffect(() => {
+    const held = joinMedicine(row.medicine_name, row.strength);
+    if (held !== nameText.trim().replace(/\s+/g, ' ')) setNameText(held);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.medicine_name, row.strength]);
+
   const suggestions = useMemo(
     () => (query.length >= 2 ? suggestNames(query, medicineIndex) : []),
     [query, medicineIndex],
@@ -837,11 +858,12 @@ function MedicineRow({
         >
           <input
             className="input"
-            list={`meds-${row.id ?? row.medicine_name}-${index}`}
+            list={listId}
             placeholder="e.g. Paracetamol 650mg"
             disabled={!canEdit}
-            value={joinMedicine(row.medicine_name, row.strength)}
+            value={nameText}
             onChange={(e) => {
+              setNameText(e.target.value);
               const parsed = splitMedicine(e.target.value);
               onChange(parsed);
               // Suggestions are matched on the name, so the dose must not be
@@ -849,7 +871,7 @@ function MedicineRow({
               setQuery(parsed.medicine_name);
             }}
           />
-          <datalist id={`meds-${row.id ?? row.medicine_name}-${index}`}>
+          <datalist id={listId}>
             {suggestions.map((name) => (
               <option key={name} value={name} />
             ))}
