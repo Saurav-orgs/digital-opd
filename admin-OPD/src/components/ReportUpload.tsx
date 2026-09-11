@@ -4,6 +4,7 @@ import { reportsApi } from '../api/endpoints';
 import { useToast } from './Toast';
 import { Field, Modal } from './ui';
 import { CameraCapture, cameraAvailable } from './CameraCapture';
+import { CameraIcon, UploadIcon } from './icons';
 
 /** What the report endpoint accepts — images plus PDF. */
 const ACCEPT = 'image/png,image/jpeg,image/webp,application/pdf';
@@ -72,23 +73,26 @@ export function ReportUpload({
         }}
       />
 
-      <div className="row" style={{ gap: 6 }}>
-        {cameraAvailable() && (
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={() => setCameraOpen(true)}
-          >
-            📷 Take Photo
-          </button>
-        )}
+      {/*
+        Two dashed tiles rather than two small buttons. Filing a report is the
+        second thing this screen is for, and on a tablet at a desk a 34px
+        button beside a card title is a poor target for it.
+      */}
+      <div className="add-reports-row">
         <button
           type="button"
-          className="btn btn-sm"
+          className="add-tile"
           onClick={() => fileRef.current?.click()}
         >
-          Choose File
+          <UploadIcon size={18} />
+          <span>Upload</span>
         </button>
+        {cameraAvailable() && (
+          <button type="button" className="add-tile" onClick={() => setCameraOpen(true)}>
+            <CameraIcon size={18} />
+            <span>Take Photo</span>
+          </button>
+        )}
       </div>
 
       {cameraOpen && (

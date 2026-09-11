@@ -10,6 +10,8 @@ import { Permission } from '../database/models/permission.model';
 import { Role } from '../database/models/role.model';
 import { RolePermission } from '../database/models/role-permission.model';
 import { User } from '../database/models/user.model';
+import { OpdSchedule } from '../database/models/opd-schedule.model';
+import { ScheduleException } from '../database/models/schedule-exception.model';
 import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
 import { RegisterDoctorDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
@@ -23,6 +25,7 @@ import {
   UserType,
   ActivityAction,
   ActivityActor,
+  ScheduleExceptionType,
 } from '../common/enums';
 
 // Modules the tenant Doctor role receives (all clinical modules).
@@ -47,6 +50,156 @@ const TENANT_PATHLAB_PERMS = [
   { module: PermissionModule.PATHLABS, action: PermissionAction.READ },
 ];
 
+
+/*
+ * Sign-up sends availability and leave as JSON strings, because the request is
+ * multipart/form-data and has nowhere to put a nested object. These parse and
+ * sanity-check them; anything malformed is rejected with the doctor's own
+ * wording rather than a validation dump, and anything absent is simply skipped
+ * — both fields are optional, and a doctor can set hours up later.
+ */
+/** One session on one weekday. A day may have several. */
+interface ParsedSession {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+}
+
+interface ParsedAvailability {
+  sessions: ParsedSession[];
+  slot_duration_min: number;
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+function badRequest(message: string): never {
+  throw new AppException(ErrorCode.BAD_REQUEST, { message });
+}
+
+/**
+ * Read the availability the sign-up form sent.
+ *
+ * Two shapes are accepted. The current one is per-day, because a doctor's week
+ * is not one window repeated — Monday may run 10:00–14:00 and 17:00–19:00
+ * while Saturday is a single morning:
+ *
+ *   { slot_duration_min, days: [{ day: 1, slots: [{ start_time, end_time }] }] }
+ *
+ * The older shape — one session fanned out across a set of weekdays — is still
+ * read so an older client keeps working:
+ *
+ *   { days: [1,2,3], start_time, end_time, slot_duration_min }
+ *
+ * Both collapse to the same list of sessions, which is exactly what
+ * `opd_schedules` stores: one row per session, several rows per weekday
+ * allowed by design.
+ */
+function parseAvailability(raw?: string): ParsedAvailability | null {
+  if (!raw?.trim()) return null;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    badRequest('Could not read the availability you chose. Please set it again.');
+  }
+
+  const duration = Number(parsed?.slot_duration_min);
+  if (!Number.isInteger(duration) || duration < 5 || duration > 120) {
+    badRequest('A slot must be between 5 and 120 minutes long.');
+  }
+
+  const sessions: ParsedSession[] = [];
+
+  const addSession = (day: number, start: unknown, end: unknown) => {
+    const s = String(start ?? '');
+    const e = String(end ?? '');
+    if (!HHMM.test(s) || !HHMM.test(e)) {
+      badRequest('Opening and closing times must be times of day.');
+    }
+    if (e <= s) badRequest('The closing time must be after the opening time.');
+    sessions.push({ day_of_week: day, start_time: s, end_time: e });
+  };
+
+  const rawDays = Array.isArray(parsed?.days) ? parsed.days : [];
+
+  // Per-day shape: entries are objects carrying their own slot list.
+  if (rawDays.some((d: any) => d && typeof d === 'object')) {
+    for (const entry of rawDays) {
+      const day = Number(entry?.day);
+      if (!Number.isInteger(day) || day < 0 || day > 6) {
+        badRequest('A working day must be a day of the week.');
+      }
+      const slots = Array.isArray(entry?.slots) ? entry.slots : [];
+      if (!slots.length) continue; // a day with no slots is simply a day off
+      for (const slot of slots) addSession(day, slot?.start_time, slot?.end_time);
+    }
+  } else {
+    // Legacy shape: one session repeated across the chosen weekdays.
+    const days: number[] = [...new Set<number>(rawDays.map(Number))].filter(
+      (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+    );
+    if (!days.length) return null;
+    for (const day of days) {
+      addSession(day, parsed.start_time, parsed.end_time);
+    }
+  }
+
+  if (!sessions.length) return null;
+
+  // Two sessions on one day that run through each other would produce
+  // overlapping slot grids, and the doctor cannot be in both.
+  const byDay = new Map<number, ParsedSession[]>();
+  for (const session of sessions) {
+    const list = byDay.get(session.day_of_week) ?? [];
+    list.push(session);
+    byDay.set(session.day_of_week, list);
+  }
+  for (const list of byDay.values()) {
+    const sorted = [...list].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].start_time < sorted[i - 1].end_time) {
+        badRequest('Two time slots on the same day overlap.');
+      }
+    }
+  }
+
+  return { sessions, slot_duration_min: duration };
+}
+
+function parseVacations(raw?: string): { from: string; to: string }[] {
+  if (!raw?.trim()) return [];
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    badRequest('Could not read the vacation dates. Please set them again.');
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((v: any) => {
+    const from = String(v?.from ?? '');
+    const to = String(v?.to ?? from);
+    if (!YMD.test(from) || !YMD.test(to)) {
+      badRequest('Vacation dates must be real dates.');
+    }
+    if (to < from) badRequest('A vacation cannot end before it starts.');
+    return { from, to };
+  });
+}
+
+/** Every date from `from` to `to`, inclusive. Capped so one typo in the year
+ *  cannot write thousands of leave rows. */
+function expandDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const last = new Date(`${to}T00:00:00Z`);
+  while (cursor <= last && out.length < 366) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
 @Injectable()
 export class DoctorsService {
   private readonly logger = new Logger(DoctorsService.name);
@@ -58,6 +211,10 @@ export class DoctorsService {
     private readonly rolePermissionModel: typeof RolePermission,
     @InjectModel(Permission) private readonly permissionModel: typeof Permission,
     @InjectModel(User) private readonly userModel: typeof User,
+    @InjectModel(OpdSchedule)
+    private readonly scheduleModel: typeof OpdSchedule,
+    @InjectModel(ScheduleException)
+    private readonly exceptionModel: typeof ScheduleException,
     private readonly sequelize: Sequelize,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
@@ -182,7 +339,8 @@ export class DoctorsService {
    */
   async registerSelf(
     dto: RegisterDoctorDto,
-    license: Express.Multer.File,
+    license?: Express.Multer.File,
+    photo?: Express.Multer.File,
   ): Promise<{ id: string; status: DoctorVerificationStatus }> {
     const existing = await this.userModel.findOne({
       where: { email: dto.email.toLowerCase() },
@@ -194,10 +352,26 @@ export class DoctorsService {
       });
     }
 
+    /*
+     * Parse the two JSON blobs before anything is written. They arrive as
+     * strings because the request is multipart; if either is malformed the
+     * doctor should hear about it before an account exists, not after.
+     */
+    const availability = parseAvailability(dto.availability);
+    const vacations = parseVacations(dto.vacations);
+
     // Upload before the transaction: an S3 failure should not leave a
     // half-written tenant behind, and an orphaned object is the cheaper leak.
-    this.storage.validateDocument(license);
-    const { key } = await this.storage.uploadDocument(license, 'doctor-licenses');
+    // Both files are optional — the certificate can follow later.
+    let key: string | null = null;
+    if (license) {
+      this.storage.validateDocument(license);
+      ({ key } = await this.storage.uploadDocument(license, 'doctor-licenses'));
+    }
+    let photoKey: string | null = null;
+    if (photo) {
+      ({ key: photoKey } = await this.storage.uploadImage(photo, 'doctor-photos'));
+    }
 
     const registered = await this.sequelize.transaction(async (t) => {
       const slug = await this.uniqueSlug(dto.name);
@@ -209,6 +383,9 @@ export class DoctorsService {
           contact_mobile: dto.contact_mobile,
           license_number: dto.license_number,
           license_file_key: key,
+          profile_photo_url: photoKey,
+          clinic_name: dto.clinic_name ?? null,
+          clinic_address: dto.clinic_address ?? null,
           public_slug: slug,
           terms_accepted_at: new Date(),
           terms_version: dto.terms_version ?? null,
@@ -257,6 +434,42 @@ export class DoctorsService {
         } as any,
         { transaction: t },
       );
+
+      /*
+       * Opening hours, written inside the same transaction as the account. The
+       * sign-up form now collects each day's own sessions, so a doctor with a
+       * morning and an evening clinic sets both here; every session becomes one
+       * `opd_schedules` row, and a weekday may own several of them.
+       */
+      if (availability && availability.sessions.length) {
+        await this.scheduleModel.bulkCreate(
+          availability.sessions.map((session) => ({
+            doctor_id: doctor.id,
+            day_of_week: session.day_of_week,
+            start_time: session.start_time,
+            end_time: session.end_time,
+            slot_duration_min: availability.slot_duration_min,
+            is_active: true,
+          })) as any,
+          { transaction: t },
+        );
+      }
+
+      // Leave is stored a date at a time, so a range is expanded here rather
+      // than kept as a span — that is the shape the slot grid already reads.
+      if (vacations.length) {
+        const dates = vacations.flatMap((v) => expandDates(v.from, v.to));
+        if (dates.length) {
+          await this.exceptionModel.bulkCreate(
+            dates.map((date) => ({
+              doctor_id: doctor.id,
+              date,
+              type: ScheduleExceptionType.LEAVE,
+            })) as any,
+            { transaction: t },
+          );
+        }
+      }
 
       return { id: doctor.id, status: DoctorVerificationStatus.APPROVED };
     });
@@ -727,6 +940,14 @@ export class DoctorsService {
       booking_url: cleanBase ? `${cleanBase}/d/${d.public_slug}` : `/d/${d.public_slug}`,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       qr_code_url: this.storage.publicUrl(d.qr_code_key),
+      /*
+       * Where the patient is actually going. These already print on the
+       * prescription letterhead, so they are the doctor's public-facing
+       * details by design — the phone is deliberately left out, since the
+       * booking flow is the intended way to reach the practice.
+       */
+      clinic_name: d.clinic_name,
+      clinic_address: d.clinic_address,
     };
   }
 }

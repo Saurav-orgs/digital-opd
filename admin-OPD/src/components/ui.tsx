@@ -44,7 +44,18 @@ export function Modal({
         className={`modal ${large ? 'modal-lg' : ''} ${footer ? 'modal-pinned' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>{title}</h3>
+        {/*
+          A real close control in the header. Clicking the backdrop has always
+          worked, but it is not something a dialog tells you about, and the
+          dialogs that dropped their Cancel button would otherwise look like
+          they had no way out.
+        */}
+        <div className="modal-head">
+          <h3>{title}</h3>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
         {footer ? (
           <>
             <div className="modal-body">{children}</div>
@@ -121,6 +132,7 @@ const STATUS_LABEL: Record<string, string> = {
   on_hold: 'On hold',
   done: 'Completed',
   rejected: 'Cancelled',
+  no_show: 'No-show',
 };
 
 /**

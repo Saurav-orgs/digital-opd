@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { extname } from 'path';
 import { InjectModel } from '@nestjs/sequelize';
 import { PatientReport } from '../database/models/patient-report.model';
 import { Appointment } from '../database/models/appointment.model';
@@ -310,11 +311,51 @@ export class ReportsService {
     );
   }
 
-  async remove(id: string): Promise<void> {
+  /**
+   * A report as the clinic is allowed to see it. Tenant-scoped: a doctor's
+   * login reaches only reports filed under that doctor — directly, or through
+   * the visit they were uploaded to, since a patient's own upload carries no
+   * doctor of its own. A report from another clinic reads as missing rather
+   * than forbidden.
+   */
+  private async ownReport(id: string, user: AuthUser): Promise<PatientReport> {
     const row = await this.reportModel.findByPk(id);
     if (!row) {
       throw new AppException(ErrorCode.NOT_FOUND, { message: 'Report not found.' });
     }
+    if (user.doctorId) {
+      let owner = row.doctor_id;
+      if (!owner && row.appointment_id) {
+        const appointment = await this.appointmentModel.findByPk(row.appointment_id);
+        owner = appointment?.doctor_id ?? null;
+      }
+      if (owner !== user.doctorId) {
+        throw new AppException(ErrorCode.NOT_FOUND, { message: 'Report not found.' });
+      }
+    }
+    return row;
+  }
+
+  /**
+   * The file itself, served through the API so the browser can print or save
+   * it. The presigned URL on the report is fine to open in a tab, but script
+   * cannot read it — the bucket is another origin with no CORS — so a
+   * `download` attribute is ignored and a print dialog cannot be driven.
+   */
+  async file(
+    id: string,
+    user: AuthUser,
+  ): Promise<{ buffer: Buffer; contentType: string; filename: string }> {
+    const row = await this.ownReport(id, user);
+    const { buffer, contentType } = await this.storage.downloadWithType(row.file_key);
+    const ext = extname(row.file_key) || '';
+    // The title is what the doctor named it; the extension is what the file is.
+    const stem = row.title.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 100) || 'report';
+    return { buffer, contentType, filename: `${stem}${ext}` };
+  }
+
+  async remove(id: string, user: AuthUser): Promise<void> {
+    const row = await this.ownReport(id, user);
     const appointmentId = row.appointment_id;
     await this.storage.delete(row.file_key);
     await row.destroy();

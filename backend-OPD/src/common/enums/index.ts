@@ -74,6 +74,14 @@ export enum ConsultationStatus {
   DONE = 'done',
   ON_HOLD = 'on_hold',
   REJECTED = 'rejected',
+  /**
+   * The patient never arrived. Distinct from `rejected`, which is the clinic
+   * calling the visit off — a no-show is the patient's doing, and the two need
+   * to be told apart when a number is being considered for blocking.
+   *
+   * The column is a plain string, so this needs no migration.
+   */
+  NO_SHOW = 'no_show',
 }
 
 /** Where a booking originated. `walk_in` is a doctor-created, in-clinic booking. */

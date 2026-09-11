@@ -4,252 +4,314 @@ import { appointmentsApi, patientProfilesApi } from '../api/endpoints';
 import type { PatientProfile } from '../api/types';
 import { useToast } from './Toast';
 import { Field, Modal } from './ui';
+import { initials } from '../lib/avatar';
 
-/** Today in the browser's own timezone — `toISOString` would shift the date. */
-function localToday(): string {
+/**
+ * How many people one number may register. Mirrors the server's own cap — the
+ * server is the one that enforces it; this only keeps the desk from filling in
+ * a form that was always going to be refused.
+ */
+const MAX_PATIENTS_PER_NUMBER = 5;
+
+type Step = 'phone' | 'patients' | 'newPatient' | 'reason';
+
+/** Age in whole years from a YYYY-MM-DD birth date, for display only. */
+function ageFromDob(dob: string): string {
+  if (!dob) return '';
+  const born = new Date(`${dob}T00:00:00`);
+  if (Number.isNaN(born.getTime())) return '';
   const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
+  let age = now.getFullYear() - born.getFullYear();
+  const monthDelta = now.getMonth() - born.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < born.getDate())) age--;
+  return age >= 0 && age <= 120 ? String(age) : '';
 }
 
-function localTimeNow(): string {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+function describe(p: PatientProfile): string {
+  const age = p.dob ? ageFromDob(p.dob) : p.last_age != null ? String(p.last_age) : '';
+  return [p.gender, age && `${age} yrs`].filter(Boolean).join(' · ');
 }
 
 /**
  * Doctor-created, in-clinic booking — and a full patient registration.
  *
+ * Four steps rather than one long form, because the desk is answering four
+ * questions in order and only the first one is always the same: whose number
+ * is this, which of the people on it is here, are they new, and what have they
+ * come in for.
+ *
+ * **No date and no time.** The patient is standing there, and the doctor sees
+ * walk-ins between bookings and after hours alike, so asking when the visit is
+ * only ever produced a form field that said "now". The server stamps its own
+ * clock and nudges to the next free minute if two people arrive together.
+ *
  * A walk-in creates the same account and patient rows a self-booking does, so
  * the patient can log in with this number afterwards and find the visit, its
- * reports and its prescription waiting. The number is entered first because
- * one number may already carry several family members, and the front desk must
- * say which one this is.
- *
- * No slot picker: the patient is already in the clinic and the doctor decides
- * when to see them, routinely outside the published grid. The form asks for the
- * date and time directly and defaults both to now, which is the answer almost
- * every time. The address is optional for the same reason — a queue at the desk
- * is not the moment to insist on a PIN code.
+ * reports and its prescription waiting.
  */
 export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
 
+  const [step, setStep] = useState<Step>('phone');
   const [mobile, setMobile] = useState('');
+  // The number actually looked up — not the box, which may have moved on.
+  const [lookedUp, setLookedUp] = useState('');
   // '' = a new patient. Never a name lookup: an identical name on the same
   // number is a different person unless the front desk picks their card.
   const [profileId, setProfileId] = useState('');
   const [name, setName] = useState('');
-  const [gender, setGender] = useState('');
-  const [age, setAge] = useState('');
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('');
-  const [stateName, setStateName] = useState('');
-  const [pincode, setPincode] = useState('');
+  const [gender, setGender] = useState('female');
+  const [dob, setDob] = useState('');
   const [description, setDescription] = useState('');
-  // Defaulted to now: a walk-in is happening as it is being typed.
-  const [date, setDate] = useState(localToday);
-  const [time, setTime] = useState(localTimeNow);
 
   const mobileValid = /^[6-9]\d{9}$/.test(mobile.trim());
 
   const patientsQ = useQuery({
-    queryKey: ['patients-by-mobile', mobile.trim()],
-    queryFn: () => patientProfilesApi.byMobile(mobile.trim()),
-    enabled: mobileValid,
+    queryKey: ['patients-by-mobile', lookedUp],
+    queryFn: () => patientProfilesApi.byMobile(lookedUp),
+    enabled: /^[6-9]\d{9}$/.test(lookedUp),
   });
   const patients = patientsQ.data ?? [];
-
-  // Picking an existing patient prefills their details; they stay editable,
-  // since people move and ages change between visits.
-  const applyPatient = (p: PatientProfile | null) => {
-    setName(p?.name ?? '');
-    setGender(p?.gender ?? '');
-    setAge(p?.last_age != null ? String(p.last_age) : '');
-    setAddress(p?.address_line ?? '');
-    setCity(p?.city ?? '');
-    setStateName(p?.state ?? '');
-    setPincode(p?.pincode ?? '');
-  };
+  const atLimit = patients.length >= MAX_PATIENTS_PER_NUMBER;
 
   // A different number means a different family; drop any stale selection.
   useEffect(() => {
     setProfileId('');
-    applyPatient(null);
-  }, [mobile]);
+  }, [lookedUp]);
 
-  const nameValid = name.trim().length >= 2;
-  const ageNum = Number(age);
-  const ageValid = age.trim() !== '' && Number.isInteger(ageNum) && ageNum >= 0 && ageNum <= 120;
-  // A PIN code that is given must still be real — a wrong one is worse than a
-  // blank one, because it silently reaches the patient's record.
-  const pincodeValid = !pincode.trim() || /^[1-9]\d{5}$/.test(pincode.trim());
-  const timeValid = /^([01]\d|2[0-3]):([0-5]\d)$/.test(time);
-  const canSubmit =
-    mobileValid && nameValid && !!gender && ageValid && pincodeValid && !!date && timeValid;
+  const selected = patients.find((p) => p.id === profileId) ?? null;
 
   const book = useMutation({
     mutationFn: () =>
       appointmentsApi.bookWalkIn({
         doctor_id: doctorId,
-        appointment_date: date,
-        start_time: time,
-        ...(profileId ? { patient_profile_id: profileId } : {}),
-        patient_name: name.trim(),
-        patient_mobile: mobile.trim(),
-        patient_gender: gender,
-        patient_age: ageNum,
-        patient_address: address.trim() || undefined,
-        patient_city: city.trim() || undefined,
-        patient_state: stateName.trim() || undefined,
-        patient_pincode: pincode.trim() || undefined,
+        ...(profileId
+          ? { patient_profile_id: profileId }
+          : { patient_dob: dob || undefined }),
+        patient_name: (selected?.name ?? name).trim(),
+        patient_mobile: lookedUp,
+        patient_gender: (selected?.gender ?? gender).toLowerCase(),
         description: description.trim() || undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (appointment) => {
       qc.invalidateQueries({ queryKey: ['appointments'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Walk-in booked');
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      toast.success(
+        `Walk-in booked for ${appointment.patient_name}`,
+        appointment.start_time ? `Today at ${appointment.start_time.slice(0, 5)}` : undefined,
+      );
       onClose();
     },
     onError: (e) => toast.error(e),
   });
 
+  const lookUp = () => {
+    if (!mobileValid) return;
+    setLookedUp(mobile.trim());
+    setStep('patients');
+  };
+
+  const newPatientValid = name.trim().length >= 2 && !!dob;
+
+  // The footer button is the whole navigation: one action per step, labelled
+  // for what it does there.
+  const cta = (() => {
+    switch (step) {
+      case 'phone':
+        return { label: 'Check number', disabled: !mobileValid, run: lookUp };
+      case 'patients':
+        return {
+          label: 'Continue',
+          disabled: !profileId,
+          run: () => setStep('reason'),
+        };
+      case 'newPatient':
+        return {
+          label: book.isPending ? 'Booking…' : 'Book appointment',
+          disabled: !newPatientValid || book.isPending,
+          run: () => book.mutate(),
+        };
+      default:
+        return {
+          label: book.isPending ? 'Booking…' : 'Book appointment',
+          disabled: book.isPending,
+          run: () => book.mutate(),
+        };
+    }
+  })();
+
   return (
-    <Modal title="Book a walk-in" onClose={onClose} large>
-      <div className="grid cols-2">
-        <Field label="Mobile number *">
-          <input
-            className="input"
-            value={mobile}
-            maxLength={10}
-            onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
-          />
-        </Field>
-        <Field label="Patient *">
-          <select
-            className="select"
-            value={profileId}
-            disabled={!mobileValid}
-            onChange={(e) => {
-              setProfileId(e.target.value);
-              applyPatient(patients.find((p) => p.id === e.target.value) ?? null);
-            }}
-          >
-            <option value="">
-              {patients.length ? '+ New patient on this number' : 'New patient'}
-            </option>
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · {p.patient_code}
-                {p.last_age != null ? ` · ${p.last_age} yrs` : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-
-      <div className="grid cols-2">
-        <Field label="Patient name *">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Gender *">
-          <select className="select" value={gender} onChange={(e) => setGender(e.target.value)}>
-            <option value="">Select</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-          </select>
-        </Field>
-        <Field label="Age *">
-          <input
-            className="input"
-            type="number"
-            min={0}
-            max={120}
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-          />
-        </Field>
-      </div>
-      <Field label="Address">
-        <input
-          className="input"
-          placeholder="Optional — can be added later"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-        />
-      </Field>
-      <div className="grid cols-2">
-        <Field label="City">
-          <input className="input" value={city} onChange={(e) => setCity(e.target.value)} />
-        </Field>
-        <Field label="State">
-          <input
-            className="input"
-            value={stateName}
-            onChange={(e) => setStateName(e.target.value)}
-          />
-        </Field>
-        <Field
-          label="PIN code"
-          error={pincodeValid ? undefined : 'Enter a valid 6-digit PIN code, or leave it blank.'}
-        >
-          <input
-            className="input"
-            inputMode="numeric"
-            maxLength={6}
-            value={pincode}
-            onChange={(e) => setPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          />
-        </Field>
-      </div>
-      <Field label="Reason for visit (optional)">
-        <textarea
-          className="input"
-          rows={2}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </Field>
-
-      {/* Date and time, not a slot. The doctor may see a walk-in between
-          bookings or after hours, and the grid has no opinion on either. */}
-      <div className="grid cols-2">
-        <Field label="Date *">
-          <input
-            className="input"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </Field>
-        <Field label="Time *">
-          <input
-            className="input"
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-          />
-          <span className="hint">Defaults to now; any time is allowed.</span>
-        </Field>
-      </div>
-
-      <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
-        This registers the patient — they can log in with this number afterwards
-        to see the visit, its reports and the prescription.
-      </p>
-
-      <div className="modal-actions">
-        <button className="btn" onClick={onClose}>Cancel</button>
+    <Modal
+      title="Walk-in appointment"
+      onClose={onClose}
+      footer={
         <button
-          className="btn btn-primary"
-          disabled={!canSubmit || book.isPending}
-          onClick={() => book.mutate()}
+          className="btn btn-primary walkin-cta"
+          disabled={cta.disabled}
+          onClick={cta.run}
         >
-          {book.isPending ? 'Booking…' : 'Book walk-in'}
+          {cta.label}
         </button>
-      </div>
+      }
+    >
+      {step === 'phone' && (
+        <>
+          <Field label="Mobile number">
+            <input
+              className="input"
+              inputMode="numeric"
+              autoFocus
+              placeholder="98xxxxxxxx"
+              value={mobile}
+              maxLength={10}
+              onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') lookUp();
+              }}
+            />
+          </Field>
+        </>
+      )}
+
+      {step === 'patients' && (
+        <>
+          <button className="wizard-back" onClick={() => setStep('phone')}>
+            ← Change number
+          </button>
+          <div className="wizard-summary">
+            <b>{lookedUp}</b>
+          </div>
+
+          {patientsQ.isLoading ? (
+            <p className="muted" style={{ fontSize: 13 }}>Looking up this number…</p>
+          ) : patients.length ? (
+            <>
+              <div className="wizard-label">
+                {patients.length} patient{patients.length === 1 ? '' : 's'} registered
+                on this number
+              </div>
+              <div className="member-list">
+                {patients.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`member-chip ${profileId === p.id ? 'selected' : ''}`}
+                    onClick={() => setProfileId(p.id)}
+                  >
+                    <span className="member-avatar" aria-hidden>
+                      {initials(p.name)}
+                    </span>
+                    <span className="member-text">
+                      <span className="member-name">{p.name}</span>
+                      <span className="member-rel">{describe(p) || p.patient_code}</span>
+                    </span>
+                    <span className="member-radio" aria-hidden />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>
+              No patients registered on this number yet.
+            </p>
+          )}
+
+          {atLimit ? (
+            <p className="field-err" style={{ marginTop: 12 }}>
+              This number already has {MAX_PATIENTS_PER_NUMBER} registered patients,
+              the maximum allowed.
+            </p>
+          ) : (
+            <button className="wizard-link" onClick={() => setStep('newPatient')}>
+              + Add a new patient
+            </button>
+          )}
+        </>
+      )}
+
+      {step === 'newPatient' && (
+        <>
+          <button className="wizard-back" onClick={() => setStep('patients')}>
+            ← Back
+          </button>
+          <div className="wizard-label">New patient details</div>
+
+          <Field label="Full name *">
+            <input
+              className="input"
+              autoFocus
+              placeholder="e.g. Priya Verma"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+
+          <Field label="Gender *">
+            <div className="gender-row">
+              {['female', 'male', 'other'].map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  className={`gender-opt ${gender === g ? 'selected' : ''}`}
+                  onClick={() => setGender(g)}
+                >
+                  {g === 'female' ? 'Female' : g === 'male' ? 'Male' : 'Other'}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {/* Date of birth, not age: an age typed at the desk is wrong within a
+              year, and this record outlives the visit. */}
+          <Field label="Date of birth *">
+            <input
+              className="input"
+              type="date"
+              max={new Date().toISOString().slice(0, 10)}
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+            />
+            {dob && ageFromDob(dob) && (
+              <span className="hint">{ageFromDob(dob)} years old</span>
+            )}
+          </Field>
+
+          <Field label="Reason for visit">
+            <input
+              className="input"
+              placeholder="e.g. Fever, follow-up, routine checkup"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+        </>
+      )}
+
+      {step === 'reason' && selected && (
+        <>
+          <button className="wizard-back" onClick={() => setStep('patients')}>
+            ← Back
+          </button>
+          <div className="wizard-summary">
+            <b>{selected.name}</b>
+            <br />
+            {[describe(selected), lookedUp].filter(Boolean).join(' · ')}
+          </div>
+
+          <Field label="Reason for visit">
+            <input
+              className="input"
+              autoFocus
+              placeholder="e.g. Fever, follow-up, routine checkup"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+        </>
+      )}
+
     </Modal>
   );
 }

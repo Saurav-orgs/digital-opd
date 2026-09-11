@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import { Field, PasswordInput } from '../components/ui';
+import { LogoFull, PoweredByIttitude } from '../components/Brand';
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -32,15 +33,10 @@ export default function Login() {
   return (
     <div className="auth-screen">
       <div className="card login-card">
-        <div className="login-logo">+</div>
-        <h1 style={{ fontSize: 20, marginBottom: 2 }}>Digital OPD</h1>
-        <div
-          className="muted"
-          style={{ fontSize: 10.5, fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase' }}
-        >
-          by Ittitude
-        </div>
-        <p className="muted" style={{ marginTop: 10, marginBottom: 24 }}>
+        {/* The login screen is the one place the full lockup is shown; every
+            other surface uses the mark on its own. */}
+        <LogoFull markSize={52} className="login-lockup" />
+        <p className="muted" style={{ marginTop: 18, marginBottom: 24 }}>
           Sign in to manage doctors, schedules and appointments.
         </p>
         <form onSubmit={onSubmit}>
@@ -87,6 +83,7 @@ export default function Login() {
             New here? <Link to="/register">Register your practice</Link>
           </div>
         </form>
+        <PoweredByIttitude className="auth-powered-by" />
       </div>
     </div>
   );

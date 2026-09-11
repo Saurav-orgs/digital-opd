@@ -111,7 +111,7 @@ export const Confirmation: React.FC = () => {
         </div>
 
         <div className="icon-center-row" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '28px' }}>
-          <ShieldCheck size={16} color="#10B981" />
+          <ShieldCheck size={16} color="var(--teal)" />
           <span>Your appointment is confirmed. Arrive a few minutes early on the day of your visit.</span>
         </div>
 

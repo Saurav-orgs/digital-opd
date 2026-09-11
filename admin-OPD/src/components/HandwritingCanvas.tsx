@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi } from '../api/endpoints';
-import { useToast } from './Toast';
-import { PrescriptionPreviewModal, PrintPrescriptionButton } from './PrescriptionPreview';
+import type { DraftFlushRef } from '../lib/draftFlush';
+import { PrintPrescriptionButton } from './PrescriptionPreview';
+
+/** How long the pad waits after the pen lifts before saving. */
+const AUTOSAVE_DELAY_MS = 2000;
 
 type Tool = 'pen' | 'eraser';
 
@@ -23,12 +26,13 @@ const INK = '#16324F';
 export function HandwritingCanvas({
   appointmentId,
   canEdit,
+  flushRef,
 }: {
   appointmentId: string;
   canEdit: boolean;
+  /** Lets the Preview step upload the strokes before it renders. */
+  flushRef?: DraftFlushRef;
 }) {
-  const qc = useQueryClient();
-  const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const drawing = useRef(false);
@@ -36,15 +40,39 @@ export function HandwritingCanvas({
   const undoStack = useRef<ImageData[]>([]);
 
   const [tool, setTool] = useState<Tool>('pen');
-  const [dirty, setDirty] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const qc = useQueryClient();
+
+  /*
+   * What is on the pad, kept outside the canvas element.
+   *
+   * The element itself is not stable: going fullscreen renders it in a
+   * different place in the tree, and React mounts a fresh, blank one there.
+   * Every stroke ends by copying the pixels here, and every mount starts by
+   * copying them back — so the drawing survives the toggle, and the saved
+   * page fetched from the server has somewhere to land before the canvas
+   * exists.
+   */
+  const snapshotRef = useRef<ImageData | null>(null);
+  // Strokes since the last upload. Only a pad that has changed is uploaded;
+  // pushing an untouched pad would replace the saved page with what happened
+  // to be on screen, which after a failed load is nothing.
+  const dirtyRef = useRef(false);
+  const loadedRef = useRef(false);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const uploadChainRef = useRef<Promise<void> | null>(null);
 
   const prescriptionQ = useQuery({
     queryKey: ['prescription', appointmentId],
     queryFn: () => consultationApi.prescription(appointmentId),
   });
   const issued = prescriptionQ.data?.status === 'issued';
+
+  const snapshot = () => {
+    const ctx = ctxRef.current;
+    if (ctx) snapshotRef.current = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -54,6 +82,7 @@ export function HandwritingCanvas({
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctxRef.current = ctx;
+    if (snapshotRef.current) ctx.putImageData(snapshotRef.current, 0, 0);
 
     // Prevent touch gestures/scrolling on mobile & tablet while interacting with the canvas
     const preventTouchScroll = (e: TouchEvent) => {
@@ -75,6 +104,46 @@ export function HandwritingCanvas({
     };
   }, [isFullscreen]);
 
+  /*
+   * Pick up where the doctor left off. The saved page comes through the API
+   * as a PNG and is drawn onto the pad once, underneath anything already
+   * written on it — a doctor who started writing before it arrived keeps
+   * their strokes on top.
+   */
+  const savedUrl = issued ? null : prescriptionQ.data?.handwriting_image_url;
+  useEffect(() => {
+    if (!savedUrl || loadedRef.current) return;
+    loadedRef.current = true;
+    let cancelled = false;
+    let done = false;
+    (async () => {
+      const blob = await consultationApi.handwritingImage(appointmentId);
+      if (!blob || cancelled) return;
+      const bitmap = await createImageBitmap(blob);
+      if (cancelled) return;
+      const ctx = ctxRef.current;
+      if (!ctx) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.drawImage(bitmap, 0, 0, CANVAS_W, CANVAS_H);
+      ctx.restore();
+      snapshot();
+      done = true;
+    })().catch(() => {
+      // Nothing to draw back; the pad stays as it is, and only new strokes
+      // will ever be uploaded over the saved page.
+      loadedRef.current = false;
+    });
+    return () => {
+      // A load that never landed (the effect re-ran, or the pad unmounted
+      // mid-fetch) has not happened; the next run is free to try again.
+      if (!done) {
+        cancelled = true;
+        loadedRef.current = false;
+      }
+    };
+  }, [savedUrl, appointmentId]);
+
   const pushUndo = () => {
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -87,6 +156,7 @@ export function HandwritingCanvas({
     if (!ctx || undoStack.current.length === 0) return;
     const prev = undoStack.current.pop()!;
     ctx.putImageData(prev, 0, 0);
+    changed();
   };
 
   const clear = () => {
@@ -94,7 +164,8 @@ export function HandwritingCanvas({
     if (!ctx) return;
     pushUndo();
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    setDirty(false);
+    // A cleared pad is a change like any other — the saved page goes too.
+    changed();
   };
 
   const toCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -118,7 +189,6 @@ export function HandwritingCanvas({
     pushUndo();
     drawing.current = true;
     last.current = toCanvasCoords(e);
-    setDirty(true);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -152,43 +222,105 @@ export function HandwritingCanvas({
     try {
       canvasRef.current?.releasePointerCapture(e.pointerId);
     } catch (_) {}
+    changed();
   };
 
   /** Push what is on the pad to the server — the step before issue or preview. */
   const uploadStrokes = async () => {
-    const canvas = canvasRef.current;
+    // The pad may already be gone — a save that was pending when the doctor
+    // switched tabs runs after unmount — so the snapshot stands in for it.
+    let canvas: HTMLCanvasElement | null = canvasRef.current;
+    if (!canvas && snapshotRef.current) {
+      canvas = document.createElement('canvas');
+      canvas.width = CANVAS_W;
+      canvas.height = CANVAS_H;
+      canvas.getContext('2d')?.putImageData(snapshotRef.current, 0, 0);
+    }
     if (!canvas) throw new Error('No canvas');
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Export failed'))), 'image/png'),
     );
     const file = new File([blob], 'handwriting.png', { type: 'image/png' });
-    await consultationApi.saveHandwriting(appointmentId, file);
+    const saved = await consultationApi.saveHandwriting(appointmentId, file);
+    // The page now has a handwriting URL; the Preview step's "anything to
+    // preview?" check reads it from here.
+    qc.setQueryData(['prescription', appointmentId], saved);
+    // What was just uploaded is what is on the server, so the next mount
+    // must not fetch and draw it a second time on top of itself.
+    loadedRef.current = true;
   };
 
-  const issue = useMutation({
-    mutationFn: async () => {
-      await uploadStrokes();
-      await consultationApi.issuePrescription(appointmentId);
-    },
-    onSuccess: () => {
-      setPreviewing(false);
-      qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
-      qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
-      toast.success('Prescription issued');
-      setIsFullscreen(false);
-    },
-    onError: (e) => toast.error(e),
-  });
+  /**
+   * One upload, queued behind any already running. Uploads are full
+   * replacements, so two in flight could land out of order; chaining keeps
+   * the last one the doctor's latest page.
+   */
+  const saveNow = (): Promise<void> => {
+    const run = async () => {
+      if (!canEdit || !dirtyRef.current) return;
+      dirtyRef.current = false;
+      setSaveState('saving');
+      try {
+        await uploadStrokes();
+        setSaveState('saved');
+      } catch (e) {
+        dirtyRef.current = true;
+        setSaveState('error');
+        throw e;
+      }
+    };
+    const prev = uploadChainRef.current ?? Promise.resolve();
+    const next = prev.then(run, run);
+    uploadChainRef.current = next;
+    return next;
+  };
+
+  const cancelPendingAutosave = () => {
+    if (autosaveTimerRef.current != null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+  };
 
   /*
-   * Handwriting is the mode where the finished page is hardest to picture: the
-   * pad shows bare strokes, and the PDF puts them on the letterhead, scaled to
-   * whatever room is left under the header. Worth a look before it goes out.
+   * A stroke has ended (or undo/clear ran). Remember the pixels, and save a
+   * moment after the pen stays up — a doctor writing a line lifts the pen
+   * between words, and uploading on every lift would be one request a word.
    */
-  const loadPreview = async () => {
-    await uploadStrokes();
-    return consultationApi.prescriptionPreview(appointmentId);
+  const changed = () => {
+    snapshot();
+    dirtyRef.current = true;
+    setSaveState('idle');
+    if (!canEdit) return;
+    cancelPendingAutosave();
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      saveNow().catch(() => undefined);
+    }, AUTOSAVE_DELAY_MS);
   };
+
+  // Leaving the tab with a save still pending: send it now rather than lose it.
+  useEffect(
+    () => () => {
+      if (autosaveTimerRef.current != null) {
+        cancelPendingAutosave();
+        saveNow().catch(() => undefined);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // Same reasoning as the editor: the Preview step is on the page now, so it
+  // needs a way to push the strokes up before it asks for the PDF. Only a pad
+  // that changed is pushed — see `dirtyRef`.
+  useEffect(() => {
+    if (flushRef)
+      flushRef.current = async () => {
+        cancelPendingAutosave();
+        await saveNow();
+      };
+  });
 
   if (issued && prescriptionQ.data) {
     const p = prescriptionQ.data;
@@ -282,39 +414,9 @@ export function HandwritingCanvas({
           </div>
           <div className="row" style={{ gap: 8 }}>
             <button className="btn btn-sm" onClick={() => setIsFullscreen(false)}>Exit Fullscreen</button>
-            {canEdit && (
-              <>
-                <button
-                  className="btn btn-sm"
-                  disabled={issue.isPending || !dirty}
-                  onClick={() => setPreviewing(true)}
-                  title="See it on your letterhead before it goes out"
-                >
-                  👁 Preview
-                </button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={issue.isPending || !dirty}
-                  onClick={() => issue.mutate()}
-                >
-                  {issue.isPending ? 'Issuing…' : 'Issue prescription'}
-                </button>
-              </>
-            )}
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>{canvasContent}</div>
-
-        {/* Fullscreen is its own return, so the dialog has to be mounted here
-            too — otherwise Preview does nothing from the whiteboard. */}
-        {previewing && (
-          <PrescriptionPreviewModal
-            load={loadPreview}
-            onClose={() => setPreviewing(false)}
-            onIssue={canEdit ? () => issue.mutate() : undefined}
-            issuing={issue.isPending}
-          />
-        )}
       </div>
     );
   }
@@ -332,9 +434,24 @@ export function HandwritingCanvas({
           <button className="btn btn-sm" onClick={undo} disabled={!canEdit}>Undo</button>
           <button className="btn btn-sm" onClick={clear} disabled={!canEdit}>Clear</button>
         </div>
-        <button className="btn btn-sm" onClick={() => setIsFullscreen(true)}>
-          ⛶ Fullscreen Whiteboard
-        </button>
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <span
+            className="muted"
+            style={{ fontSize: 12, color: saveState === 'error' ? 'var(--state-error)' : undefined }}
+            aria-live="polite"
+          >
+            {saveState === 'saving'
+              ? 'Saving…'
+              : saveState === 'saved'
+                ? 'Saved'
+                : saveState === 'error'
+                  ? "Couldn't save"
+                  : ''}
+          </span>
+          <button className="btn btn-sm" onClick={() => setIsFullscreen(true)}>
+            ⛶ Fullscreen Whiteboard
+          </button>
+        </div>
       </div>
 
       {canvasContent}
@@ -343,34 +460,13 @@ export function HandwritingCanvas({
         Write with a stylus or mouse. Click <strong>Fullscreen Whiteboard</strong> for a large distraction-free writing space.
       </p>
 
-      {canEdit && (
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-          <button
-            className="btn btn-sm"
-            disabled={issue.isPending || !dirty}
-            onClick={() => setPreviewing(true)}
-            title="See it on your letterhead before it goes out"
-          >
-            👁 Preview
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={issue.isPending || !dirty}
-            onClick={() => issue.mutate()}
-          >
-            {issue.isPending ? 'Issuing…' : 'Issue prescription'}
-          </button>
-        </div>
-      )}
-
-      {previewing && (
-        <PrescriptionPreviewModal
-          load={loadPreview}
-          onClose={() => setPreviewing(false)}
-          onIssue={canEdit ? () => issue.mutate() : undefined}
-          issuing={issue.isPending}
-        />
-      )}
+      {/*
+        Preview and Issue used to sit here and in the fullscreen bar. Both
+        belong to the page now — the consultation ends on its Preview step, and
+        issuing from inside the pad let a prescription reach a patient without
+        the doctor ever seeing the letterhead it renders on. The pad's strokes
+        still reach the server before that step, through `flushRef`.
+      */}
     </div>
   );
 }

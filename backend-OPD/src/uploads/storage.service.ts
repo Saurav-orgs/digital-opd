@@ -120,12 +120,27 @@ export class StorageService {
    * server-side (e.g. re-running an AI summary after the first attempt failed).
    */
   async download(key: string): Promise<Buffer> {
+    return (await this.downloadWithType(key)).buffer;
+  }
+
+  /**
+   * The bytes plus the MIME type they were stored with — for serving a file
+   * back through the API rather than by presigned URL. The presigned URL is
+   * fine to navigate to, but a browser cannot print or save it from script:
+   * the bucket is a different origin and sends no CORS headers.
+   */
+  async downloadWithType(
+    key: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
     try {
       const res = await this.s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       );
       const bytes = await res.Body!.transformToByteArray();
-      return Buffer.from(bytes);
+      return {
+        buffer: Buffer.from(bytes),
+        contentType: res.ContentType || 'application/octet-stream',
+      };
     } catch (err) {
       this.logger.error(`S3 download failed for ${key}`, err as Error);
       throw new AppException(ErrorCode.NOT_FOUND, {

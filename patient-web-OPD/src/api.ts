@@ -46,6 +46,8 @@ export const api = {
         consultationFee: d.consultation_fee != null ? String(d.consultation_fee) : null,
         profilePhotoUrl: d.profile_photo_url,
         publicSlug: d.public_slug || '',
+        clinicName: d.clinic_name ?? null,
+        clinicAddress: d.clinic_address ?? null,
       }));
     } catch (err) {
       handleAxiosError(err);
@@ -65,6 +67,8 @@ export const api = {
         consultationFee: d.consultation_fee != null ? String(d.consultation_fee) : null,
         profilePhotoUrl: d.profile_photo_url,
         publicSlug: d.public_slug || '',
+        clinicName: d.clinic_name ?? null,
+        clinicAddress: d.clinic_address ?? null,
       };
     } catch (err) {
       handleAxiosError(err);

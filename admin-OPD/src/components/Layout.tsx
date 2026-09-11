@@ -1,14 +1,56 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { NAV } from '../lib/nav';
+import { NAV, type NavIconName } from '../lib/nav';
+import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
+import { useCollapsible } from '../lib/collapsePreference';
+import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
+import {
+  AccountIcon,
+  BlockIcon,
+  CalendarIcon,
+  ChevronIcon,
+  DocumentIcon,
+  FlaskIcon,
+  GearIcon,
+  HospitalIcon,
+  PeopleIcon,
+  ShieldIcon,
+  UserCogIcon,
+} from './icons';
 
+const NAV_ICON: Record<NavIconName, (props: { size?: string | number }) => JSX.Element> = {
+  calendar: CalendarIcon,
+  people: PeopleIcon,
+  block: BlockIcon,
+  users: UserCogIcon,
+  roles: ShieldIcon,
+  hospital: HospitalIcon,
+  settings: GearIcon,
+  flask: FlaskIcon,
+  document: DocumentIcon,
+};
+
+/**
+ * The app shell.
+ *
+ * Two shapes, per the design's own breakpoint. Below 700px the sidebar is an
+ * off-canvas drawer over a top bar; at and above it the drawer becomes a
+ * permanent 72px rail of icons that expands to 240px on request.
+ *
+ * The rail is the default rather than the expanded menu because the doctor
+ * knows these seven destinations by their second day, and the 168px it gives
+ * back is a column of the appointment table. The choice is remembered — a
+ * doctor who expands the menu is saying they want the labels, and re-collapsing
+ * it on every page load would be answering them back.
+ */
 export default function Layout() {
-  const { user, logout, can, isDoctor, isSuperAdmin } = useAuth();
+  const { logout, can, isDoctor, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapsible('sidebar', true);
+  const railMode = useMediaQuery(RAIL);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
@@ -21,103 +63,88 @@ export default function Layout() {
       (!n.doctorOnly || !isSuperAdmin),
   );
 
-  const getFormattedRole = (type?: string) => {
-    if (!type) return '';
-    switch (type) {
-      case 'super_admin':
-        return 'Super Admin';
-      case 'admin':
-        return 'Admin';
-      case 'doctor':
-        return 'Doctor';
-      default:
-        return type.replace(/_/g, ' ');
-    }
-  };
-
-  const getRoleIcon = (type?: string) => {
-    switch (type) {
-      case 'super_admin':
-        return '';
-      case 'doctor':
-        return '';
-      default:
-        return '';
-    }
-  };
-
-  const renderUserInfo = () => {
-    if (!user) return null;
-    const roleLabel = getFormattedRole(user.type);
-    const nameLabel = user.name?.trim() || '';
-    const icon = getRoleIcon(user.type);
-
-    const isDuplicate =
-      !nameLabel ||
-      nameLabel.toLowerCase().replace(/[\s_]/g, '') ===
-      roleLabel.toLowerCase().replace(/[\s_]/g, '');
-
-    return (
-      <div className="user-profile-badge">
-        <span className="user-icon" aria-hidden>{icon}</span>
-        {isDuplicate ? (
-          <span className="user-role-title">{roleLabel}</span>
-        ) : (
-          <span className="user-role-title">
-            <span className="user-name">{nameLabel}</span>
-            <span className="user-sep">·</span>
-            <span className="user-role">{roleLabel}</span>
-          </span>
-        )}
-      </div>
-    );
-  };
+  // On a phone the drawer is either open or off-canvas; "collapsed" is a
+  // rail-only idea and would otherwise hide the labels inside the drawer.
+  const expanded = railMode ? !collapsed : true;
 
   return (
     <div className="app-shell">
       {drawerOpen && (
         <div className="sidebar-overlay" onClick={() => setDrawerOpen(false)} />
       )}
-      <aside className={`sidebar ${drawerOpen ? 'open' : ''}`}>
-        <div className="brand">
-          <span className="brand-mark">+</span>
-          <span className="brand-lockup">
-            <span className="brand-name">Digital OPD</span>
-            <span className="brand-by">by Ittitude</span>
-          </span>
-        </div>
-        {items.map((n) => (
-          <NavLink
-            key={n.path}
-            to={n.path}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+      <aside
+        className={`sidebar ${drawerOpen ? 'open' : ''} ${expanded ? 'expanded' : ''}`}
+      >
+        {railMode && (
+          <button
+            className="sidebar-toggle"
+            onClick={toggleCollapsed}
+            aria-label={expanded ? 'Collapse menu' : 'Expand menu'}
+            title={expanded ? 'Collapse menu' : 'Expand menu'}
           >
-            <span aria-hidden>{n.icon}</span>
-            {n.label}
-          </NavLink>
-        ))}
-        {isDoctor && (
-          <NavLink
-            to="/profile"
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span aria-hidden>🧑‍⚕️</span>
-            My profile
-          </NavLink>
+            <ChevronIcon direction={expanded ? 'left' : 'right'} size={15} />
+          </button>
         )}
+
+        <div className="sidebar-logo">
+          {expanded ? (
+            <LogoFull markSize={34} />
+          ) : (
+            <LogoMark size={36} />
+          )}
+        </div>
+
+        <nav className="sidebar-items">
+          {items.map((n) => {
+            const Icon = NAV_ICON[n.icon];
+            return (
+              <NavLink
+                key={n.path}
+                to={n.path}
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                title={expanded ? undefined : n.label}
+              >
+                <Icon size={19} />
+                <span className="nav-label">{n.label}</span>
+              </NavLink>
+            );
+          })}
+          {isDoctor && (
+            <NavLink
+              to="/profile"
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              title={expanded ? undefined : 'My profile'}
+            >
+              <AccountIcon size={19} />
+              <span className="nav-label">My profile</span>
+            </NavLink>
+          )}
+        </nav>
+
         <div className="spacer" />
         <button
           className="btn btn-logout"
+          title={expanded ? undefined : 'Sign out'}
           onClick={() => {
             logout();
             navigate('/login');
           }}
         >
-          Sign out
+          <span className="nav-label">Sign out</span>
+          <span className="logout-short" aria-hidden>
+            ⏻
+          </span>
         </button>
+        <PoweredByIttitude className="sidebar-powered-by" />
       </aside>
 
       <div className="main">
+        {/*
+          The phone top bar is the hamburger and nothing else, as the design
+          has it. The wordmark used to sit on the right; it is on the drawer
+          the button opens, and repeating it here only ate the width the
+          screen underneath actually needs.
+        */}
         <header className="topbar">
           <button
             className="hamburger"
@@ -126,9 +153,6 @@ export default function Layout() {
           >
             ☰
           </button>
-          <div className="who">
-            {renderUserInfo()}
-          </div>
         </header>
         <main className="content">
           <Outlet />

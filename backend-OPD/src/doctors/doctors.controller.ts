@@ -10,9 +10,10 @@ import {
   Res,
   StreamableFile,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import {
@@ -174,21 +175,37 @@ export class DoctorsController {
   })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
-    FileInterceptor('license', {
-      storage: memoryStorage(),
-      limits: { fileSize: 6 * 1024 * 1024 },
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'license', maxCount: 1 },
+        { name: 'photo', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: 6 * 1024 * 1024 },
+      },
+    ),
   )
   async register(
     @Body() dto: RegisterDoctorDto,
-    @UploadedFile() license: Express.Multer.File,
+    /*
+     * Both files are optional now. The certificate used to be required here,
+     * but licence review already happens after the account is live, so
+     * refusing the sign-up over a missing scan cost the doctor an account
+     * without buying any safety. The redesigned form says "you can add this
+     * later" and the super admin's pending panel is where it lands.
+     */
+    @UploadedFiles()
+    files: {
+      license?: Express.Multer.File[];
+      photo?: Express.Multer.File[];
+    },
   ) {
-    if (!license) {
-      throw new AppException(ErrorCode.FILE_REQUIRED, {
-        message: 'Please attach your practice licence or registration certificate.',
-      });
-    }
-    await this.doctorsService.registerSelf(dto, license);
+    await this.doctorsService.registerSelf(
+      dto,
+      files?.license?.[0],
+      files?.photo?.[0],
+    );
     // Deliberately thin: the caller is an unauthenticated form, so it gets a
     // confirmation and nothing about the tenant it just created.
     return {

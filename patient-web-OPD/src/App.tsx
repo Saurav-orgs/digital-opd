@@ -15,6 +15,7 @@ import { Patients } from './pages/patient/Patients';
 import { Notifications } from './pages/patient/Notifications';
 import { Footer } from './components/Footer';
 import { AccountNav } from './components/AccountNav';
+import { LogoMark } from './components/Brand';
 import type { ReactNode } from 'react';
 import { usePatientAuth } from './auth/PatientAuthContext';
 
@@ -36,10 +37,14 @@ export default function App() {
             <header className="web-navbar">
               <div className="web-navbar-inner">
                 <Link to="/" className="web-brand">
-                  <span className="brand-icon">+</span>
+                  <LogoMark size={34} />
                   <span className="brand-lockup">
-                    <span className="brand-name">Digital OPD</span>
-                    <span className="brand-by">by Ittitude</span>
+                    <span className="brand-name">
+                      <span className="brand-my">my</span>
+                      <span className="brand-digital">Digital</span>
+                      <span className="brand-opd">OPD</span>
+                    </span>
+                    <span className="brand-by">digitally connected</span>
                   </span>
                 </Link>
 

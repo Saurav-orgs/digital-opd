@@ -4,6 +4,7 @@ import { reportsApi } from '../api/endpoints';
 import { useToast } from '../components/Toast';
 import { useCollapsible } from '../lib/collapsePreference';
 import { CollapseToggle } from './CollapseToggle';
+import { SparkleIcon } from './icons';
 import type {
   AiJobStatus,
   ProgressStatus,
@@ -43,7 +44,7 @@ export function ProgressSummaryCard({
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
-  const [collapsed, toggleCollapsed] = useCollapsible('progress-summary');
+  const [collapsed, toggleCollapsed] = useCollapsible('progress-summary-v2');
 
   const retry = useMutation({
     mutationFn: () => reportsApi.retryProgress(appointmentId),
@@ -58,14 +59,7 @@ export function ProgressSummaryCard({
   if (!status) return null;
 
   return (
-    <div
-      style={{
-        padding: '12px 14px',
-        borderRadius: 10,
-        background: 'var(--primary-tint, #eef4ff)',
-        border: '1px solid var(--primary, #cddffb)',
-      }}
-    >
+    <div className="ai-box">
       {/*
         The verdict stays on the header, so folding the card away costs the
         doctor the detail but never the answer — a collapsed card still says
@@ -80,7 +74,10 @@ export function ProgressSummaryCard({
           onToggle={toggleCollapsed}
           label="the comparison with the last visit"
         >
-          <strong style={{ fontSize: 13 }}>Since the last visit</strong>
+          <span className="ai-box-title">
+            <SparkleIcon size={16} />
+            Since the last visit
+          </span>
           {status === 'ready' && summary && (
             <span
               style={{

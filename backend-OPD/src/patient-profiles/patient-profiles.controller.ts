@@ -17,6 +17,7 @@ import {
   UpdatePatientProfileDto,
 } from './dto/patient-profile.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
 import { PatientAuthGuard } from '../patient-auth/patient-auth.guard';
@@ -48,6 +49,19 @@ export class StaffPatientProfilesController {
     if (!/^[6-9]\d{9}$/.test(mobile ?? '')) return [];
     const account = await this.service.findAccount(mobile);
     return account ? this.service.listForAccount(account.id) : [];
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Every patient this clinic has seen' })
+  @Permissions({
+    module: PermissionModule.APPOINTMENTS,
+    action: PermissionAction.READ,
+  })
+  async list(@CurrentUser() user: AuthUser, @Query('search') search?: string) {
+    // A clinic's patient list is its own. An account with no doctor behind it
+    // — the platform super admin — has no such list rather than everyone's.
+    if (!user.doctorId) return [];
+    return this.service.listForDoctor(user.doctorId, search);
   }
 }
 

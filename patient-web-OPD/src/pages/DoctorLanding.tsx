@@ -1,14 +1,48 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { format, addDays } from 'date-fns';
-import { Info, Stethoscope } from 'lucide-react';
+import { format, addDays, isToday } from 'date-fns';
+import { Info, Clock, MapPin } from 'lucide-react';
 import { api } from '../api';
 import { AppConfig } from '../config';
-import type { Slot } from '../types';
-import { NetworkAvatar } from '../components/NetworkAvatar';
+import type { Slot, DaySlots } from '../types';
 import { StateView } from '../components/StateView';
+import { BookingSteps } from '../components/BookingSteps';
 import { useDoctorCtx } from '../context/DoctorContext';
+
+/** "Priya Verma" → "PV". Falls back to one letter, then to a dash. */
+function initials(name: string | null | undefined) {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '—';
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+/** "09:00" → "9:00 AM". Left alone if it is not an HH:mm string. */
+function pretty(time: string | undefined) {
+  if (!time) return '';
+  const [h, m] = time.split(':').map(Number);
+  if (Number.isNaN(h)) return time;
+  const suffix = h < 12 ? 'AM' : 'PM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m ?? 0).padStart(2, '0')} ${suffix}`;
+}
+
+/**
+ * "9:00 AM – 1:00 PM · 15 min each" — the shape of the day, read off the grid
+ * rather than the schedule, so a doctor with split sessions still gets an
+ * honest first and last time.
+ */
+function sessionSummary(day: DaySlots | undefined) {
+  const slots = day?.slots ?? [];
+  if (!slots.length) return '';
+  const first = slots[0];
+  const last = slots[slots.length - 1];
+  const span = `${pretty(first.startTime)} – ${pretty(last.endTime)}`;
+  const [sh, sm] = first.startTime.split(':').map(Number);
+  const [eh, em] = first.endTime.split(':').map(Number);
+  const mins = (eh - sh) * 60 + (em - sm);
+  return mins > 0 ? `${span} · ${mins} min each` : span;
+}
 
 export const DoctorLanding: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -40,6 +74,14 @@ export const DoctorLanding: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Date>(dates[0]);
   const formattedSelectedDate = format(selectedDate, 'yyyy-MM-dd');
 
+  /*
+   * The mockup confirms the slot with a Continue button instead of navigating
+   * on the tap. That gives the patient a chance to change their mind on a
+   * small screen, where a mis-tap used to take them straight into the form.
+   */
+  const [picked, setPicked] = useState<Slot | null>(null);
+  useEffect(() => setPicked(null), [formattedSelectedDate]);
+
   const { data: daySlots, isLoading: isSlotsLoading, error: slotsError } = useQuery({
     queryKey: ['slots', doctor?.id, formattedSelectedDate],
     queryFn: () => api.getSlots(doctor!.id, formattedSelectedDate),
@@ -67,117 +109,138 @@ export const DoctorLanding: React.FC = () => {
     }
   };
 
+  const meta = [doctor.qualifications, doctor.specialization].filter(Boolean).join(' · ');
+  const clinic = [doctor.clinicName, doctor.clinicAddress].filter(Boolean).join(', ');
+
   return (
-    <div className="doctor-landing-wrap">
-      {/* ── Gradient hero ── */}
-      <div className="doctor-hero-gradient">
-        <div className="doctor-hero-tag">
-          <Stethoscope size={13} />
-          <span>OPD Appointment</span>
-        </div>
-
-        <div className="doctor-hero-info">
-          <div className="doctor-hero-text">
-            <div className="doctor-hero-name">{doctor.name}</div>
-            {doctor.specialization && (
-              <div className="doctor-hero-spec">{doctor.specialization}</div>
-            )}
-            {doctor.qualifications && (
-              <div className="doctor-hero-qual">{doctor.qualifications}</div>
-            )}
-            {doctor.bio && (
-              <div className="doctor-hero-bio">{doctor.bio}</div>
-            )}
+    <div className="booking-screen">
+      {/* ── Doctor hero ── */}
+      <header className="doc-hero">
+        <div className="doc-hero-top">
+          {doctor.profilePhotoUrl ? (
+            <img className="doc-avatar" src={doctor.profilePhotoUrl} alt="" />
+          ) : (
+            <span className="doc-avatar" aria-hidden>{initials(doctor.name)}</span>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <h1 className="doc-name">{doctor.name}</h1>
+            {meta && <div className="doc-meta">{meta}</div>}
           </div>
-          <NetworkAvatar url={doctor.profilePhotoUrl} size={96} alt={doctor.name} />
         </div>
-      </div>
+        {clinic && (
+          <div className="clinic-line">
+            <MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{clinic}</span>
+          </div>
+        )}
+      </header>
 
-      {/* ── Body ── */}
-      <div className="doctor-landing-body">
-        {/* Date strip */}
-        <span className="landing-section-label">Pick a date</span>
-        <div className="date-strip" style={{ marginBottom: 24 }}>
+      <BookingSteps current={1} />
+
+      <div className="screen">
+        <h2 className="section-title">Choose a date</h2>
+        <div className="date-scroll">
           {dates.map((d) => {
             const isSelected = format(d, 'yyyy-MM-dd') === formattedSelectedDate;
             return (
-              <div
+              <button
+                type="button"
                 key={d.toISOString()}
-                className={'date-chip' + (isSelected ? ' selected' : '')}
+                className={'date-pill' + (isSelected ? ' selected' : '')}
                 onClick={() => setSelectedDate(d)}
+                aria-pressed={isSelected}
               >
-                <span className="day-name">{format(d, 'EEE')}</span>
-                <span className="day-num">{format(d, 'd')}</span>
-                <span className="month-name">{format(d, 'MMM')}</span>
-              </div>
+                <span className="dow">{isToday(d) ? 'Today' : format(d, 'EEE')}</span>
+                <span className="dnum">{format(d, 'd')}</span>
+              </button>
             );
           })}
         </div>
 
-        {/* Slots */}
-        <div className="landing-slots-header">
-          <span className="landing-section-label" style={{ marginBottom: 0 }}>
-            Available slots
-          </span>
-          <div className="landing-legend">
-            <LegendDot color="var(--primary)" label="Open" />
-            <LegendDot color="#D3D1C7" label="Booked" />
-            <LegendDot color="#9AA1AB" label="Past" />
+        <section className="box teal-accent">
+          <div className="box-head">
+            <div style={{ minWidth: 0 }}>
+              <h3 className="box-title">Available slots</h3>
+              <div className="box-sub">
+                {sessionSummary(daySlots) || format(selectedDate, 'EEEE, d MMMM')}
+              </div>
+            </div>
+            <span className="box-icon" aria-hidden><Clock size={16} /></span>
           </div>
-        </div>
 
-        {isSlotsLoading ? (
-          <div style={{ padding: '24px 0' }}><StateView loading /></div>
-        ) : slotsError ? (
-          <NoticeCard message={slotsError instanceof Error ? slotsError.message : 'Could not load slots.'} />
-        ) : !daySlots?.available ? (
-          <NoticeCard message={getUnavailableLabel(daySlots?.reason)} />
-        ) : daySlots.slots.length === 0 ? (
-          <NoticeCard message="No slots available for this day." />
-        ) : (
-          <div className="slots-wrap" style={{ marginTop: 12 }}>
-            {daySlots.slots.map((slot, idx) => (
-              <SlotChip
-                key={`${slot.startTime}-${idx}`}
-                slot={slot}
-                onSelect={() =>
-                  navigate('/book', { state: { doctor, date: formattedSelectedDate, slot } })
-                }
-              />
-            ))}
+          {isSlotsLoading ? (
+            <div style={{ padding: '24px 0' }}><StateView loading /></div>
+          ) : slotsError ? (
+            <Notice message={slotsError instanceof Error ? slotsError.message : 'Could not load slots.'} />
+          ) : !daySlots?.available ? (
+            <Notice message={getUnavailableLabel(daySlots?.reason)} />
+          ) : daySlots.slots.length === 0 ? (
+            <Notice message="No slots available for this day." />
+          ) : (
+            <div className="slot-grid">
+              {daySlots.slots.map((slot, idx) => (
+                <SlotChip
+                  key={`${slot.startTime}-${idx}`}
+                  slot={slot}
+                  selected={picked?.startTime === slot.startTime}
+                  onSelect={() => setPicked(slot)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ── Confirm bar ── */}
+      <div className="bottom-bar">
+        <div className="bottom-inner">
+          <div className="bottom-summary">
+            <div className="bs-label">Step 1 of 3</div>
+            <div className="bs-value">
+              {picked ? `${pretty(picked.startTime)} · ${format(selectedDate, 'EEE, d MMM')}` : 'Select a time slot'}
+            </div>
           </div>
-        )}
+          <button
+            className="btn-primary-lg"
+            disabled={!picked}
+            onClick={() =>
+              navigate('/book', {
+                state: { doctor, date: formattedSelectedDate, slot: picked },
+              })
+            }
+          >
+            Continue
+          </button>
+        </div>
       </div>
     </div>
   );
 };
 
-const SlotChip: React.FC<{ slot: Slot; onSelect: () => void }> = ({ slot, onSelect }) => {
-  let className = 'slot-chip ';
-  if (slot.status === 'booked') className += 'booked';
-  else if (slot.status === 'past') className += 'past';
-  else className += 'available';
-
+const SlotChip: React.FC<{
+  slot: Slot;
+  selected: boolean;
+  onSelect: () => void;
+}> = ({ slot, selected, onSelect }) => {
+  // "taken" covers booked and past alike: both mean "you cannot have this one",
+  // and the mockup draws them the same way — struck through and greyed.
+  const taken = !slot.selectable;
   return (
-    <div className={className} onClick={() => { if (slot.selectable) onSelect(); }}>
-      {slot.startTime}
-    </div>
+    <button
+      type="button"
+      className={`slot${taken ? ' taken' : ''}${selected ? ' selected' : ''}`}
+      disabled={taken}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
+      {pretty(slot.startTime)}
+    </button>
   );
 };
 
-const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label }) => (
-  <div className="landing-legend-item">
-    <div className="landing-legend-dot" style={{ background: color }} />
-    <span>{label}</span>
-  </div>
-);
-
-const NoticeCard: React.FC<{ message: string }> = ({ message }) => (
-  <div style={{
-    display: 'flex', alignItems: 'center', gap: 10,
-    color: 'var(--text-secondary)', padding: '14px 0',
-  }}>
+const Notice: React.FC<{ message: string }> = ({ message }) => (
+  <div className="slot-notice">
     <Info size={17} />
-    <span style={{ fontSize: 14 }}>{message}</span>
+    <span>{message}</span>
   </div>
 );

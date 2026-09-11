@@ -7,15 +7,23 @@ import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
+import {
+  DayAvailabilityEditor,
+  workingDays,
+  type DayTimings,
+} from '../components/DayAvailabilityEditor';
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const hhmm = (t: string) => t.slice(0, 5);
-
-interface Session { start_time: string; end_time: string; slot_duration_min: number }
 
 /**
  * The doctor's own OPD schedule, reached from My Profile. Self-scoped to the
  * logged-in doctor's linked profile — the clinic has a single doctor.
+ *
+ * Shares the registration form's per-day editor, at the client's request, so
+ * setting hours works the same whether it is done at sign-up or changed a year
+ * later. The one thing this screen adds is that a day already saved on the
+ * server arrives saved — nothing is "unset" here that the clinic is already
+ * open for.
  */
 export default function DoctorSchedule() {
   const navigate = useNavigate();
@@ -30,28 +38,38 @@ export default function DoctorSchedule() {
     enabled: !!id,
   });
 
-  // Local editable model: sessions grouped by weekday.
-  const [byDay, setByDay] = useState<Record<number, Session[]>>({});
+  const [timings, setTimings] = useState<DayTimings>({});
+  // One duration for the whole week, which is what the sign-up form collects.
+  // An existing schedule may hold several; the first one wins and the rest are
+  // brought into line on the next save rather than silently kept apart.
+  const [slotMins, setSlotMins] = useState(15);
 
   useEffect(() => {
     if (!schedQ.data) return;
-    const grouped: Record<number, Session[]> = {};
+    const next: DayTimings = {};
     for (const e of schedQ.data) {
-      (grouped[e.day_of_week] ??= []).push({
-        start_time: hhmm(e.start_time),
-        end_time: hhmm(e.end_time),
-        slot_duration_min: e.slot_duration_min,
-      });
+      const day = next[e.day_of_week] ?? { slots: [], saved: true };
+      day.slots.push({ start_time: hhmm(e.start_time), end_time: hhmm(e.end_time) });
+      next[e.day_of_week] = day;
     }
-    setByDay(grouped);
+    for (const day of Object.values(next)) {
+      day.slots.sort((x, y) => x.start_time.localeCompare(y.start_time));
+    }
+    setTimings(next);
+    if (schedQ.data[0]) setSlotMins(schedQ.data[0].slot_duration_min);
   }, [schedQ.data]);
 
   const save = useMutation({
     mutationFn: () => {
       const entries: ScheduleEntry[] = [];
-      for (const [day, sessions] of Object.entries(byDay)) {
-        for (const s of sessions) {
-          entries.push({ day_of_week: Number(day), ...s });
+      for (const day of workingDays(timings)) {
+        for (const slot of timings[day].slots) {
+          entries.push({
+            day_of_week: day,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+            slot_duration_min: slotMins,
+          });
         }
       }
       return schedulesApi.replace(id, entries);
@@ -63,20 +81,6 @@ export default function DoctorSchedule() {
   if (!isDoctor || !id) return <Empty>This page is for the doctor’s account.</Empty>;
   if (schedQ.isLoading) return <Loading />;
 
-  const addSession = (day: number) =>
-    setByDay((prev) => ({
-      ...prev,
-      [day]: [...(prev[day] ?? []), { start_time: '11:00', end_time: '14:00', slot_duration_min: 10 }],
-    }));
-
-  const removeSession = (day: number, idx: number) =>
-    setByDay((prev) => ({ ...prev, [day]: prev[day].filter((_, i) => i !== idx) }));
-
-  const patchSession = (day: number, idx: number, patch: Partial<Session>) =>
-    setByDay((prev) => ({
-      ...prev,
-      [day]: prev[day].map((s, i) => (i === idx ? { ...s, ...patch } : s)),
-    }));
 
   return (
     <>
@@ -100,51 +104,34 @@ export default function DoctorSchedule() {
       <div className="grid cols-2-1">
         <div className="card">
           <div className="card-title">Weekly hours</div>
-          {DAYS.map((label, day) => (
-            <div key={day} style={{ padding: '10px 0', borderBottom: 'var(--hairline)' }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <strong style={{ fontWeight: 500 }}>{label}</strong>
-                {canEdit && (
-                  <button className="btn btn-sm btn-ghost" onClick={() => addSession(day)}>
-                    + Add session
-                  </button>
-                )}
-              </div>
-              {(byDay[day] ?? []).length === 0 ? (
-                <span className="muted" style={{ fontSize: 13 }}>No OPD</span>
-              ) : (
-                (byDay[day] ?? []).map((s, idx) => (
-                  <div key={idx} className="row" style={{ marginTop: 8 }}>
-                    <input
-                      className="input" type="time" style={{ width: 120 }} disabled={!canEdit}
-                      value={s.start_time}
-                      onChange={(e) => patchSession(day, idx, { start_time: e.target.value })}
-                    />
-                    <span className="muted">to</span>
-                    <input
-                      className="input" type="time" style={{ width: 120 }} disabled={!canEdit}
-                      value={s.end_time}
-                      onChange={(e) => patchSession(day, idx, { end_time: e.target.value })}
-                    />
-                    <select
-                      className="select" style={{ width: 110 }} disabled={!canEdit}
-                      value={s.slot_duration_min}
-                      onChange={(e) => patchSession(day, idx, { slot_duration_min: Number(e.target.value) })}
-                    >
-                      {[5, 10, 15, 20, 30].map((m) => (
-                        <option key={m} value={m}>{m} min</option>
-                      ))}
-                    </select>
-                    {canEdit && (
-                      <button className="btn btn-sm btn-danger" onClick={() => removeSession(day, idx)}>
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          ))}
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>
+            Open a day to add its time slots, then save it. A day can have more
+            than one slot. Days you leave unset are days off.
+          </div>
+
+          <DayAvailabilityEditor
+            timings={timings}
+            onChange={setTimings}
+            onNotify={(m) => toast.success(m)}
+          />
+
+          <label className="form-label" style={{ marginTop: 14 }}>
+            Each appointment slot
+          </label>
+          <select
+            className="select"
+            value={slotMins}
+            disabled={!canEdit}
+            onChange={(e) => setSlotMins(Number(e.target.value))}
+          >
+            {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+              <option key={m} value={m}>{m} min</option>
+            ))}
+          </select>
+          <span className="hint">
+            Saving a day here records it; the schedule reaches the server when
+            you press Save schedule.
+          </span>
         </div>
 
         <div className="stack">

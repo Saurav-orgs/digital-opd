@@ -9,10 +9,11 @@ export class ConsultationDto {
       ConsultationStatus.DONE,
       ConsultationStatus.ON_HOLD,
       ConsultationStatus.REJECTED,
+      ConsultationStatus.NO_SHOW,
     ],
   })
   @IsEnum(ConsultationStatus, {
-    message: 'Status must be done, on_hold, or rejected.',
+    message: 'Status must be done, on_hold, rejected or no_show.',
   })
   status: ConsultationStatus;
 }

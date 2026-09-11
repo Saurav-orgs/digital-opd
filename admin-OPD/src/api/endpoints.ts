@@ -1,9 +1,10 @@
-import api from './client';
+import api, { ApiError } from './client';
 import { filenameFromDisposition } from '../lib/shareFile';
 import type {
   Appointment,
   AuthUser,
   BlockedNumber,
+  ClinicPatient,
   PendingDoctor,
   ConsultationSession,
   CreateDoctorResult,
@@ -313,6 +314,22 @@ export const consultationApi = {
         responseType: 'blob',
       })
       .then((r) => r.data as Blob),
+  /**
+   * The saved strokes as a PNG, or null when the visit has none. Fetched
+   * through the API so the pad can draw it back onto the canvas without
+   * tainting it — a cross-origin image would make the canvas unexportable.
+   */
+  handwritingImage: async (appointmentId: string): Promise<Blob | null> => {
+    try {
+      const r = await api.get(`/appointments/${appointmentId}/prescription/handwriting`, {
+        responseType: 'blob',
+      });
+      return r.data as Blob;
+    } catch (e) {
+      if (e instanceof ApiError && e.statusCode === 404) return null;
+      throw e;
+    }
+  },
   saveHandwriting: (appointmentId: string, image: Blob) => {
     const fd = new FormData();
     fd.append('file', image, 'handwriting.png');
@@ -380,6 +397,16 @@ export const reportsApi = {
       .then((r) => r.data);
   },
   remove: (id: string) => api.delete(`/reports/${id}`).then((r) => r.data),
+  /**
+   * The file's bytes, through the API. The presigned URL on the report can be
+   * opened in a tab but not read by script (no CORS on the bucket), so this is
+   * what printing and downloading use.
+   */
+  file: (id: string) =>
+    api.get(`/reports/${id}/file`, { responseType: 'blob' }).then((r) => ({
+      blob: r.data as Blob,
+      filename: filenameFromDisposition(r.headers['content-disposition'], 'report'),
+    })),
   retrySummary: (id: string) =>
     api.post(`/reports/${id}/summary/retry`).then((r) => r.data),
   retryVisitSummary: (appointmentId: string) =>
@@ -398,6 +425,12 @@ export const patientProfilesApi = {
   byMobile: (mobile: string) =>
     api
       .get<PatientProfile[]>('/patient-profiles/by-mobile', { params: { mobile } })
+      .then((r) => r.data),
+  /** Everyone this clinic has actually seen. Server-side search on name, code
+   *  or number. */
+  list: (search?: string) =>
+    api
+      .get<ClinicPatient[]>('/patient-profiles', { params: { search } })
       .then((r) => r.data),
 };
 

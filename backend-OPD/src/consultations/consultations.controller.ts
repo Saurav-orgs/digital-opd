@@ -152,6 +152,20 @@ export class ConsultationsController {
     return this.prescriptions.saveHandwriting(id, file, user);
   }
 
+  @Get('prescription/handwriting')
+  @ApiOperation({ summary: 'The saved handwriting strokes (PNG), for reloading the pad' })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
+  @RawResponse()
+  async prescriptionHandwriting(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, contentType } = await this.prescriptions.handwritingFile(id, user);
+    res.set({ 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+    return new StreamableFile(buffer);
+  }
+
   @Get('prescription/pdf')
   @ApiOperation({
     summary: 'The issued prescription PDF itself, for download or native share',

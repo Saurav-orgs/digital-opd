@@ -1,34 +1,94 @@
-/* ── Calm Clinical design system (plan §15) ──────────────────
-   Inter, flat surfaces, 0.5px hairlines, 12px card / 8px control radius.
-   Semantic colors are reserved — they map 1:1 to status/payment_status.
+/* ── myDigitalOPD design system ───────────────────────────────
+   Redesign (2026-09): the "Calm Clinical" blue was replaced by the teal /
+   marigold system in the approved mockups. Poppins carries the headings,
+   Inter the body; surfaces are flat cards on a warm grey page with a soft
+   shadow and 0.5px hairlines.
+
+   Every token name from the previous system is kept and remapped rather than
+   renamed, so screens that were not individually redesigned pick the new look
+   up for free and nothing that referenced a token can break. Names marked
+   "was undefined" were referenced in code but never declared — they resolved
+   to an invalid value and silently inherited; they are declared now.
+
+   Semantic colours still map 1:1 to record state, but the mockups invert the
+   old reading: a *completed* consultation is neutral grey (it is done, it
+   should recede) and teal is kept for a closed/confirmed record.
+
    Mobile-first: base styles target small screens; @media (min-width) enhances. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 
 :root {
-  --primary: #185fa5;
-  --primary-hover: #0c447c;
-  --primary-tint: #e6f1fb;
-  --secondary: #0f6e56;
+  /* ── Brand ──────────────────────────────────────────────── */
+  --teal: #167567;
+  --teal-dark: #0d4f45;
+  --sage-tint: #d8f0e6;
+  --sage-line: #b7ded0;
+
+  --marigold: #f2a128;
+  --marigold-dark: #b9760c;
+  --marigold-tint: #fcebcb;
+
+  --berry: #b84571;
+  --berry-dark: #8a2f53;
+  --berry-tint: #f6e1ea;
+
+  --sky: #2e86ab;
+  --sky-dark: #1f5f7a;
+  --sky-tint: #dceef6;
+
+  /* Neutral "spent" surface — completed rows, taken slots. */
+  --neutral-tint: #f2f1ea;
+  --neutral-line: #e4e2d8;
+
+  /* ── Legacy names, remapped onto the brand above ────────── */
+  --primary: var(--teal);
+  --primary-hover: var(--teal-dark);
+  --primary-tint: var(--sage-tint);
+  --secondary: var(--teal-dark);
   --secondary-accent: #1d9e75;
-  --secondary-tint: #e1f5ee;
+  --secondary-tint: var(--sage-tint);
 
-  --page: #f7f8fa;
+  --page: #f0f0f0;
+  --bg: var(--page); /* was undefined */
   --card: #ffffff;
-  --border: #e4e7ec;
-  --text: #1a2433;
-  --text-secondary: #5f6b7a;
+  --surface-2: #f7f8f7; /* was undefined */
+  --border: #dceee6;
+  --line: var(--border);
+  --text: #163832;
+  --text-secondary: #4f6e67;
+  --text-muted: #8aa39c; /* was undefined */
+  --muted: var(--text-muted); /* was undefined */
 
-  --state-available: #185fa5;
-  --state-booked: #d3d1c7;
-  --state-on-hold: #ba7517;
-  --state-error: #e24b4a;
-  --state-done: #0f6e56;
+  --ink: var(--text);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-muted);
 
-  --radius-card: 12px;
-  --radius-control: 8px;
+  --danger: #c4433a; /* was undefined */
+  --warning: var(--marigold); /* was undefined */
+  --warning-ink: var(--marigold-dark); /* was undefined */
+
+  /* ── Semantic state — reserved, never decorative ────────── */
+  --state-available: var(--teal);
+  --state-booked: var(--neutral-line);
+  --state-on-hold: var(--marigold-dark);
+  --state-error: var(--danger);
+  --state-done: var(--teal-dark);
+
+  /* ── Shape & depth ──────────────────────────────────────── */
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
   --hairline: 0.5px solid var(--border);
+  --shadow: 0 10px 24px rgba(22, 56, 50, 0.07);
+  --shadow-sm: 0 2px 8px rgba(22, 56, 50, 0.05);
 
+  /* ── Type ───────────────────────────────────────────────── */
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* ittitude house mark — a second brand, kept in its own colours. */
+  --ittitude-ink: #1f2124;
+  --ittitude-blue: #2ca6df;
 }
 
 * {
@@ -53,7 +113,8 @@ h1,
 h2,
 h3,
 h4 {
-  font-weight: 500;
+  font-family: var(--font-heading);
+  font-weight: 600;
   margin: 0;
   color: var(--text);
 }
@@ -71,21 +132,27 @@ img {
   min-height: 100vh;
   width: 100%;
 }
+
+/* ── Sidebar ───────────────────────────────────────────────
+   Below 700px this is an off-canvas drawer. At and above it, it becomes a
+   permanent rail — 72px of icons, expanding to 240px when the doctor asks for
+   the labels. Both states live on the same element so the transition is a
+   width change rather than a swap. */
 .sidebar {
-  width: 236px;
+  width: 240px;
   flex-shrink: 0;
   background: var(--card);
   border-right: var(--hairline);
   display: flex;
   flex-direction: column;
-  padding: 20px 12px;
+  padding: 0 0 6px;
   position: fixed;
   top: 0;
   left: 0;
   height: 100vh;
   z-index: 40;
   transform: translateX(-100%);
-  transition: transform 0.2s ease;
+  transition: transform 0.22s ease;
 }
 .sidebar.open {
   transform: translateX(0);
@@ -93,59 +160,75 @@ img {
 .sidebar-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(26, 36, 51, 0.32);
+  background: rgba(13, 40, 35, 0.45);
   z-index: 35;
 }
-.sidebar .brand {
-  font-weight: 500;
-  font-size: 16px;
-  color: var(--primary);
-  padding: 4px 12px 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--primary);
-  color: #fff;
-  display: inline-flex;
+
+/* The rail's expand/collapse control: a disc straddling the right edge, so it
+   reads as belonging to the boundary it moves rather than to the menu. */
+.sidebar-toggle {
+  display: none;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
+  position: absolute;
+  top: 22px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  z-index: 11;
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+}
+.sidebar-toggle:active {
+  transform: scale(0.92);
 }
 
-/* Two-line brand lockup: product name over the company that makes it. */
-.brand-lockup {
+.sidebar-logo {
+  padding: 22px 18px 18px;
+  border-bottom: var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 74px;
+}
+
+.sidebar-items {
+  padding: 10px 8px;
+  flex: 1;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  line-height: 1.15;
+  gap: 2px;
 }
-.brand-name {
-  font-size: 15.5px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
+
+.sidebar-powered-by {
+  padding: 12px;
+  margin-top: 8px;
+  border-top: var(--hairline);
+  display: flex;
+  justify-content: center;
 }
-.brand-by {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
+
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 13px;
+  padding: 11px 12px;
   border-radius: var(--radius-control);
   color: var(--text-secondary);
-  font-weight: 400;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .nav-item:hover {
   background: var(--page);
@@ -153,12 +236,15 @@ img {
 }
 .nav-item.active {
   background: var(--primary-tint);
-  color: var(--primary);
-  font-weight: 500;
+  color: var(--teal-dark);
 }
 .sidebar .spacer {
   flex: 1;
 }
+.btn-logout .logout-short {
+  display: none;
+}
+
 .main {
   flex: 1;
   display: flex;
@@ -171,7 +257,6 @@ img {
   background: var(--card);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 0 16px;
   position: sticky;
   top: 0;
@@ -179,7 +264,7 @@ img {
 }
 .hamburger {
   border: var(--hairline);
-  background: var(--card);
+  background: var(--page);
   border-radius: var(--radius-control);
   width: 38px;
   height: 38px;
@@ -188,50 +273,21 @@ img {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--text);
 }
-.topbar .who {
+.topbar-brand {
   margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-.user-profile-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  background: linear-gradient(135deg, #e6f1fb 0%, #edf5fd 100%);
-  border: 1px solid rgba(24, 95, 165, 0.22);
-  border-radius: 999px;
-  color: var(--primary);
-  font-weight: 500;
-  font-size: 13px;
-  box-shadow: 0 2px 6px rgba(24, 95, 165, 0.06);
-  transition: all 0.15s ease;
+  gap: 9px;
 }
-.user-profile-badge:hover {
-  background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
-  border-color: rgba(24, 95, 165, 0.35);
-  box-shadow: 0 3px 10px rgba(24, 95, 165, 0.12);
+.topbar-brand .brand-name {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
-.user-profile-badge .user-icon {
-  font-size: 14px;
-}
-.user-profile-badge .user-role-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #114275;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-.user-profile-badge .user-sep {
-  color: rgba(17, 66, 117, 0.4);
-  font-weight: 400;
-}
-.user-profile-badge .user-role {
-  color: var(--primary-hover);
-  font-weight: 500;
-}
+
 .content {
   padding: 16px;
   flex: 1;
@@ -239,6 +295,98 @@ img {
   max-width: 1400px;
   margin: 0 auto;
 }
+
+/* ── Rail (≥700px) ─────────────────────────────────────────
+   The design's first breakpoint: the drawer stops being a drawer. */
+@media (min-width: 700px) {
+  .sidebar {
+    position: sticky;
+    align-self: flex-start;
+    transform: none;
+    width: 72px;
+    height: 100vh;
+    transition: width 0.2s ease;
+    overflow: visible;
+  }
+  .sidebar.expanded {
+    width: 240px;
+  }
+  .sidebar-toggle {
+    display: flex;
+  }
+  .hamburger,
+  .sidebar-overlay {
+    display: none;
+  }
+
+  /* Collapsed: the icon is the menu item, centred in its own column. */
+  .sidebar-logo {
+    padding: 16px 8px;
+    justify-content: center;
+  }
+  .sidebar.expanded .sidebar-logo {
+    padding: 22px 18px 18px;
+    justify-content: flex-start;
+  }
+  .nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: 12px 0;
+  }
+  .sidebar.expanded .nav-item {
+    justify-content: flex-start;
+    gap: 13px;
+    padding: 11px 12px;
+  }
+  .nav-label {
+    display: none;
+  }
+  .sidebar.expanded .nav-label {
+    display: inline;
+  }
+  /* Collapsed, the button is an icon in the rail's own column, not a bar
+     stretched across it. */
+  .btn-logout {
+    width: 40px;
+    margin: 0 auto;
+    padding: 10px 0;
+  }
+  .sidebar.expanded .btn-logout {
+    width: calc(100% - 16px);
+    padding: 10px 12px;
+  }
+  .btn-logout .logout-short {
+    display: inline;
+  }
+  .sidebar.expanded .btn-logout .logout-short {
+    display: none;
+  }
+  /* `.powered-by` is declared further down at equal specificity, so this has
+     to out-rank it rather than merely follow it. */
+  .sidebar .sidebar-powered-by {
+    display: none;
+  }
+  .sidebar.expanded .sidebar-powered-by {
+    display: flex;
+  }
+
+  .topbar {
+    display: none;
+  }
+  .content {
+    padding: 20px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .content {
+    padding: 24px 28px;
+  }
+  .page-head h1 {
+    font-size: 20px;
+  }
+}
+
 .page-head {
   display: flex;
   align-items: center;
@@ -270,29 +418,6 @@ img {
   grid-template-columns: 1fr; /* mobile: single column by default */
 }
 
-/* Desktop layout */
-@media (min-width: 900px) {
-  .sidebar {
-    position: sticky;
-    transform: none;
-    height: 100vh;
-  }
-  .hamburger,
-  .sidebar-overlay {
-    display: none;
-  }
-  .topbar {
-    height: 60px;
-    padding: 0 28px;
-  }
-  .content {
-    padding: 24px 28px;
-  }
-  .page-head h1 {
-    font-size: 20px;
-  }
-}
-
 /* Opt-in multi-column groups */
 @media (min-width: 760px) {
   .cols-2 {
@@ -320,12 +445,10 @@ img {
   .cols-2 {
     grid-template-columns: 1fr;
   }
-  .user-profile-badge {
-    padding: 4px 10px;
-    font-size: 12px;
-  }
-  .user-profile-badge .user-icon {
-    font-size: 13px;
+  /* The wordmark is the first thing to give up room on a narrow topbar; the
+     mark alone still says whose app this is. */
+  .topbar-brand .brand-name {
+    font-size: 13.5px;
   }
 }
 
@@ -440,7 +563,7 @@ img {
   background: var(--card);
   border: var(--hairline);
   border-radius: var(--radius-control);
-  box-shadow: 0 4px 16px rgba(26, 36, 51, 0.12);
+  box-shadow: 0 4px 16px rgba(22, 56, 50, 0.12);
   z-index: 50;
   min-width: 130px;
   padding: 4px 0;
@@ -450,7 +573,7 @@ img {
   bottom: 100%;
   margin-top: 0;
   margin-bottom: 4px;
-  box-shadow: 0 -4px 16px rgba(26, 36, 51, 0.12);
+  box-shadow: 0 -4px 16px rgba(22, 56, 50, 0.12);
 }
 .action-menu-item {
   display: block;
@@ -482,37 +605,246 @@ img {
   gap: 6px;
   margin-bottom: 14px;
 }
-/* One prescription medicine's inputs, side by side.
-   Flex rather than a grid with breakpoints: this row lives in a column whose
-   width depends on the page around it, so wrapping has to follow the space
-   actually available rather than the viewport's width. Fields wrap only when
-   they no longer fit, which on a wide screen puts the whole medicine on one
-   line instead of three. */
-.rx-fields {
+/* ── Prescription editor ───────────────────────────────────
+   The design's three sections, each under a plain heading rather than boxed
+   in a labelled field. */
+.rx-panel-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.rx-panel-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.rx-panel-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0 14px;
+}
+.rx-section-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  margin: 16px 0 8px;
+}
+.rx-section-title:first-child {
+  margin-top: 0;
+}
+/* Clear all on the left, Save draft on the right: one starts over, the other
+   commits, and they should not sit beside each other as a pair. */
+.rx-actions {
+  align-items: center;
+  gap: 8px;
+}
+.rx-clear {
+  color: var(--danger);
+}
+.rx-clear:hover:not(:disabled) {
+  background: #fdecec;
+}
+.rx-clear:disabled {
+  opacity: 0.4;
+}
+
+/* One medicine: a grey slab with its fields on a line, a remove disc in the
+   corner and its remark folded away. */
+.med-row {
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 10px 10px 9px;
+  position: relative;
+}
+.med-row.from-ai {
+  border-color: var(--sage-line);
+  background: #f6fbf9;
+}
+.med-ai-tag {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+}
+.med-row-fields {
+  display: flex;
+  gap: 6px;
+  padding-right: 22px;
+}
+.med-row-fields > .field {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.med-row-fields > .field.med-freq {
+  flex: 0 0 84px;
+}
+.med-row-fields > .field.med-days {
+  flex: 0 0 104px;
+}
+.med-row-fields .field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+/* On a phone the three fields on one line leave the medicine name about 130px
+   — too narrow to read what you typed. The name takes the row and the two
+   short fields share the next one. */
+@media (max-width: 560px) {
+  .med-row-fields {
+    flex-wrap: wrap;
+    gap: 8px 6px;
+  }
+  .med-row-fields > .field.med-name {
+    flex: 1 1 100%;
+  }
+  .med-row-fields > .field.med-freq,
+  .med-row-fields > .field.med-days {
+    flex: 1 1 0;
+  }
+}
+.med-remove {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.med-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.med-remark-toggle {
+  display: inline-block;
+  margin-top: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--marigold-dark);
+  cursor: pointer;
+}
+.med-remark-field {
+  margin-top: 5px;
+}
+.med-remark-input {
+  padding: 7px 9px;
+  font-size: 12px;
+}
+.med-warning {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--state-on-hold);
 }
-.rx-fields > .field {
-  flex: 1 1 130px;
-  min-width: 0;
-  margin-bottom: 8px;
+.med-suggest {
+  padding: 1px 8px;
+  font-family: inherit;
+  font-size: 11.5px;
+  border-radius: 999px;
+  color: var(--state-on-hold);
+  background: none;
+  border: 1px solid currentColor;
+  cursor: pointer;
 }
-/* The two that hold real words get more room and give way last. */
-.rx-fields > .field.rx-medicine {
-  flex: 2.2 1 230px;
+
+/* ── Record panel ──────────────────────────────────────────
+   One big round button in the middle of the card. Recording is the whole
+   purpose of this panel, so it gets the middle of it. */
+.mic-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 8px 6px;
 }
-.rx-fields > .field.rx-instructions {
-  flex: 1.8 1 190px;
+.mic-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--berry);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(184, 69, 113, 0.35);
 }
-.rx-fields > .field.rx-narrow {
-  flex: 0.7 1 100px;
+.mic-btn:hover:not(:disabled) {
+  background: var(--berry-dark);
+}
+.mic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mic-btn.recording {
+  background: var(--danger);
+  animation: micPulse 1.4s infinite;
+}
+@keyframes micPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(196, 67, 58, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(196, 67, 58, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(196, 67, 58, 0);
+  }
+}
+.mic-status {
+  margin-top: 11px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.mic-timer {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  margin-top: 2px;
+}
+.mic-cancel {
+  margin-top: 10px;
+  color: var(--danger);
 }
 
 .field label {
   font-size: 13px;
   color: var(--text-secondary);
+}
+/* Fields that sit under a section heading pass no label; the empty element
+   would still reserve its line. */
+.field label:empty {
+  display: none;
 }
 .input,
 .select,
@@ -603,7 +935,41 @@ tr.clickable-row {
   transition: background 0.15s ease;
 }
 tr.clickable-row:hover {
-  background: var(--primary-tint);
+  background: #f7fbfa;
+}
+
+/* The table row carries the same left rail the card does, so a doctor moving
+   between a laptop and a tablet reads the same colour for the same state. */
+tr.appt-row td:first-child {
+  border-left: 3px solid transparent;
+}
+tr.appt-row.previous td:first-child,
+tr.appt-row.today-done td:first-child {
+  border-left-color: var(--text-muted);
+}
+tr.appt-row.today-next td:first-child {
+  border-left-color: var(--marigold);
+}
+tr.appt-row.today-wait td:first-child {
+  border-left-color: var(--teal);
+}
+tr.appt-row.upcoming td:first-child {
+  border-left-color: var(--sky);
+}
+/* Name over a quiet caption, so age and gender need no column of their own. */
+.row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+.row-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-top: 1px;
 }
 
 /* ── Range tabs (Previous / Today / Upcoming) ───────────────
@@ -615,24 +981,52 @@ tr.clickable-row:hover {
   flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
+  /* The search and filter row sits directly above; without this the two read
+     as one crowded block. */
+  margin-top: 14px;
 }
 .range-tab {
-  padding: 8px 20px;
-  font-size: 14px;
+  position: relative;
+  flex: 1 1 0;
+  text-align: center;
+  padding: 10px 8px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  font-family: inherit;
+  font-size: 13px;
   font-weight: 600;
-  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
   white-space: nowrap;
 }
+.range-tab:hover {
+  border-color: var(--sage-line);
+}
+.range-tab.active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
 .range-tab-count {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.4;
+  opacity: 0.7;
+}
+/* Amber dot = "there is still work in this tab". It is dropped on the active
+   tab, where the list itself already answers the question. */
+.range-tab-dot {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--marigold);
 }
 
 @media (max-width: 520px) {
@@ -689,6 +1083,12 @@ tr.clickable-row:hover {
   color: var(--primary);
   background: var(--primary-tint);
 }
+/* A no-show is the patient's doing, not the clinic's — it reads as a warning
+   rather than the error colour a cancellation carries. */
+.badge-no_show {
+  color: var(--marigold-dark);
+  background: var(--marigold-tint);
+}
 
 /* ── Slot chips ────────────────────────────────────────────── */
 .slot {
@@ -723,7 +1123,7 @@ tr.clickable-row:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(26, 36, 51, 0.32);
+  background: rgba(22, 56, 50, 0.32);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -738,14 +1138,40 @@ tr.clickable-row:hover {
   max-width: 480px;
   margin: auto;
   padding: 22px;
-  box-shadow: 0 12px 32px rgba(26, 36, 51, 0.15);
+  box-shadow: 0 12px 32px rgba(22, 56, 50, 0.15);
 }
 .modal-lg {
   max-width: 640px;
 }
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .modal h3 {
   font-size: 17px;
-  margin-bottom: 16px;
+  margin: 0;
+}
+.modal-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--page);
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-close:hover {
+  background: var(--neutral-tint);
+  color: var(--text);
 }
 /* Consultation outcome buttons.
    The three of them share one line at every width. On a phone the card is
@@ -825,7 +1251,7 @@ tr.clickable-row:hover {
   padding: 12px 16px;
   width: 100%;
   max-width: 340px;
-  box-shadow: 0 6px 20px rgba(26, 36, 51, 0.1);
+  box-shadow: 0 6px 20px rgba(22, 56, 50, 0.1);
 }
 .toast.error {
   border-left-color: var(--state-error);
@@ -867,7 +1293,7 @@ tr.clickable-row:hover {
   max-width: 400px;
   text-align: center;
   padding: 32px 28px;
-  box-shadow: 0 10px 40px rgba(26, 36, 51, 0.06);
+  box-shadow: 0 10px 40px rgba(22, 56, 50, 0.06);
 }
 .login-card .field {
   text-align: left;
@@ -912,85 +1338,391 @@ tr.clickable-row:hover {
   margin-bottom: 14px;
 }
 
-/* ── Dashboard ─────────────────────────────────────────────── */
-.stat-tiles {
-  grid-template-columns: repeat(3, 1fr);
+/* ── Dashboard ───────────────────────────────────────────────
+   The doctor header, the four counters and the appointment list are the
+   design's three bands. The header is a band at every size, not a card: it
+   bleeds to the top and both edges of the content column and keeps only its
+   rounded underside, so nothing sits above it. Each breakpoint cancels
+   whatever gutter `.content` is carrying at that width. */
+.doc-hero {
+  background: linear-gradient(180deg, var(--teal) 0%, var(--teal-dark) 100%);
+  color: #fff;
+  padding: 22px 20px 24px;
+  border-radius: 0 0 28px 28px;
+  /* Cancels .content's phone gutter (12px 14px). */
+  margin: -12px -14px 0;
 }
-@media (max-width: 640px) {
-  .stat-tiles {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-  }
+.doc-hero-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-@media (max-width: 480px) {
-  .stat-tiles {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-  }
-  .stat {
-    padding: 12px 8px;
-  }
-  .stat .num {
-    font-size: 22px;
-  }
-  .stat .label {
-    font-size: 11px;
-  }
-  .stat .ico {
-    width: 28px;
-    height: 28px;
-    font-size: 14px;
-    top: 8px;
-    right: 8px;
-  }
-  .stat-bar {
-    margin: -12px -10px 10px;
-  }
-}
-.stat {
-  position: relative;
-  overflow: hidden;
-  padding: 18px;
-}
-.stat .num {
-  font-size: 30px;
-  font-weight: 500;
-  line-height: 1.1;
-}
-.stat .label {
-  color: var(--text-secondary);
-  font-size: 13px;
-  margin-top: 4px;
-}
-.stat .ico {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  display: inline-flex;
+.doc-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+  display: flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  object-fit: cover;
+}
+.doc-name {
   font-size: 17px;
+  color: #fff;
+  overflow-wrap: anywhere;
 }
-.stat.accent-blue .ico {
-  background: var(--primary-tint);
+.doc-meta {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 2px;
 }
-.stat.accent-teal .ico {
-  background: var(--secondary-tint);
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 9px;
+  margin: 16px 0 14px;
 }
-.stat.accent-amber .ico {
-  background: #fbf1e0;
+
+.stat-tile {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 11px 4px 9px;
+  text-align: center;
 }
-.stat.accent-gray .ico {
+.stat-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  margin: 0 auto 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+.stat-num {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1;
+}
+.stat-label {
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 3px;
+  line-height: 1.2;
+}
+.stat-tile.teal .stat-icon {
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+}
+.stat-tile.teal .stat-num {
+  color: var(--teal-dark);
+}
+.stat-tile.marigold .stat-icon {
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+}
+.stat-tile.marigold .stat-num {
+  color: var(--marigold-dark);
+}
+.stat-tile.berry .stat-icon {
+  background: var(--berry-tint);
+  color: var(--berry-dark);
+}
+.stat-tile.berry .stat-num {
+  color: var(--berry-dark);
+}
+.stat-tile.sky .stat-icon {
+  background: var(--sky-tint);
+  color: var(--sky-dark);
+}
+.stat-tile.sky .stat-num {
+  color: var(--sky-dark);
+}
+
+/* ── Dashboard toolbar (search · date · status · walk-in) ──── */
+.dash-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.dash-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.dash-search .input {
+  width: 100%;
+  padding-left: 36px;
+}
+.dash-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.dash-toolbar-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.dash-toolbar-filters .input,
+.dash-toolbar-filters .select {
+  width: auto;
+  min-width: 130px;
+}
+
+/* ── Filter popovers ───────────────────────────────────────
+   A button that opens a panel, rather than a native select: the date filter
+   holds two controls at once ("Any date" and a picker), which a <select>
+   cannot. Both filters use it so the row reads as one thing. */
+.filter-btn-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filter-btn:hover {
+  color: var(--text);
+}
+.filter-btn.active-filter {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+.filter-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  min-width: 168px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  z-index: 30;
+}
+.filter-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border: 0;
+  background: none;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.filter-opt:hover {
   background: var(--page);
 }
-.stat-bar {
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  margin: -18px -18px 14px;
+.filter-opt.selected {
+  background: var(--sage-tint);
+  color: var(--teal-dark);
 }
+.filter-date {
+  padding: 6px 5px 2px;
+}
+.filter-date .input {
+  width: 100%;
+}
+.reset-filters-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-control);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.reset-filters-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--page);
+}
+.reset-filters-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Walk-in FAB ───────────────────────────────────────────
+   The one control on this screen that creates something, and it has to be
+   reachable with the list scrolled anywhere — the desk books a walk-in while
+   looking at the queue, not at the top of the page. */
+.fab-walkin {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  padding: 13px 18px;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(22, 56, 50, 0.28);
+}
+.fab-walkin:hover:not(:disabled) {
+  background: var(--teal-dark);
+}
+.fab-walkin:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.fab-walkin:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (min-width: 700px) {
+  /* Cancels .content's 20px gutter. */
+  .doc-hero {
+    margin: -20px -20px 0;
+    border-radius: 0 0 22px 22px;
+    padding: 22px 24px 24px;
+  }
+}
+@media (max-width: 520px) {
+  .stat-row {
+    gap: 7px;
+  }
+  .dash-toolbar-filters {
+    width: 100%;
+  }
+  .dash-toolbar-filters .input,
+  .dash-toolbar-filters .select {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* ── Dashboard, desktop (≥1024px) ──────────────────────────
+   A desktop dashboard rather than a stretched phone screen: a slim identity
+   band, a KPI strip that reads left-to-right, one toolbar line, and the
+   appointment list as a scannable table. */
+@media (min-width: 1024px) {
+  /* Cancels .content's 24px 28px gutter. */
+  .doc-hero {
+    background: linear-gradient(120deg, var(--teal-dark), var(--teal));
+    margin: -24px -28px 0;
+    border-radius: 0 0 18px 18px;
+    padding: 20px 28px 22px;
+  }
+  .doc-hero-top {
+    gap: 14px;
+  }
+  .doc-avatar {
+    width: 46px;
+    height: 46px;
+    font-size: 15px;
+  }
+  .doc-name {
+    font-size: 18px;
+  }
+
+  /* Icon at the left, the figure over its label at the right. */
+  .stat-row {
+    gap: 16px;
+    margin: 20px 0 18px;
+  }
+  .stat-tile {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 14px;
+    align-items: center;
+    text-align: left;
+    padding: 16px 18px;
+  }
+  .stat-icon {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    margin: 0;
+  }
+  .stat-num {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+    font-size: 25px;
+  }
+  .stat-label {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    font-size: 11.5px;
+  }
+
+  /* One toolbar line: search on the left, filters on the right. */
+  .dash-toolbar {
+    flex-wrap: nowrap;
+  }
+  .dash-toolbar-filters {
+    flex-wrap: nowrap;
+  }
+  .filter-btn-wrap {
+    flex: 0 0 auto;
+  }
+  .filter-btn {
+    min-width: 122px;
+    padding: 11px 16px;
+  }
+  .range-tabs {
+    max-width: 520px;
+  }
+
+  .fab-walkin {
+    right: 34px;
+    bottom: 30px;
+    padding: 14px 20px;
+    font-size: 13.5px;
+  }
+}
+
 .hero {
   background: linear-gradient(120deg, var(--primary), var(--primary-hover));
   color: #fff;
@@ -1068,47 +1800,1830 @@ tr.clickable-row:hover {
 /* ── Appointment cards (phone) ──────────────────────────────
    The table scrolls sideways below 760px, which hides the status column just
    when it is being scanned for. These replace it there; the table is untouched
-   from 760px up. */
+   from 760px up. The left rail carries the state — amber for the patient who
+   is next, grey once the consultation is done, teal for the rest of today. */
 .appt-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
+  gap: 10px;
+  padding: 12px;
 }
 .appt-card {
-  display: block;
   width: 100%;
   text-align: left;
   font: inherit;
   color: inherit;
   background: var(--card);
-  border: var(--hairline);
-  border-radius: var(--radius-card);
-  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 14px 16px 13px;
   cursor: pointer;
-  /* A whole card is the tap target, so it must not feel like a button. */
-  box-shadow: none;
+  position: relative;
+  overflow: hidden;
+}
+.appt-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+/* The left rail carries where this visit sits in the day, which is the one
+   thing a doctor scanning the list is actually looking for. */
+.appt-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--teal);
+}
+.appt-card.previous::before,
+.appt-card.today-done::before,
+.appt-card.done::before {
+  background: var(--text-muted);
+}
+.appt-card.today-next::before,
+.appt-card.next::before {
+  background: var(--marigold);
+}
+.appt-card.today-wait::before {
+  background: var(--teal);
+}
+.appt-card.upcoming::before {
+  background: var(--sky);
 }
 .appt-card:active {
   background: var(--page);
 }
+.appt-card:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* What the patient brought with them — a summary line that opens. */
+.appt-attach {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 11.5px;
+  color: var(--berry-dark);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.appt-attach .chev {
+  margin-left: auto;
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+.appt-attach.open .chev {
+  transform: rotate(180deg);
+}
+.appt-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--page);
+  border-radius: 12px;
+  padding: 11px 12px;
+  line-height: 1.55;
+}
+.appt-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13.5px;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+}
+.appt-avatar.av-1 {
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+}
+.appt-avatar.av-2 {
+  background: var(--berry-tint);
+  color: var(--berry-dark);
+}
+.appt-avatar.av-3 {
+  background: var(--sky-tint);
+  color: var(--sky-dark);
+}
+.appt-avatar.sm {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+.appt-body {
+  flex: 1;
+  min-width: 0;
+}
 .appt-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 .appt-card-name {
+  font-family: var(--font-heading);
   font-weight: 600;
   font-size: 14.5px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.appt-card-meta {
+.appt-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.appt-badge.next {
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+}
+/* A finished consultation should recede, not celebrate — grey, not teal. */
+.appt-badge.done {
+  background: var(--neutral-tint);
+  color: var(--text-muted);
+}
+.appt-badge.leave {
+  background: var(--berry-tint);
+  color: var(--berry-dark);
+}
+.appt-badge.no-show {
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+}
+.appt-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+/* Flex + a real gap, so the icon cannot run under the first digits the way
+   the emoji it replaced did. */
+.appt-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--teal-dark);
+  margin-top: 5px;
+  font-weight: 600;
+}
+.appt-time-badge {
+  flex-shrink: 0;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 7px 11px;
+  border-radius: 11px;
+  white-space: nowrap;
+  text-align: center;
+}
+.appt-time-badge.is-done {
+  background: var(--neutral-tint);
+  color: var(--text-muted);
+}
+.appt-time-date {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+/* The desktop table keeps its own row rhythm; the avatar just rides along. */
+.row-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+/* ── Wizard modals (walk-in) ───────────────────────────────
+   One question per step, so each panel is short and the footer button is the
+   only navigation. */
+.wizard-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-bottom: 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.wizard-back:hover {
+  color: var(--text);
+}
+.wizard-summary {
+  background: var(--page);
+  border-radius: 13px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.wizard-summary b {
+  color: var(--text);
+}
+.wizard-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+.wizard-link {
+  display: inline-block;
+  margin-top: 14px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--marigold-dark);
+  cursor: pointer;
+}
+/* The wizard's single footer action spans the dialog — it is the only way
+   forward, so it should not look like one of two choices. */
+.walkin-cta {
+  width: 100%;
+  justify-content: center;
+  padding: 12px;
+  font-size: 13px;
+}
+
+/* Picking which member of a household this visit is for. */
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.member-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 13px;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  font-family: inherit;
+  cursor: pointer;
+}
+.member-chip.selected {
+  border-color: var(--marigold);
+  background: var(--marigold-tint);
+}
+.member-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.member-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.member-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.member-rel {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+.member-radio {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+.member-chip.selected .member-radio {
+  border-color: var(--marigold);
+  background: var(--marigold);
+  box-shadow: inset 0 0 0 3px #fff;
+}
+
+/* Gender as three buttons rather than a select: three options, and the answer
+   is one tap instead of two. */
+.gender-row {
+  display: flex;
+  gap: 8px;
+}
+.gender-opt {
+  flex: 1;
+  text-align: center;
+  padding: 9px 6px;
+  border-radius: var(--radius-control);
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.gender-opt.selected {
+  background: var(--sage-tint);
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+
+/* ── Brand lockup ────────────────────────────────────────────
+   The wordmark keeps the logo's own colours rather than the UI palette: the
+   marigold accent (--marigold) is a UI colour, the logo's orange is part of a
+   fixed lockup and should not drift with the theme. Same reasoning for the
+   ittitude house mark below — it is a second brand, not an accent of this one. */
+.brand-lockup-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 44px; /* the mark size drives the lockup; overridden inline */
+  gap: 12px;
+}
+.brand-words {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.brand-wordmark {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.brand-my {
+  color: #64748b;
+}
+.brand-digital {
+  color: #0f172a;
+}
+.brand-opd {
+  color: #f97316;
+}
+.brand-tagline {
+  font-family: var(--font);
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin-top: 0.25em;
+  white-space: nowrap;
+}
+/* On the teal hero the two dark words need to read against it; the orange
+   already has enough contrast and is what makes the lockup recognisable. */
+.brand-lockup-full.is-inverse .brand-my {
+  color: rgba(255, 255, 255, 0.72);
+}
+.brand-lockup-full.is-inverse .brand-digital {
+  color: #ffffff;
+}
+.brand-lockup-full.is-inverse .brand-tagline {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── "Powered by ittitude." ──────────────────────────────── */
+.powered-by {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-heading);
+  line-height: 1;
+}
+.powered-by-label {
+  font-family: var(--font);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.powered-by-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ittitude-ink);
+}
+.powered-by-dot {
+  color: var(--ittitude-blue);
+}
+
+/* On a dark ground the near-black wordmark would vanish; the blue dot is kept
+   so the mark is still ittitude's. */
+.powered-by.is-inverse .powered-by-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+.powered-by.is-inverse .powered-by-name {
+  color: #ffffff;
+}
+
+/* The login lockup is centred and sits above the sign-in copy. */
+.login-lockup {
+  justify-content: center;
+}
+.auth-powered-by {
+  display: flex;
+  justify-content: center;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: var(--hairline);
+}
+
+/* ══ Doctor registration wizard ═══════════════════════════════
+   A public two-stage form on the page background — no sidebar, no topbar, so
+   it carries its own column and the same card language as the dashboard. */
+.register-screen {
+  min-height: 100vh;
+  background: var(--page);
+  padding: 28px 16px 40px;
+}
+.register-inner {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.register-head {
+  text-align: center;
+  margin-bottom: 4px;
+}
+.register-head h1 {
+  font-size: 22px;
+}
+.register-head p {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+}
+
+/* ── Stage strip, shared shape with the patient booking flow ── */
+.register-inner .steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 16px 0 18px;
+  margin: 0;
+  list-style: none;
+}
+.register-inner .step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.register-inner .step.locked {
+  opacity: 0.45;
+}
+.register-inner .step-dot {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+}
+.register-inner .step.done .step-dot {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.register-inner .step.active .step-dot {
+  background: var(--marigold);
+  border-color: var(--marigold);
+  color: #fff;
+}
+.register-inner .step-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.register-inner .step.done .step-label,
+.register-inner .step.active .step-label {
+  color: var(--text);
+}
+.register-inner .step-track {
+  height: 2px;
+  flex: 1 1 auto;
+  min-width: 8px;
+  background: var(--border);
+  border-radius: 2px;
+  list-style: none;
+}
+.register-inner .step-track.done {
+  background: var(--teal);
+}
+
+/* The registration stepper is the consultation's `.steps2`, so the two flows
+   read the same. It just needs room around it here. */
+.register-steps {
+  padding: 16px 0 18px;
+  margin: 0;
+}
+
+/* ── Per-day opening hours ─────────────────────────────────
+   One row per weekday, opened one at a time. A row that has never been saved
+   says so in words rather than leaving the doctor to infer it from an empty
+   summary — "day off" is a real answer, not a missing one. */
+.day-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.day-row {
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--card);
+}
+.day-row.is-set {
+  border-color: var(--sage-line);
+}
+.day-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dr-day {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 0 0 38px;
+}
+.dr-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-summary.set {
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+.dr-badge {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+}
+.dr-chevron {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.day-row.open .dr-chevron {
+  transform: rotate(180deg);
+}
+.day-row-body {
+  padding: 4px 14px 14px;
+  border-top: 1px dashed var(--border);
+}
+.slot-row {
+  margin-top: 12px;
+}
+.slot-remove-link {
+  margin-top: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--berry-dark);
+  cursor: pointer;
+}
+/* Adding a medicine and adding a slot are the same gesture in the design:
+   a dashed marigold bar the width of what it adds to. */
+.add-med-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px;
+  border-radius: var(--radius-control);
+  border: 1.5px dashed var(--marigold);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--marigold-dark);
+  text-align: center;
+  cursor: pointer;
+}
+.add-med-btn:hover {
+  background: var(--marigold-tint);
+}
+.add-slot-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  border-radius: var(--radius-control);
+  border: 1.5px dashed var(--marigold);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--marigold-dark);
+  cursor: pointer;
+}
+.tg-save {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  border-radius: var(--radius-control);
+  border: 0;
+  background: var(--teal);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tg-save:hover {
+  background: var(--teal-dark);
+}
+.day-row-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 3px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+.dr-apply-all,
+.dr-clear {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dr-apply-all {
+  color: var(--sky-dark);
+}
+.dr-clear {
+  color: var(--berry-dark);
+}
+.form-notice {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal-dark);
+}
+
+/* ── Section cards with a colour rail ────────────────────────── */
+.register-inner .box {
+  background: var(--card);
+  border-radius: 20px;
+  padding: 16px 18px 18px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.register-inner .box::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+}
+.register-inner .teal-accent::before {
+  background: var(--teal);
+}
+.register-inner .marigold-accent::before {
+  background: var(--marigold);
+}
+.register-inner .berry-accent::before {
+  background: var(--berry);
+}
+.register-inner .sky-accent::before {
+  background: var(--sky);
+}
+.register-inner .box-title {
+  font-size: 14.5px;
+  margin: 0;
+}
+.register-inner .box-sub {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--text-secondary);
+  margin: 2px 0 12px;
+}
+.register-inner .form-label {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.register-inner .box > .form-label:first-of-type {
+  margin-top: 0;
+}
+.register-inner .input,
+.register-inner .select {
+  width: 100%;
+}
+.field-err {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+
+/* ── Photo picker ────────────────────────────────────────────── */
+.photo-picker {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.photo-drop {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  border: 2px dashed var(--sage-line);
+  background: var(--card);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 0;
+}
+.photo-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo-drop-icon {
+  font-size: 22px;
+}
+.photo-label {
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+/* ── File drop ───────────────────────────────────────────────── */
+.file-drop {
+  width: 100%;
+  border: 1.5px dashed var(--sage-line);
+  background: var(--sage-tint);
+  border-radius: 14px;
+  padding: 18px 12px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--teal-dark);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.file-drop-icon {
+  font-size: 18px;
+}
+.file-drop-main {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.file-drop-sub {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+/* ── Working days ────────────────────────────────────────────── */
+.day-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.day-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.day-check:has(input:checked) {
+  background: var(--sage-tint);
+  border-color: var(--sage-line);
+  color: var(--teal-dark);
+}
+.day-check.all {
+  display: inline-flex;
+  border-style: dashed;
+}
+.day-check input {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--teal);
+}
+
+.time-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.vacation-row {
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.add-row-btn {
+  width: 100%;
+  border: 1.5px dashed var(--sage-line);
+  background: transparent;
+  border-radius: 12px;
+  padding: 11px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--teal-dark);
+  cursor: pointer;
+}
+.add-row-btn:hover {
+  background: var(--sage-tint);
+}
+
+.terms-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  cursor: pointer;
+}
+.terms-row input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--teal);
+}
+
+.register-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+@media (max-width: 420px) {
+  .time-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .day-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ══ Consultation screen ══════════════════════════════════════ */
+.visit-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.visit-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Overflow menu ──────────────────────────────────────────── */
+.opts-wrap {
+  position: relative;
+}
+.opts-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.opts-btn:hover {
+  border-color: var(--sage-line);
+}
+.opts-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.opts-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 61;
+  min-width: 190px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+.opts-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.opts-item:hover {
+  background: var(--sage-tint);
+}
+/* Everything in this menu acts against the patient's booking, so all of it
+   carries the warning colour rather than only the last item. */
+.opts-item.danger {
+  color: var(--danger);
+}
+.opts-item.danger:hover {
+  background: #fdecec;
+}
+.opts-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Patient card ────────────────────────────────────────────
+   Everything identifying the patient on one caption line, the time right-
+   aligned as plain type rather than a pill, and the three appointment actions
+   under a dashed rule — the mockup's shape. */
+.patient-card {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 10px 13px;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+.pc-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.pc-info {
+  flex: 1;
+  min-width: 0;
+}
+.pc-name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14.5px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pc-meta {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pc-time {
+  text-align: right;
+  flex-shrink: 0;
+}
+.pc-time-val {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.pc-time-val.cancelled {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.pc-time-date {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.patient-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+}
+.pa-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Padding rather than a fixed height: these wrap to two lines on a narrow
+     phone, and a 34px box clipped them. */
+  min-height: 40px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1.5px solid;
+  background: var(--card);
+}
+.pa-btn.history {
+  border-color: rgba(46, 134, 171, 0.35);
+  color: var(--sky-dark);
+}
+.pa-btn.cancel {
+  border-color: rgba(184, 69, 113, 0.35);
+  color: var(--berry-dark);
+}
+.pa-btn.reschedule {
+  border-color: var(--sage-line);
+  color: var(--teal-dark);
+}
+.pa-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── The record behind the card, folded away ─────────────────── */
+.patient-more {
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.patient-more > summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.patient-more-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 4px 24px;
+  margin-top: 10px;
+}
+
+/* ── Step strip (Reports · Prescription · Preview) ────────────
+   Dots joined by a track, matching the patient booking stepper: marigold is
+   where you are, teal is what is behind you. */
+.steps2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0 0 16px;
+  list-style: none;
+}
+.step2-item {
+  flex: 1;
+  min-width: 0;
+  list-style: none;
+}
+.step2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+.step2-dot {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+.step2.active .step2-dot {
+  background: var(--marigold);
+  border-color: var(--marigold);
+  color: #fff;
+}
+.step2.done .step2-dot {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.step2-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step2.active .step2-label,
+.step2.done .step2-label {
+  color: var(--text);
+}
+.step2-track {
+  height: 2px;
+  flex: 0 0 18px;
+  background: var(--border);
+  border-radius: 2px;
+  list-style: none;
+}
+.step2-track.done {
+  background: var(--teal);
+}
+/* Preview is earned by saving the prescription; a locked step says so rather
+   than doing nothing when pressed. */
+.step2.locked {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Pinned next action ────────────────────────────────────────
+   Fixed to the bottom of the window, so the page underneath has to end above
+   it — without this the bar covers whatever the doctor scrolled to, which on
+   the prescription step is the field they are typing in. */
+.visit-page {
+  padding-bottom: 88px;
+}
+.visit-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 30;
+}
+.visit-bottom-inner {
+  width: 100%;
+  max-width: 760px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
+  pointer-events: auto;
+  box-shadow: 0 -8px 20px rgba(22, 56, 50, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-secondary-cta {
+  /* Equal halves with the primary, as the design has them — not a small Back
+     tucked beside a stretched Save. */
+  flex: 1;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 13px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.btn-cta {
+  flex: 1;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 13px;
+  font-family: var(--font-heading);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-cta:hover {
+  background: var(--teal-dark);
+}
+/* Waiting on a dictation to become a draft. */
+.btn-cta:disabled,
+.btn-cta:disabled:hover {
+  background: var(--teal);
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* ── Patient header, shared by the history and patient screens ── */
+.visit-patient-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  margin-bottom: 4px;
+}
+.visit-patient-body {
+  min-width: 0;
+}
+.visit-patient-name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 16px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Patient history page ────────────────────────────────────── */
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 18px 0 10px;
+}
+.history-visit-date {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.history-sub-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 12px 0 6px;
+}
+
+@media (max-width: 520px) {
+  .pa-btn {
+    font-size: 10.5px;
+  }
+  .step2-label {
+    font-size: 10.5px;
+  }
+  .step2-track {
+    flex: 0 0 10px;
+  }
+}
+
+/* ── AI summary box ────────────────────────────────────────
+   The design's contoured card with a sky rail, not a tinted panel: it is the
+   first thing on the Reports step and it should read as a card of the same
+   family as everything under it, distinguished by its accent rather than by
+   being a different kind of surface. */
+.ai-box {
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: 17px;
+  box-shadow: var(--shadow);
+  padding: 13px 15px;
+  position: relative;
+  overflow: hidden;
+}
+.ai-box::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--sky);
+}
+.ai-box-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.ai-box-title svg {
+  color: var(--sky-dark);
+}
+
+/* ── Report cards ──────────────────────────────────────────
+   A report is a row with three things you do to it. Print and download act on
+   the file and say nothing about the visit; only the prescription closes a
+   consultation. The sparkle opens this report's own summary — the detail
+   behind the combined box at the top of the step. */
+.report-card {
+  background: var(--card);
+  border-radius: 14px;
+  border: var(--hairline);
+  padding: 10px 12px;
+}
+.report-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.report-info {
+  flex: 1;
+  min-width: 0;
+}
+.report-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+.report-name:hover {
+  color: var(--teal-dark);
+  text-decoration: underline;
+}
+.report-date {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.report-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.ra-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--page);
+  border: var(--hairline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+.ra-icon-btn:hover {
+  color: var(--text);
+}
+.ra-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ra-icon-btn.danger:hover {
+  color: var(--state-error);
+  border-color: var(--state-error);
+}
+.ra-icon-btn.summary-active {
+  background: var(--card);
+  border-color: var(--sky);
+  color: var(--sky-dark);
+}
+.report-summary {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Two dashed tiles for filing a report, rather than two small buttons. */
+.add-reports-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.add-tile {
+  background: var(--page);
+  border: 1.5px dashed var(--berry);
+  border-radius: 13px;
+  padding: 12px 6px;
+  text-align: center;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--berry-dark);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.add-tile:hover {
+  background: var(--berry-tint);
+}
+
+/* ── Prescription mode tabs ────────────────────────────────
+   Four equal tiles: the four ways to write a prescription are alternatives to
+   each other, so none of them should look like the default. */
+.rx-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 0 0 14px;
+}
+.rx-tab {
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 9px 2px 8px;
+  text-align: center;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.rx-tab-icon {
+  color: var(--text-secondary);
+  display: flex;
+}
+.rx-tab-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.rx-tab.active {
+  background: var(--teal);
+  border-color: var(--teal);
+}
+.rx-tab.active .rx-tab-icon,
+.rx-tab.active .rx-tab-label {
+  color: #fff;
+}
+
+/* ── Preview: the document, framed as the file it becomes ──── */
+.pdf-viewer {
+  border-radius: 16px;
+  overflow: hidden;
+  border: var(--hairline);
+  box-shadow: var(--shadow);
+  background: #5a6a66;
+  margin-bottom: 12px;
+}
+.pdf-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--teal-dark);
+  color: #fff;
+}
+.pdf-bar-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-bar-edit {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdf-bar-edit:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+.pdf-scroll {
+  padding: 12px;
+}
+.pdf-scroll iframe {
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+.issue-btn {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.issue-btn:hover:not(:disabled) {
+  background: var(--teal-dark);
+}
+.issue-btn:disabled {
+  background: #b9c7c3;
+  cursor: not-allowed;
+}
+/* A frozen prescription cannot be issued twice; the button becomes a fact. */
+.issued-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.preview-actions {
+  display: flex;
+  gap: 8px;
+}
+.prev-action-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 58px;
+  border-radius: 14px;
+  background: var(--card);
+  border: var(--hairline);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  color: var(--teal-dark);
+  font-family: inherit;
+}
+.prev-action-btn:hover:not(:disabled) {
+  background: var(--sage-tint);
+}
+.prev-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.prev-action-label {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.preview-note {
+  font-size: 11.5px;
+  margin: 12px 0 0;
+  line-height: 1.5;
+}
+
+/* ── The visit is over ─────────────────────────────────────── */
+.success-panel {
+  background: var(--card);
+  border-radius: 20px;
+  border: var(--hairline);
+  box-shadow: var(--shadow);
+  padding: 30px 22px;
+  text-align: center;
+}
+.success-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+.success-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 16px;
+}
+.success-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.success-ctas {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 22px;
+}
+.success-cta {
+  padding: 12px;
+  border-radius: 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  border: 1.5px solid transparent;
+}
+.success-cta.primary {
+  background: var(--teal);
+  color: #fff;
+}
+.success-cta.primary:hover {
+  background: var(--teal-dark);
+}
+.success-cta.secondary {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--text);
+}
+.success-cta.secondary:hover {
+  background: var(--page);
+}
+
+/* ── Consultation, desktop (≥1024px) ───────────────────────
+   Two columns: the patient stays in view on the left while the working panel
+   — reports, prescription, the document — sits on the right. The pinned
+   bottom bar unpins and sits under the panel it belongs to, because on a
+   desktop there is no thumb reaching for the bottom of a screen. */
+@media (min-width: 1024px) {
+  .visit-page {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    grid-template-areas:
+      'back    back'
+      'patient steps'
+      'patient panel'
+      'patient cta';
+    align-content: start;
+    column-gap: 24px;
+    max-width: 1240px;
+  }
+  .visit-topbar {
+    grid-area: back;
+  }
+  .visit-patient-col {
+    grid-area: patient;
+    position: sticky;
+    top: 20px;
+    align-self: start;
+  }
+  .visit-patient-col .patient-card {
+    padding: 20px;
+  }
+  .visit-page > .steps2 {
+    grid-area: steps;
+    margin-bottom: 14px;
+  }
+  .visit-panel {
+    grid-area: panel;
+    min-width: 0;
+  }
+
+  /* The card becomes a profile panel: identity stacked, actions listed. */
+  .visit-patient-col .pc-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .visit-patient-col .pc-time {
+    text-align: left;
+  }
+  .visit-patient-col .patient-actions {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .visit-patient-col .pa-btn {
+    width: 100%;
+    min-height: 42px;
+    font-size: 12.5px;
+  }
+
+  .step2-label {
+    font-size: 12px;
+  }
+  .rx-tabs {
+    gap: 10px;
+  }
+  .rx-tab {
+    padding: 12px 2px 11px;
+  }
+  .rx-tab-label {
+    font-size: 11px;
+  }
+  .pdf-scroll {
+    padding: 20px;
+  }
+
+  .visit-page {
+    padding-bottom: 40px;
+  }
+  /* Unpinned: it sits under the panel rather than over the window. */
+  .visit-bottom-bar {
+    grid-area: cta;
+    position: static;
+    justify-content: flex-start;
+    pointer-events: auto;
+    margin-top: 16px;
+    align-self: start;
+  }
+  .visit-bottom-inner {
+    max-width: none;
+    background: transparent;
+    border-top: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+}
+
+/* The caption line carries a phone glyph; give it room so it cannot sit on
+   the digits the way the emoji it replaced did. */
+.pc-mobile {
+  margin-left: 5px;
+}
+.pc-meta svg {
+  vertical-align: -0.12em;
+}
+
+/* Autosave status beside the editor's Save draft button. */
+.rx-save-state.is-error {
+  color: var(--state-error);
 }

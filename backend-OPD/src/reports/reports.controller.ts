@@ -8,9 +8,12 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -19,6 +22,7 @@ import { ReportSummaryService } from './report-summary.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateProgressSummaryDto } from './dto/update-progress-summary.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
+import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { PermissionAction, PermissionModule } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { AppException } from '../common/errors/app.exception';
@@ -167,10 +171,28 @@ export class ReportsController {
     return this.summaries.retryConsolidation(appointmentId);
   }
 
+  @Get(':id/file')
+  @ApiOperation({ summary: 'The report file itself, for printing or download' })
+  @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.READ })
+  @RawResponse()
+  async file(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, contentType, filename } = await this.service.file(id, user);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition',
+    });
+    return new StreamableFile(buffer);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a report' })
   @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.CREATE })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.remove(id);
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 }

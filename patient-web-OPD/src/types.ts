@@ -10,6 +10,9 @@ export interface Doctor {
   profile_photo_url?: string | null;
   publicSlug: string;
   public_slug?: string | null;
+  /** Where the patient is going — shown in the booking hero. */
+  clinicName?: string | null;
+  clinicAddress?: string | null;
 }
 
 export type SlotStatus = 'available' | 'booked' | 'past';

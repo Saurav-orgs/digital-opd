@@ -116,6 +116,28 @@ export class PrescriptionsService {
   }
 
   /**
+   * The saved handwriting strokes as the PNG they were uploaded as, so the pad
+   * can pick up where the doctor left off. Served through the API rather than
+   * by presigned URL: drawing a cross-origin image onto a canvas taints it, and
+   * a tainted canvas cannot be exported again.
+   */
+  async handwritingFile(
+    appointmentId: string,
+    user: AuthUser,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    await this.assertAccess(appointmentId, user);
+    const prescription = await this.prescriptionModel.findOne({
+      where: { appointment_id: appointmentId },
+    });
+    if (!prescription?.handwriting_image_key) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'This visit has no handwritten prescription.',
+      });
+    }
+    return this.storage.downloadWithType(prescription.handwriting_image_key);
+  }
+
+  /**
    * Issue the prescription: freeze it, render the PDF, tell the patient, and
    * record what the doctor changed so the model can learn from it.
    */

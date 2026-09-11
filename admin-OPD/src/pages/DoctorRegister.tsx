@@ -1,12 +1,45 @@
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { doctorRegistrationApi } from '../api/endpoints';
 import { PasswordInput } from '../components/ui';
 import { TermsDialog } from '../components/TermsDialog';
+import { PoweredByIttitude } from '../components/Brand';
 import { PROVIDER_TERMS_VERSION } from '../content/providerTerms';
+import {
+  DayAvailabilityEditor,
+  workingDays,
+  type DayTimings,
+} from '../components/DayAvailabilityEditor';
 
 const MAX_LICENSE_BYTES = 6 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+
+/*
+ * The design turns specialisation into a picker. The list is the one it shows;
+ * "Other" reveals a free-text box so nothing that used to be typeable becomes
+ * un-typeable — existing doctors hold values that are not on this list.
+ */
+const SPECIALISATIONS = [
+  'General Medicine',
+  'Pediatrics',
+  'Cardiology',
+  'Dermatology',
+  'Orthopedics',
+  'Gynaecology',
+  'ENT',
+  'Psychiatry',
+  'Dentistry',
+];
+
+const STEPS = ['Account', 'Register', 'Availability'] as const;
+type Stage = 1 | 2 | 3;
+
+interface Vacation {
+  from: string;
+  to: string;
+  reason: string;
+}
 
 /**
  * Public sign-up for a doctor who wants their own clinic on the platform.
@@ -15,10 +48,23 @@ const MAX_LICENSE_BYTES = 6 * 1024 * 1024;
  * review no longer gates sign-in (see registerSelf on the server). The licence
  * is still collected and still reviewable — it is the verification step that
  * stopped being a gate, so this page promises an account rather than a wait.
+ *
+ * Three stages, per the updated design: the credentials you will sign in with,
+ * then who you are, then when you work. Splitting the account off the profile
+ * matters because they fail differently — a taken email is a different problem
+ * from a missing qualification, and finding out about the first one after
+ * filling in the second is the worst order to learn it.
+ *
+ * The third stage writes opening hours and any booked leave along with the
+ * account, so a doctor who finishes this form has a booking link that already
+ * works.
  */
 export default function DoctorRegisterPage() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const photoRef = useRef<HTMLInputElement>(null);
+
+  const [stage, setStage] = useState<Stage>(1);
 
   const [form, setForm] = useState({
     name: '',
@@ -28,21 +74,33 @@ export default function DoctorRegisterPage() {
     license_number: '',
     specialization: '',
     qualifications: '',
+    clinic_address: '',
   });
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [specChoice, setSpecChoice] = useState('');
   const [license, setLicense] = useState<File | null>(null);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+
+  // ── Availability ──────────────────────────────────────────
+  const [timings, setTimings] = useState<DayTimings>({});
+  const [slotMins, setSlotMins] = useState(15);
+  const [vacations, setVacations] = useState<Vacation[]>([]);
 
   const field = (key: keyof typeof form) => ({
     value: form[key],
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setForm((f) => ({ ...f, [key]: e.target.value }));
       setError(null);
     },
   });
+
+  const openDays = workingDays(timings);
 
   const mut = useMutation({
     mutationFn: () => {
@@ -50,7 +108,27 @@ export default function DoctorRegisterPage() {
       Object.entries(form).forEach(([k, v]) => {
         if (v.trim()) fd.append(k, v.trim());
       });
-      fd.append('license', license!);
+      if (license) fd.append('license', license);
+      if (photo) fd.append('photo', photo);
+      // Only send hours if some were set — the server treats an empty set as
+      // "not configured" rather than "closed every day".
+      if (openDays.length) {
+        fd.append(
+          'availability',
+          JSON.stringify({
+            slot_duration_min: slotMins,
+            days: openDays.map((day) => ({
+              day,
+              slots: timings[day].slots.map((s) => ({
+                start_time: s.start_time,
+                end_time: s.end_time,
+              })),
+            })),
+          }),
+        );
+      }
+      const realVacations = vacations.filter((v) => v.from && v.to);
+      if (realVacations.length) fd.append('vacations', JSON.stringify(realVacations));
       // Recorded server-side against this exact wording, so a later change to
       // the document cannot rewrite what this doctor actually agreed to.
       fd.append('terms_version', PROVIDER_TERMS_VERSION);
@@ -63,16 +141,32 @@ export default function DoctorRegisterPage() {
 
   const validMobile = /^[6-9]\d{9}$/.test(form.contact_mobile.trim());
   const passwordsMatch = form.password === confirmPassword;
-  const canSubmit =
-    form.name.trim().length >= 2 &&
+
+  /*
+   * Stage 1 is the credential, and nothing else. The client's answer was
+   * explicit: sign-in is by email — the design's "email or mobile" would have
+   * meant a second login path the server does not have.
+   */
+  const stage1Valid =
     /\S+@\S+\.\S+/.test(form.email.trim()) &&
     form.password.length >= 8 &&
-    passwordsMatch &&
+    passwordsMatch;
+
+  /*
+   * Stage 2 holds everything the profile cannot be created without. The
+   * certificate is not among them — the design offers "you can add this
+   * later", and licence review already happened after the account went live,
+   * so requiring it here only ever cost sign-ups.
+   */
+  const stage2Valid =
+    form.name.trim().length >= 2 &&
     validMobile &&
     form.license_number.trim().length >= 3 &&
-    !!license &&
-    acceptedTerms &&
-    !mut.isPending;
+    form.clinic_address.trim().length >= 3 &&
+    form.qualifications.trim().length >= 2 &&
+    form.specialization.trim().length >= 2;
+
+  const canSubmit = stage1Valid && stage2Valid && acceptedTerms && !mut.isPending;
 
   if (done) {
     return (
@@ -80,9 +174,10 @@ export default function DoctorRegisterPage() {
         <div className="card login-card" style={{ textAlign: 'center' }}>
           <h2 style={{ marginBottom: 8 }}>Your practice is ready ✓</h2>
           <p className="muted" style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Thank you. We have your details and your practice licence. You can
-            sign in right away with <strong>{form.email.trim()}</strong> and the
-            password you just chose.
+            Thank you. You can sign in right away with{' '}
+            <strong>{form.email.trim()}</strong> and the password you just chose.
+            {openDays.length > 0 && ' Your booking link is live with the hours you set.'}
+            {!license && ' You can add your registration certificate from My profile.'}
           </p>
           <button
             className="btn btn-primary"
@@ -96,171 +191,407 @@ export default function DoctorRegisterPage() {
     );
   }
 
+  const goStage = (n: Stage) => {
+    // Later stages are reachable only once the ones before them hold up —
+    // otherwise the last step submits a form with a hole in the middle of it.
+    if (n >= 2 && !stage1Valid) return;
+    if (n >= 3 && !stage2Valid) return;
+    setError(null);
+    setStage(n);
+  };
+
   return (
-    <div className="auth-screen">
-      <div
-        className="card login-card"
-        style={{ maxWidth: 460, textAlign: 'left' }}
-      >
-        <h2 style={{ marginBottom: 4, textAlign: 'center' }}>Register your practice</h2>
-        <p
-          className="muted"
-          style={{ fontSize: 13.5, marginBottom: 18, textAlign: 'center' }}
-        >
-          Create your clinic on Digital OPD. Your practice licence is kept on
-          file for verification — your account is ready to use straight away.
-        </p>
+    <div className="register-screen">
+      <div className="register-inner">
+        <header className="register-head">
+          <h1>Doctor Registration</h1>
+          <p className="muted">Set up your profile to start seeing patients.</p>
+        </header>
 
-        <label className="form-label">Full name *</label>
-        <input className="input" placeholder="Dr. Asha Rao" {...field('name')} />
+        <ol className="steps2 register-steps" aria-label="Registration progress">
+          {STEPS.map((label, i) => {
+            const n = (i + 1) as Stage;
+            const locked = (n === 2 && !stage1Valid) || (n === 3 && !stage2Valid);
+            return (
+              <Fragment key={label}>
+                {i > 0 && (
+                  <li className={`step2-track ${stage > i ? 'done' : ''}`} aria-hidden />
+                )}
+                <li className="step2-item">
+                  <button
+                    type="button"
+                    className={`step2 ${stage === n ? 'active' : stage > n ? 'done' : ''} ${
+                      locked ? 'locked' : ''
+                    }`}
+                    aria-current={stage === n ? 'step' : undefined}
+                    disabled={locked}
+                    onClick={() => goStage(n)}
+                  >
+                    <span className="step2-dot" aria-hidden>
+                      {stage > n ? '✓' : n}
+                    </span>
+                    <span className="step2-label">{label}</span>
+                  </button>
+                </li>
+              </Fragment>
+            );
+          })}
+        </ol>
 
-        <label className="form-label" style={{ marginTop: 12 }}>Login email *</label>
-        <input className="input" type="email" placeholder="dr.asha@clinic.com" {...field('email')} />
+        {stage === 1 && (
+          <section className="box teal-accent">
+            <h2 className="box-title">Create your account</h2>
+            <div className="box-sub">This is what you will sign in with.</div>
 
-        <label className="form-label" style={{ marginTop: 12 }}>Password *</label>
-        <PasswordInput placeholder="min 8 characters" {...field('password')} />
-        {form.password.length > 0 && form.password.length < 8 && (
-          <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: 4 }}>
-            Password must be at least 8 characters.
-          </p>
-        )}
+            <label className="form-label">Email *</label>
+            <input
+              className="input"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              {...field('email')}
+            />
 
-        <label className="form-label" style={{ marginTop: 12 }}>Confirm password *</label>
-        <PasswordInput
-          placeholder="re-enter your password"
-          value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
-            setError(null);
-          }}
-        />
-        {confirmPassword.length > 0 && !passwordsMatch && (
-          <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: 4 }}>
-            Passwords do not match.
-          </p>
-        )}
+            <label className="form-label">Password *</label>
+            <PasswordInput placeholder="At least 8 characters" {...field('password')} />
+            {form.password.length > 0 && form.password.length < 8 && (
+              <p className="field-err">Password must be at least 8 characters.</p>
+            )}
 
-        <label className="form-label" style={{ marginTop: 12 }}>Mobile number *</label>
-        <input
-          className="input"
-          inputMode="numeric"
-          maxLength={10}
-          placeholder="10-digit number"
-          value={form.contact_mobile}
-          onChange={(e) =>
-            setForm((f) => ({
-              ...f,
-              contact_mobile: e.target.value.replace(/\D/g, '').slice(0, 10),
-            }))
-          }
-        />
-        {form.contact_mobile.length > 0 && !validMobile && (
-          <p style={{ color: 'var(--danger, red)', fontSize: 12, marginTop: 4 }}>
-            Enter a valid 10-digit mobile number.
-          </p>
-        )}
-
-        <label className="form-label" style={{ marginTop: 12 }}>
-          Medical registration number *
-        </label>
-        <input className="input" placeholder="e.g. MCI-12345/2018" {...field('license_number')} />
-
-        <label className="form-label" style={{ marginTop: 12 }}>Specialization</label>
-        <input className="input" placeholder="Cardiologist" {...field('specialization')} />
-
-        <label className="form-label" style={{ marginTop: 12 }}>Qualifications</label>
-        <input className="input" placeholder="MD, DM (Cardiology)" {...field('qualifications')} />
-
-        <label className="form-label" style={{ marginTop: 12 }}>
-          Practice licence / registration certificate *
-        </label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,application/pdf"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            if (f.size > MAX_LICENSE_BYTES) {
-              setError('That file is larger than 6 MB. Please choose a smaller one.');
-              return;
-            }
-            setLicense(f);
-            setError(null);
-          }}
-        />
-        <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>
-            {license ? 'Choose a different file' : 'Choose file'}
-          </button>
-          <span className="muted" style={{ fontSize: 12.5 }}>
-            {license ? license.name : 'PDF or image, up to 6 MB'}
-          </span>
-        </div>
-
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 9,
-            marginTop: 16,
-            fontSize: 13,
-            lineHeight: 1.55,
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={acceptedTerms}
-            onChange={(e) => {
-              setAcceptedTerms(e.target.checked);
-              setError(null);
-            }}
-            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, cursor: 'pointer' }}
-          />
-          <span>
-            I have read and accept the{' '}
-            {/* A button, not a link: this opens the text over the form so
-                nothing already typed is lost. */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                setShowTerms(true);
+            <label className="form-label">Confirm password *</label>
+            <PasswordInput
+              placeholder="Re-enter your password"
+              value={confirmPassword}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                setError(null);
               }}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                font: 'inherit',
-                color: 'var(--primary)',
-                textDecoration: 'underline',
-                cursor: 'pointer',
-              }}
-            >
-              Provider Terms &amp; Conditions
+            />
+            {confirmPassword.length > 0 && !passwordsMatch && (
+              <p className="field-err">Passwords do not match.</p>
+            )}
+          </section>
+        )}
+
+        {stage === 2 && (
+          <>
+            {/* ── Photo ── */}
+            <div className="photo-picker">
+              <input
+                ref={photoRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  if (f.size > MAX_PHOTO_BYTES) {
+                    setError('That photo is larger than 6 MB. Please choose a smaller one.');
+                    return;
+                  }
+                  setPhoto(f);
+                  setPhotoPreview(URL.createObjectURL(f));
+                  setError(null);
+                }}
+              />
+              <button
+                type="button"
+                className="photo-drop"
+                onClick={() => photoRef.current?.click()}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" />
+                ) : (
+                  <span className="photo-drop-icon" aria-hidden>📷</span>
+                )}
+              </button>
+              <div className="photo-label">
+                Doctor's photo <span className="muted">(optional)</span>
+              </div>
+            </div>
+
+            {/* ── Basic details ── */}
+            <section className="box sky-accent">
+              <h2 className="box-title">Basic details</h2>
+
+              <label className="form-label">Doctor's name *</label>
+              <input className="input" placeholder="e.g. Dr. Ananya Sharma" {...field('name')} />
+
+              <label className="form-label">Mobile number *</label>
+              <input
+                className="input"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit number"
+                value={form.contact_mobile}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    contact_mobile: e.target.value.replace(/\D/g, '').slice(0, 10),
+                  }))
+                }
+              />
+              {form.contact_mobile.length > 0 && !validMobile && (
+                <p className="field-err">Enter a valid 10-digit mobile number.</p>
+              )}
+
+              <label className="form-label">Registration number *</label>
+              <input className="input" placeholder="e.g. DMC/12345/2015" {...field('license_number')} />
+            </section>
+
+            {/* ── Certificate ── */}
+            <section className="box marigold-accent">
+              <h2 className="box-title">Registration certificate</h2>
+              <div className="box-sub">Optional — you can add this later.</div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  if (f.size > MAX_LICENSE_BYTES) {
+                    setError('That file is larger than 6 MB. Please choose a smaller one.');
+                    return;
+                  }
+                  setLicense(f);
+                  setError(null);
+                }}
+              />
+              <button type="button" className="file-drop" onClick={() => fileRef.current?.click()}>
+                <span className="file-drop-icon" aria-hidden>📄</span>
+                <span className="file-drop-main">
+                  {license ? license.name : 'Tap to upload or drop a file'}
+                </span>
+                <span className="file-drop-sub">
+                  {license ? 'Choose a different file' : 'JPG, PNG or PDF · up to 6 MB'}
+                </span>
+              </button>
+            </section>
+
+            {/* ── Practice details ── */}
+            <section className="box berry-accent">
+              <h2 className="box-title">Practice details</h2>
+
+              <label className="form-label">Address *</label>
+              <textarea
+                className="input"
+                rows={2}
+                placeholder="Clinic / practice address"
+                {...field('clinic_address')}
+              />
+
+              <label className="form-label">Qualifications *</label>
+              <input className="input" placeholder="e.g. MBBS, MD" {...field('qualifications')} />
+
+              <label className="form-label">Specialisation *</label>
+              <select
+                className="select"
+                value={specChoice}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSpecChoice(v);
+                  // "Other" clears the field so the free-text box starts empty
+                  // rather than inheriting the last picked option.
+                  setForm((f) => ({ ...f, specialization: v === 'Other' ? '' : v }));
+                  setError(null);
+                }}
+              >
+                <option value="">Select specialisation</option>
+                {SPECIALISATIONS.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+                <option value="Other">Other</option>
+              </select>
+              {specChoice === 'Other' && (
+                <input
+                  className="input"
+                  style={{ marginTop: 8 }}
+                  placeholder="Your specialisation"
+                  {...field('specialization')}
+                />
+              )}
+            </section>
+          </>
+        )}
+
+        {stage === 3 && (
+          <>
+            {/* ── Slot timing ── */}
+            <section className="box teal-accent">
+              <h2 className="box-title">Slot timing</h2>
+              <div className="box-sub">
+                Open a day to add its time slots, then save it. A day can have more
+                than one slot. Days you leave unset are treated as days off.
+              </div>
+
+              <DayAvailabilityEditor
+                timings={timings}
+                onChange={setTimings}
+                onNotify={setNotice}
+              />
+
+              <label className="form-label" style={{ marginTop: 14 }}>
+                Each appointment slot
+              </label>
+              {/* Not in the design, but the booking grid cannot be built
+                  without it, and guessing silently would be worse. */}
+              <select
+                className="select"
+                value={slotMins}
+                onChange={(e) => setSlotMins(Number(e.target.value))}
+              >
+                {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+                  <option key={m} value={m}>{m} min</option>
+                ))}
+              </select>
+
+              {notice && <p className="form-notice">{notice}</p>}
+            </section>
+
+            {/* ── Vacation ── */}
+            <section className="box marigold-accent">
+              <h2 className="box-title">Vacation</h2>
+              <div className="box-sub">Patients won't be able to book appointments on these dates.</div>
+
+              {vacations.map((v, i) => (
+                <div key={i} className="vacation-row">
+                  <div className="time-row">
+                    <div>
+                      <label className="form-label">From</label>
+                      <input
+                        className="input"
+                        type="date"
+                        value={v.from}
+                        onChange={(e) =>
+                          setVacations((prev) =>
+                            prev.map((x, j) =>
+                              j === i
+                                ? { ...x, from: e.target.value, to: x.to || e.target.value }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">To</label>
+                      <input
+                        className="input"
+                        type="date"
+                        min={v.from || undefined}
+                        value={v.to}
+                        onChange={(e) =>
+                          setVacations((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)),
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <label className="form-label">Reason (optional)</label>
+                  <input
+                    className="input"
+                    placeholder="e.g. Family vacation"
+                    value={v.reason}
+                    onChange={(e) =>
+                      setVacations((prev) =>
+                        prev.map((x, j) => (j === i ? { ...x, reason: e.target.value } : x)),
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setVacations((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className="add-row-btn"
+                onClick={() =>
+                  setVacations((prev) => [...prev, { from: '', to: '', reason: '' }])
+                }
+              >
+                + Add vacation dates
+              </button>
+            </section>
+
+            {/* ── Terms ──
+                On the last step, where the client asked for it: it is the
+                thing you agree to as you commit, not as you start typing. */}
+            <label className="terms-row">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => {
+                  setAcceptedTerms(e.target.checked);
+                  setError(null);
+                }}
+              />
+              <span>
+                I have read and accept the{' '}
+                {/* A button, not a link: this opens the text over the form so
+                    nothing already typed is lost. */}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setShowTerms(true);
+                  }}
+                >
+                  Provider Terms &amp; Conditions
+                </button>
+                . *
+              </span>
+            </label>
+          </>
+        )}
+
+        {error && <p className="field-err" style={{ marginTop: 12 }}>{error}</p>}
+
+        <div className="register-actions">
+          {stage > 1 && (
+            <button className="btn" onClick={() => goStage((stage - 1) as Stage)}>
+              Back
             </button>
-            . *
-          </span>
-        </label>
-
-        {error && (
-          <p style={{ color: 'var(--danger, red)', marginTop: 12, fontSize: 13 }}>{error}</p>
-        )}
-
-        <button
-          className="btn btn-primary"
-          style={{ width: '100%', marginTop: 18 }}
-          disabled={!canSubmit}
-          onClick={() => mut.mutate()}
-        >
-          {mut.isPending ? 'Submitting…' : 'Create my account'}
-        </button>
+          )}
+          {stage < 3 ? (
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={stage === 1 ? !stage1Valid : !stage2Valid}
+              onClick={() => goStage((stage + 1) as Stage)}
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={!canSubmit || openDays.length === 0}
+              title={
+                openDays.length === 0 ? 'Save timings for at least one day' : undefined
+              }
+              onClick={() => mut.mutate()}
+            >
+              {mut.isPending ? 'Submitting…' : 'Complete setup'}
+            </button>
+          )}
+        </div>
 
         <p className="muted" style={{ fontSize: 13, textAlign: 'center', marginTop: 14 }}>
           Already registered? <Link to="/login">Sign in</Link>
         </p>
+
+        <PoweredByIttitude className="auth-powered-by" />
       </div>
 
       {showTerms && <TermsDialog onClose={() => setShowTerms(false)} />}

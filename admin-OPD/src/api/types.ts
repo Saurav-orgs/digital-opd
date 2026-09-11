@@ -119,7 +119,14 @@ export interface DaySlots {
 }
 
 export type AppointmentStatus = 'confirmed' | 'rejected';
-export type ConsultationStatus = 'pending' | 'done' | 'on_hold' | 'rejected';
+export type ConsultationStatus =
+  | 'pending'
+  | 'done'
+  | 'on_hold'
+  | 'rejected'
+  // The patient never arrived — the clinic did not call the visit off, which
+  // is what `rejected` means.
+  | 'no_show';
 
 export interface PrescriptionImage {
   id: string;
@@ -177,14 +184,26 @@ export interface PatientProfile {
   name: string;
   relation: string | null;
   gender: string | null;
+  /** YYYY-MM-DD. Age is derived from it, so it never goes stale. */
+  dob: string | null;
   address_line: string | null;
   city: string | null;
   state: string | null;
   pincode: string | null;
+  /** Age recorded on the last visit — the fallback when there is no `dob`. */
   last_age: number | null;
   last_visit_date: string | null;
   visit_count: number;
   can_delete: boolean;
+}
+
+/**
+ * A patient as the clinic's own list shows them: the profile, plus the number
+ * it is registered under. The number lives on the account rather than the
+ * patient, since one number carries a family.
+ */
+export interface ClinicPatient extends PatientProfile {
+  mobile: string;
 }
 
 export type ProgressStatus = 'improving' | 'stable' | 'worsening' | 'unclear';

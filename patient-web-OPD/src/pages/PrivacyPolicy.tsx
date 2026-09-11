@@ -60,7 +60,7 @@ export const PrivacyPolicy: React.FC = () => {
               At Digital OPD, we prioritize the protection and security of your personal data and health information. This Privacy Policy details how we collect, process, store, and safeguard your information when you browse doctors, schedule outpatient department (OPD) appointments, or interact with our services.
             </p>
             <div className="privacy-highlight-box">
-              <CheckCircle2 size={18} color="#0F6E56" />
+              <CheckCircle2 size={18} color="var(--teal)" />
               <span>We never sell, trade, or rent your personal health data to third-party advertisers or marketers.</span>
             </div>
           </div>

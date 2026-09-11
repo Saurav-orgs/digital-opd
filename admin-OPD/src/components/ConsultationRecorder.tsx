@@ -4,6 +4,7 @@ import { consultationApi } from '../api/endpoints';
 import type { ConsultationSession } from '../api/types';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ui';
+import { MicIcon, StopIcon } from './icons';
 
 const MIME_CANDIDATES = ['audio/webm', 'audio/mp4', 'audio/ogg'];
 
@@ -25,9 +26,16 @@ const mmss = (total: number) =>
 export function ConsultationRecorder({
   appointmentId,
   disabled,
+  onBusyChange,
 }: {
   appointmentId: string;
   disabled?: boolean;
+  /**
+   * Told when the doctor is mid-dictation or the recording is still on its
+   * way up. Server-side work after that (transcribing, drafting) is visible
+   * to anyone through the session query; this covers only what lives here.
+   */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -192,6 +200,16 @@ export function ConsultationRecorder({
     session?.status === 'transcribing' || session?.status === 'drafting';
   const busy = upload.isPending || processing;
 
+  // What only this component knows: the mic is open, or the audio is
+  // uploading. Cleared on unmount so a tab switch does not leave the page
+  // thinking a recording is still running.
+  const localBusy = recording || upload.isPending;
+  useEffect(() => {
+    onBusyChange?.(localBusy);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localBusy]);
+  useEffect(() => () => onBusyChange?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   /*
    * Count from when the server took the recording, not from when this screen
    * opened: the doctor can leave the appointment and come back, and a wait
@@ -216,47 +234,43 @@ export function ConsultationRecorder({
   // something when it appears rather than crying wolf on every recording.
   const looksStuck = processing && waited >= 180;
 
+  /*
+   * What the button is for, in one line, under the mic. The recorder has four
+   * states the doctor has to be able to tell apart at a glance — idle,
+   * listening, uploading, and the server thinking — and the design gives it
+   * one line of text to do it in.
+   */
+  const status = recording
+    ? 'Listening…'
+    : upload.isPending
+      ? 'Uploading the recording…'
+      : session?.status === 'transcribing'
+        ? 'Transcribing…'
+        : session?.status === 'drafting'
+          ? 'Writing the draft…'
+          : 'Tap to start recording';
+
   return (
     <div>
-      <div className="row" style={{ alignItems: 'center', gap: 12 }}>
-        {!recording ? (
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={disabled || busy}
-            onClick={start}
-          >
-            🎙 Start listening
-          </button>
-        ) : (
-          <button className="btn btn-danger btn-sm" onClick={stop}>
-            ■ Stop listening
-          </button>
-        )}
+      {/*
+        The design's mic: one big round button in the middle of the card, not a
+        pill in a toolbar. Recording is the whole purpose of this panel, so it
+        gets the middle of it.
+      */}
+      <div className="mic-wrap">
+        <button
+          className={`mic-btn ${recording ? 'recording' : ''}`}
+          disabled={disabled || (!recording && busy)}
+          onClick={recording ? stop : start}
+          aria-label={recording ? 'Stop recording' : 'Start recording'}
+          title={recording ? 'Stop recording' : 'Start recording'}
+        >
+          {recording ? <StopIcon size={22} /> : <MicIcon size={24} />}
+        </button>
 
-        {recording && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: 'var(--state-error)',
-                display: 'inline-block',
-              }}
-            />
-            Recording · {mmss(elapsed)}
-          </span>
-        )}
-
-        {!recording && busy && (
-          <span className="muted" style={{ fontSize: 13 }}>
-            {upload.isPending
-              ? 'Uploading the recording…'
-              : session?.status === 'transcribing'
-                ? 'Transcribing — this can take a few minutes on this machine.'
-                : 'Writing the prescription draft…'}
-            {processing && ` · ${mmss(waited)}`}
-          </span>
+        <div className="mic-status">{status}</div>
+        {(recording || processing) && (
+          <div className="mic-timer">{mmss(recording ? elapsed : waited)}</div>
         )}
 
         {/*
@@ -267,19 +281,18 @@ export function ConsultationRecorder({
         */}
         {!recording && processing && (
           <button
-            className="btn btn-sm"
-            style={{ color: 'var(--state-error)', marginLeft: 'auto' }}
+            className="btn btn-sm mic-cancel"
             disabled={cancel.isPending}
             onClick={() => setConfirmCancel(true)}
             title="Stop waiting and write the prescription yourself"
           >
-            {cancel.isPending ? 'Cancelling…' : '✕ Cancel'}
+            {cancel.isPending ? 'Cancelling…' : 'Cancel'}
           </button>
         )}
       </div>
 
       {looksStuck && (
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
           This is taking longer than usual. You can cancel and write the
           prescription below — the recording will be discarded.
         </div>

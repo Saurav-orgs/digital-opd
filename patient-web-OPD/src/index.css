@@ -1,43 +1,95 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 
-/* Calm Clinical design system (plan §16) — shared with admin-OPD + the apps.
-   Inter, flat surfaces, 0.5px hairlines, 12px card / 8px control radius,
-   no gradients, no heavy shadows. */
+/* myDigitalOPD design system — shared with admin-OPD + the apps.
+   Redesign (2026-09): the "Calm Clinical" blue was replaced by the teal /
+   marigold system in the approved mockups. Poppins carries the headings,
+   Inter the body; flat cards on a warm grey page, soft shadow, 0.5px hairlines.
+
+   Every token name from the previous system is kept and remapped rather than
+   renamed, so screens that were not individually redesigned pick the new look
+   up for free. Names marked "was undefined" were referenced in code but never
+   declared — they resolved to an invalid value and silently inherited. */
 :root {
-  --primary: #185FA5;
-  --primary-hover: #0C447C;
-  --primary-dark: #0C447C;
-  --primary-tint: #E6F1FB;
-  --primary-light: #F0F6FC;
+  /* ── Brand ──────────────────────────────────────────────── */
+  --teal: #167567;
+  --teal-dark: #0D4F45;
+  --sage-tint: #D8F0E6;
+  --sage-line: #B7DED0;
 
-  --secondary: #0F6E56;
-  --secondary-hover: #0A5240;
-  --secondary-tint: #E1F5EE;
+  --marigold: #F2A128;
+  --marigold-dark: #B9760C;
+  --marigold-tint: #FCEBCB;
+
+  --berry: #B84571;
+  --berry-dark: #8A2F53;
+  --berry-tint: #F6E1EA;
+
+  --sky: #2E86AB;
+  --sky-dark: #1F5F7A;
+  --sky-tint: #DCEEF6;
+
+  /* Neutral "spent" surface — completed visits, taken slots. */
+  --neutral-tint: #F2F1EA;
+  --neutral-line: #E4E2D8;
+
+  /* ── Legacy names, remapped onto the brand above ────────── */
+  --primary: var(--teal);
+  --primary-hover: var(--teal-dark);
+  --primary-dark: var(--teal-dark);
+  --primary-tint: var(--sage-tint);
+  --primary-light: #F1F9F5;
+
+  --secondary: var(--teal-dark);
+  --secondary-hover: #0A3F37;
+  --secondary-tint: var(--sage-tint);
   --secondary-light: #F2FAF6;
 
-  --page: #F7F8FA;
+  --accent: var(--marigold-dark); /* was undefined */
+  --accent-bg: var(--marigold-tint); /* was undefined */
+  --accent-border: var(--marigold); /* was undefined */
+
+  --page: #F0F0F0;
   --card: #FFFFFF;
-  --border: #E4E7EC;
-  --border-hover: #CBD5E1;
-  --text: #1A2433;
-  --text-secondary: #5F6B7A;
-  --text-muted: #5F6B7A;
+  --surface: var(--card); /* was undefined */
+  --surface-2: #F7F8F7; /* was undefined */
+  --social-bg: var(--surface-2); /* was undefined */
+  --border: #DCEEE6;
+  --border-hover: var(--sage-line);
+  --line: var(--border);
+  --text: #163832;
+  --text-h: var(--text); /* was undefined */
+  --text-secondary: #4F6E67;
+  --text-muted: #8AA39C;
 
-  --available: #185FA5;
-  --booked: #D3D1C7;
-  --on-hold: #BA7517;
-  --error: #E24B4A;
-  --done: #0F6E56;
+  --ink: var(--text);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-muted);
 
-  --radius-card: 12px;
-  --radius-control: 8px;
+  --danger: #C4433A;
+
+  /* ── Semantic state — reserved, never decorative ────────── */
+  --available: var(--teal);
+  --booked: var(--neutral-line);
+  --on-hold: var(--marigold-dark);
+  --error: var(--danger);
+  --done: var(--teal-dark);
+
+  /* ── Shape & depth ──────────────────────────────────────── */
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
   --hairline: 0.5px solid var(--border);
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  /* Kept subtle — the system favours hairline borders over shadows. */
-  --shadow-sm: 0 1px 2px rgba(26, 36, 51, 0.04);
-  --shadow-md: 0 2px 6px rgba(26, 36, 51, 0.05);
-  --shadow-lg: 0 4px 14px rgba(26, 36, 51, 0.07);
-  --shadow-primary: 0 2px 8px rgba(24, 95, 165, 0.14);
+  --font-heading: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --shadow-sm: 0 2px 8px rgba(22, 56, 50, 0.05);
+  --shadow-md: 0 6px 16px rgba(22, 56, 50, 0.06);
+  --shadow: 0 10px 24px rgba(22, 56, 50, 0.07); /* was undefined */
+  --shadow-lg: var(--shadow);
+  --shadow-primary: 0 6px 16px rgba(22, 117, 103, 0.16);
+
+  /* ittitude house mark — a second brand, kept in its own colours. */
+  --ittitude-ink: #1F2124;
+  --ittitude-blue: #2CA6DF;
 }
 
 * {
@@ -58,7 +110,20 @@ body,
   line-height: 1.5;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  /* Not `hidden`: that computes to `overflow: hidden auto`, which makes this a
+     scroll container, and a sticky header sticks to its nearest scrolling
+     ancestor rather than the viewport — which is what made .web-navbar scroll
+     away. `clip` blocks sideways scrolling without creating that container. */
+  overflow-x: clip;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* Overall Web App Shell */
@@ -69,7 +134,8 @@ body,
   display: flex;
   flex-direction: column;
   background: var(--page);
-  overflow-x: hidden;
+  /* Same reason as html/body above — see the note there. */
+  overflow-x: clip;
 }
 
 /* Header Navbar */
@@ -129,16 +195,16 @@ body,
   line-height: 1.15;
 }
 .brand-name {
+  font-family: var(--font-heading);
   font-size: 16.5px;
   font-weight: 700;
   letter-spacing: -0.3px;
 }
 .brand-by {
   font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
 }
 /* The footer sits on a dark ground, so the muted token would disappear. */
 .web-brand-footer .brand-name {
@@ -176,7 +242,7 @@ body,
   border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
-  border: 1px solid rgba(24, 95, 165, 0.15);
+  border: 1px solid rgba(22, 117, 103, 0.15);
 }
 
 .web-cta-pill {
@@ -298,7 +364,7 @@ body,
 }
 
 .search-input:focus {
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, 0.12);
+  box-shadow: 0 0 0 3px rgba(22, 117, 103, 0.12);
 }
 
 .search-icon {
@@ -737,7 +803,7 @@ body,
 .summary-bottom-bar {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid rgba(24, 95, 165, 0.15);
+  border-top: 1px solid rgba(22, 117, 103, 0.15);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -801,7 +867,7 @@ body,
 
 .form-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, 0.12);
+  box-shadow: 0 0 0 3px rgba(22, 117, 103, 0.12);
 }
 
 .form-input.error {
@@ -1081,10 +1147,10 @@ body,
 
 /* Footer Styles */
 .web-footer {
-  background: #0F172A;
+  background: var(--ink);
   color: #FFFFFF;
   margin-top: auto;
-  border-top: 1px solid #1E293B;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .web-footer-simple {
@@ -1100,7 +1166,7 @@ body,
 
 .footer-tagline {
   font-size: 14px;
-  color: #CBD5E1;
+  color: var(--sage-line);
   margin: 0;
   max-width: 480px;
 }
@@ -1118,7 +1184,7 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #38BDF8;
+  color: var(--sage-line);
   font-weight: 600;
   font-size: 14px;
   text-decoration: none;
@@ -1139,8 +1205,8 @@ body,
 }
 
 .footer-bottom {
-  border-top: 1px solid #1E293B;
-  background: #090D16;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0C221E;
   padding: 16px 24px;
 }
 
@@ -1177,7 +1243,7 @@ body,
 }
 
 .footer-bottom-link:hover {
-  color: #38BDF8;
+  color: var(--sage-line);
   text-decoration: underline;
 }
 
@@ -1770,3 +1836,637 @@ body,
   text-decoration: underline;
 }
 .btn-text:hover { opacity: 0.8; }
+
+/* ── Brand lockup ────────────────────────────────────────────
+   The wordmark keeps the logo's own colours rather than the UI palette: the
+   marigold accent (--marigold) is a UI colour, the logo's orange is part of a
+   fixed lockup and should not drift with the theme. Same reasoning for the
+   ittitude house mark below — it is a second brand, not an accent of this one. */
+.brand-lockup-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 44px; /* the mark size drives the lockup; overridden inline */
+  gap: 12px;
+}
+.brand-words {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.brand-wordmark {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.brand-my {
+  color: #64748b;
+}
+.brand-digital {
+  color: #0f172a;
+}
+.brand-opd {
+  color: #f97316;
+}
+.brand-tagline {
+  font-family: var(--font);
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin-top: 0.25em;
+  white-space: nowrap;
+}
+/* On the teal hero the two dark words need to read against it; the orange
+   already has enough contrast and is what makes the lockup recognisable. */
+.brand-lockup-full.is-inverse .brand-my {
+  color: rgba(255, 255, 255, 0.72);
+}
+.brand-lockup-full.is-inverse .brand-digital {
+  color: #ffffff;
+}
+.brand-lockup-full.is-inverse .brand-tagline {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── "Powered by ittitude." ──────────────────────────────── */
+.powered-by {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-heading);
+  line-height: 1;
+}
+.powered-by-label {
+  font-family: var(--font);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.powered-by-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ittitude-ink);
+}
+.powered-by-dot {
+  color: var(--ittitude-blue);
+}
+
+/* On a dark ground the near-black wordmark would vanish; the blue dot is kept
+   so the mark is still ittitude's. */
+.powered-by.is-inverse .powered-by-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+.powered-by.is-inverse .powered-by-name {
+  color: #ffffff;
+}
+
+
+/* The footer sits on the darkest ink, so the wordmark's two dark words flip to
+   white. "OPD" keeps its orange in both — it is what makes the lockup read. */
+.web-brand-footer .brand-my {
+  color: rgba(255, 255, 255, 0.72);
+}
+.web-brand-footer .brand-digital {
+  color: #ffffff;
+}
+.web-brand-footer .brand-by {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ══ Booking journey (doctor landing + booking form) ══════════
+   Ported from the approved mockups. The screen is a single phone column that
+   widens to two gutters on a tablet; the confirm bar is pinned to the bottom
+   so the primary action is always in reach on a small screen. */
+.booking-screen {
+  /* Cancel .web-container's gutter so the hero reaches the screen edges. */
+  margin: -20px -20px 0;
+  padding-bottom: 96px;
+}
+.booking-screen .doc-hero {
+  background: linear-gradient(165deg, #2e8c7b 0%, var(--teal-dark) 100%);
+  color: #fff;
+  padding: 24px 20px 28px;
+  border-radius: 0 0 28px 28px;
+}
+.booking-screen .doc-hero-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.booking-screen .doc-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  object-fit: cover;
+}
+.booking-screen .doc-name {
+  font-size: 17px;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.booking-screen .doc-meta {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 2px;
+}
+.booking-screen .clinic-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 14px;
+}
+
+/* ── Stage strip: Slot · Register · Reports ───────────────────
+   Amber marks where you are, teal what you have finished — the same two
+   colours the dashboard uses for "next" and "done". */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 16px 20px 6px;
+  margin: 0;
+  list-style: none;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.step[role='button'] {
+  cursor: pointer;
+}
+.step.locked {
+  opacity: 0.45;
+}
+.step-dot {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+}
+.step.done .step-dot {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.step.active .step-dot {
+  background: var(--marigold);
+  border-color: var(--marigold);
+  color: #fff;
+}
+.step-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.step.done .step-label,
+.step.active .step-label {
+  color: var(--text);
+}
+.step-track {
+  height: 2px;
+  flex: 1 1 auto;
+  min-width: 8px;
+  background: var(--border);
+  border-radius: 2px;
+  list-style: none;
+}
+.step-track.done {
+  background: var(--teal);
+}
+
+/* ── Section wrapper ─────────────────────────────────────────── */
+.booking-screen .screen {
+  padding: 6px 20px 4px;
+}
+.booking-screen .section-title {
+  font-size: 15px;
+  margin: 20px 0 10px;
+  color: var(--text);
+}
+
+/* ── Date pills ──────────────────────────────────────────────── */
+.date-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+  scrollbar-width: none;
+}
+.date-scroll::-webkit-scrollbar {
+  display: none;
+}
+.date-pill {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 10px 6px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  text-align: center;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.12s ease;
+}
+.date-pill .dow {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.date-pill .dnum {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.date-pill.selected {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.date-pill.selected .dow {
+  color: rgba(255, 255, 255, 0.8);
+}
+.date-pill:active {
+  transform: scale(0.96);
+}
+
+/* ── Section cards, with a colour rail naming the section ────── */
+.booking-screen .box,
+.booking-form-box {
+  background: var(--card);
+  border-radius: 20px;
+  padding: 16px 18px 18px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.booking-screen .box::before,
+.booking-form-box::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+}
+.teal-accent::before {
+  background: var(--teal);
+}
+.marigold-accent::before {
+  background: var(--marigold);
+}
+.berry-accent::before {
+  background: var(--berry);
+}
+.sky-accent::before {
+  background: var(--sky);
+}
+.box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+.box-title {
+  font-size: 14.5px;
+  margin: 0;
+}
+.box-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.box-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.teal-accent .box-icon {
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+}
+.marigold-accent .box-icon {
+  background: var(--marigold-tint);
+  color: var(--marigold-dark);
+}
+.berry-accent .box-icon {
+  background: var(--berry-tint);
+  color: var(--berry-dark);
+}
+.sky-accent .box-icon {
+  background: var(--sky-tint);
+  color: var(--sky-dark);
+}
+
+/* ── Slot grid ───────────────────────────────────────────────── */
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.slot {
+  padding: 9px 4px;
+  border-radius: 12px;
+  border: 1.5px solid var(--sage-line);
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+/* Booked and past read the same to the patient: not yours to take. */
+.slot.taken {
+  background: var(--neutral-tint);
+  border-color: var(--neutral-line);
+  color: var(--text-muted);
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+.slot.selected {
+  background: var(--marigold);
+  border-color: var(--marigold);
+  color: #fff;
+}
+.slot-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  padding: 16px 0 4px;
+  font-size: 14px;
+}
+
+/* ── Pinned confirm bar ──────────────────────────────────────── */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 40;
+}
+.bottom-inner {
+  width: 100%;
+  max-width: 560px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  box-shadow: 0 -8px 20px rgba(22, 56, 50, 0.06);
+}
+.bottom-summary {
+  flex: 1;
+  min-width: 0;
+}
+.bottom-summary .bs-label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.bottom-summary .bs-value {
+  font-family: var(--font-heading);
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-primary-lg {
+  flex-shrink: 0;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 26px;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary-lg:hover:not(:disabled) {
+  background: var(--teal-dark);
+}
+.btn-primary-lg:disabled {
+  background: var(--neutral-line);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+@media (min-width: 720px) {
+  .booking-screen {
+    margin: -20px -20px 0;
+  }
+  .booking-screen .doc-hero {
+    padding: 26px 32px 30px;
+  }
+  .booking-screen .screen {
+    padding: 6px 32px 4px;
+  }
+  .steps {
+    padding: 16px 32px 6px;
+  }
+  .step-dot {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+  .step-label {
+    font-size: 11px;
+  }
+  .bottom-inner {
+    max-width: 760px;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+  .slot-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* ══ Account nav ══════════════════════════════════════════════
+   One row on a wide screen; below 720px the links fold into a menu so the
+   header stays on a single line. The bell never folds — an unread badge is
+   no use hidden behind a hamburger. */
+.account-nav {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.account-nav-wide {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.account-bell {
+  position: relative;
+  display: inline-flex;
+  color: inherit;
+}
+.account-bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+.account-signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+}
+.nav-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+.nav-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.nav-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 61;
+  min-width: 216px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.nav-menu-item:hover {
+  background: var(--sage-tint);
+}
+.nav-menu-item.primary {
+  background: var(--teal);
+  color: #fff;
+}
+.nav-menu-item.primary:hover {
+  background: var(--teal-dark);
+}
+.nav-menu-item.danger {
+  color: var(--danger);
+}
+.nav-menu-item.danger:hover {
+  background: #fdecec;
+}
+.nav-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 4px;
+}
+.nav-menu-mobile {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 2px 12px 6px;
+}
+
+@media (max-width: 720px) {
+  .account-nav-wide,
+  .account-signout {
+    display: none;
+  }
+  .nav-hamburger {
+    display: inline-flex;
+  }
+  .account-nav {
+    gap: 12px;
+  }
+}
+/* The tagline is the first thing worth losing when the bar gets tight. */
+@media (max-width: 420px) {
+  .web-brand .brand-by {
+    display: none;
+  }
+  .web-navbar-inner {
+    padding: 10px 14px;
+  }
+}

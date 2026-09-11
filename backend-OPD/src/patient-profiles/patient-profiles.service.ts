@@ -26,12 +26,24 @@ export interface PatientProfileSummary {
   city: string | null;
   state: string | null;
   pincode: string | null;
-  /** Age as of their most recent visit — profiles store no age of their own. */
+  /** YYYY-MM-DD when known; age is derived from it rather than stored. */
+  dob: string | null;
+  /** Age as of their most recent visit — the fallback when there is no `dob`. */
   last_age: number | null;
   last_visit_date: string | null;
   visit_count: number;
   /** False once any OPD is done: the record is permanent from then on. */
   can_delete: boolean;
+}
+
+/**
+ * A patient as the clinic's own list shows them — the summary above plus the
+ * number they are registered under, which the account holds rather than the
+ * profile.
+ */
+export interface ClinicPatient extends PatientProfileSummary {
+  mobile: string;
+  dob: string | null;
 }
 
 /**
@@ -56,11 +68,22 @@ export interface NewProfileDetails {
   name: string;
   relation?: string | null;
   gender?: string | null;
+  /** YYYY-MM-DD. Age is derived from it so it cannot go stale between visits. */
+  dob?: string | null;
   address_line?: string | null;
   city?: string | null;
   state?: string | null;
   pincode?: string | null;
 }
+
+/**
+ * How many people one mobile number may register.
+ *
+ * A family shares a number; a clinic's front desk does not get to turn one
+ * number into an unbounded patient list. Archived profiles do not count — the
+ * cap is on who is currently registered, so removing someone frees a place.
+ */
+export const MAX_PROFILES_PER_NUMBER = 5;
 
 @Injectable()
 export class PatientProfilesService {
@@ -130,6 +153,27 @@ export class PatientProfilesService {
   }
 
   /**
+   * Refuse a sixth patient on one number.
+   *
+   * Checked here rather than at each caller because this is the only place a
+   * profile is ever created — self-booking, the patient app and the clinic's
+   * walk-in desk all arrive through it, and a cap enforced in one of the three
+   * would not be a cap.
+   */
+  private async assertBelowProfileCap(patientId: string): Promise<void> {
+    const registered = await this.profileModel.count({
+      where: { patient_id: patientId, archived_at: null },
+    });
+    if (registered >= MAX_PROFILES_PER_NUMBER) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          `This number already has ${MAX_PROFILES_PER_NUMBER} registered patients, ` +
+          'which is the maximum. Remove one to add another.',
+      });
+    }
+  }
+
+  /**
    * Always creates. An identical name on the same account is not a duplicate
    * to be resolved — the caller declined to pick an existing patient, so this
    * is a different person.
@@ -138,12 +182,14 @@ export class PatientProfilesService {
     patientId: string,
     dto: NewProfileDetails,
   ): Promise<PatientProfile> {
+    await this.assertBelowProfileCap(patientId);
     return this.profileModel.create({
       patient_id: patientId,
       patient_code: await this.generatePatientCode(),
       name: dto.name.trim(),
       relation: dto.relation ?? null,
       gender: dto.gender ?? null,
+      dob: dto.dob || null,
       // A walk-in may be registered before the desk has the address; the
       // columns are nullable and the next booking fills them in.
       address_line: dto.address_line?.trim() || null,
@@ -251,6 +297,111 @@ export class PatientProfilesService {
     this.logger.log(`Deleted patient ${profile.patient_code} (no completed OPD).`);
   }
 
+  /**
+   * Every patient this doctor has actually seen, most recent first.
+   *
+   * Scoped by appointment rather than by account: a clinic's patient list is
+   * the people who came to *it*, and the profile rows are shared across the
+   * platform. Anyone whose only booking was cancelled is left out — they were
+   * never a patient here.
+   *
+   * Deliberately not built on `summarise`, which runs a query per profile: that
+   * is fine for the handful on one number and quadratic for a clinic's whole
+   * list. The visit rows are read once and folded in memory instead.
+   */
+  async listForDoctor(
+    doctorId: string,
+    search?: string,
+  ): Promise<ClinicPatient[]> {
+    const visits = await this.appointmentModel.findAll({
+      where: {
+        doctor_id: doctorId,
+        status: { [Op.ne]: AppointmentStatus.CANCELLED },
+        patient_profile_id: { [Op.ne]: null },
+      },
+      attributes: [
+        'patient_profile_id',
+        'appointment_date',
+        'start_time',
+        'patient_age',
+        'consultation_status',
+      ],
+      order: [
+        ['appointment_date', 'DESC'],
+        ['start_time', 'DESC'],
+      ],
+    });
+    if (!visits.length) return [];
+
+    // Rows arrive newest first, so the first one seen for a profile is its
+    // latest visit and nothing needs re-sorting per patient.
+    const stats = new Map<
+      string,
+      { count: number; latest: (typeof visits)[number]; consulted: boolean }
+    >();
+    for (const visit of visits) {
+      const id = visit.patient_profile_id as string;
+      const entry = stats.get(id);
+      if (entry) {
+        entry.count++;
+        entry.consulted ||=
+          visit.consultation_status === ConsultationStatus.DONE;
+      } else {
+        stats.set(id, {
+          count: 1,
+          latest: visit,
+          consulted: visit.consultation_status === ConsultationStatus.DONE,
+        });
+      }
+    }
+
+    const profiles = await this.profileModel.findAll({
+      where: { id: [...stats.keys()], archived_at: null },
+    });
+    const accounts = await this.patientModel.findAll({
+      where: { id: [...new Set(profiles.map((p) => p.patient_id))] },
+      attributes: ['id', 'mobile'],
+    });
+    const mobileOf = new Map(accounts.map((a) => [a.id, a.mobile]));
+
+    const needle = search?.trim().toLowerCase() ?? '';
+    const digits = needle.replace(/\D/g, '');
+
+    const rows = profiles.map((profile) => {
+      const stat = stats.get(profile.id)!;
+      return {
+        id: profile.id,
+        patient_code: profile.patient_code,
+        name: profile.name,
+        relation: profile.relation,
+        gender: profile.gender,
+        dob: profile.dob,
+        address_line: profile.address_line,
+        city: profile.city,
+        state: profile.state,
+        pincode: profile.pincode,
+        mobile: mobileOf.get(profile.patient_id) ?? '',
+        last_age: stat.latest.patient_age ?? null,
+        last_visit_date: stat.latest.appointment_date,
+        visit_count: stat.count,
+        can_delete: !stat.consulted,
+      };
+    });
+
+    const matched = needle
+      ? rows.filter(
+          (r) =>
+            r.name.toLowerCase().includes(needle) ||
+            r.patient_code.toLowerCase().includes(needle) ||
+            (!!digits && r.mobile.includes(digits)),
+        )
+      : rows;
+
+    return matched.sort((a, b) =>
+      (b.last_visit_date ?? '').localeCompare(a.last_visit_date ?? ''),
+    );
+  }
+
   // ── internals ──────────────────────────────────────────────
 
   private async summarise(
@@ -276,6 +427,7 @@ export class PatientProfilesService {
       name: profile.name,
       relation: profile.relation,
       gender: profile.gender,
+      dob: profile.dob,
       address_line: profile.address_line,
       city: profile.city,
       state: profile.state,

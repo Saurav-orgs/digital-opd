@@ -22,6 +22,7 @@ import { ApiException } from '../types';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
 import { PasswordField } from '../components/PasswordField';
+import { BookingSteps } from '../components/BookingSteps';
 
 /** A report the patient staged during booking, held until the visit exists. */
 interface StagedReport {
@@ -594,24 +595,35 @@ export const BookingForm: React.FC = () => {
     }
   };
 
+  /*
+   * Two numbering systems, on purpose. The patient is shown three stages —
+   * Slot, Register, Reports — because that is the shape of the journey. The
+   * four steps below are the machinery of the "Register" stage: the number,
+   * the password, who the visit is for, and their details. Collapsing them
+   * into one screen would have meant rewriting the step machine and the
+   * family-profile picker, so the strip names the stage and the line under it
+   * says which part of it you are on.
+   */
+  const stage = step === 4 ? 3 : 2;
+  const substep =
+    step === 1
+      ? authStage === 'mobile'
+        ? 'Mobile number'
+        : authStage === 'password'
+          ? 'Your password'
+          : 'Create a password'
+      : step === 2
+        ? 'Who is this visit for?'
+        : step === 3
+          ? 'Patient details'
+          : 'Reports (optional)';
+
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+      <BookingSteps current={stage} />
       <div className="booking-header-row">
         <div>
-          <div className="step-badge-text">
-            Step {step} of 4 ·{' '}
-            {step === 1
-              ? authStage === 'mobile'
-                ? 'Mobile Number'
-                : authStage === 'password'
-                  ? 'Your Password'
-                  : 'Create a Password'
-              : step === 2
-                ? 'Who is this visit for?'
-                : step === 3
-                  ? 'Patient Details'
-                  : 'Reports (optional)'}
-          </div>
+          <div className="step-badge-text">{substep}</div>
           <h2 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
             Complete Your Booking
           </h2>
@@ -621,11 +633,28 @@ export const BookingForm: React.FC = () => {
           type="button"
           className="btn-outlined"
           onClick={() => {
+            /*
+             * Leaving the form means going back to the slot grid they picked
+             * from — the doctor's page, not browser history, which after a
+             * sign-in redirect is not necessarily where they came from.
+             */
+            const backToSlots = () =>
+              navigate(doctor?.publicSlug ? `/d/${doctor.publicSlug}` : '/');
+
             // Step 2 only exists when the number had patients on it, so going
             // back from the details form must skip it otherwise.
             if (step === 4) return setStep(3);
-            if (step === 3) return setStep(knownPatients?.length ? 2 : 1);
-            if (step === 2) return setStep(1);
+            /*
+             * Once signed in there is no step 1 to go back to: the effect that
+             * skips the number for an authenticated patient fires again the
+             * moment step 1 is set and bounces them straight back here, which
+             * is why Back used to look broken. Leave the form instead.
+             */
+            if (step === 3) {
+              if (knownPatients?.length) return setStep(2);
+              return patient ? backToSlots() : setStep(1);
+            }
+            if (step === 2) return patient ? backToSlots() : setStep(1);
             // Within step 1, Back means "that was the wrong number".
             if (authStage !== 'mobile') {
               setAuthStage('mobile');
@@ -634,7 +663,7 @@ export const BookingForm: React.FC = () => {
               setPasswordError(null);
               return;
             }
-            window.history.length > 1 ? navigate(-1) : navigate('/');
+            backToSlots();
           }}
           style={{ borderRadius: '999px', padding: '8px 20px' }}
         >

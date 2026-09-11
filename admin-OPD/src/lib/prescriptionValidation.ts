@@ -26,7 +26,7 @@ const MEDICINE_LABELS: Record<MedicineField, string> = {
   // Field stays `dosage` on the wire (the AI returns that key); only the
   // label the client asked for changed.
   dosage: 'Frequency',
-  duration_days: 'Duration (days)',
+  duration_days: 'Duration',
   instructions: 'Special instructions',
 };
 
@@ -102,9 +102,14 @@ export function validatePrescription(
       setRow(index, 'dosage', 'Please fill the frequency, e.g. Twice a day.');
     }
 
+    // NaN is how the editor marks a duration it could not read ("five days").
     const days = row.duration_days;
     if (days != null && (!Number.isInteger(days) || days < 1 || days > 365)) {
-      setRow(index, 'duration_days', 'Duration must be a whole number of days between 1 and 365.');
+      setRow(
+        index,
+        'duration_days',
+        'Duration should be between 1 day and 365 days — e.g. "5 days" or "2 weeks".',
+      );
     }
   }
 

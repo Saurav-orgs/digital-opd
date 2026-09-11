@@ -33,6 +33,7 @@ import {
   NotificationType,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { ageFromDob } from '../common/utils/age';
 import { nowInClinic } from '../common/utils/clinic-time';
 
 @Injectable()
@@ -162,6 +163,16 @@ export class AppointmentsService {
      * so only the visit's length is derived here.
      */
     /*
+     * The desk no longer picks a date or a time — the patient is in the room,
+     * so the visit is now. Both are still honoured when sent, which keeps the
+     * endpoint usable for a correction and for any older caller.
+     */
+    const clinicNow = nowInClinic(
+      this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
+    );
+    const date = dto.appointment_date ?? clinicNow.date;
+
+    /*
      * Two people can walk in together, and the desk books both at "now" — the
      * same minute for the same doctor, which the one-appointment-per-minute
      * index rejects. That index is worth keeping for online booking, where a
@@ -171,16 +182,12 @@ export class AppointmentsService {
      */
     const startTime = await this.firstFreeMinute(
       doctorId,
-      dto.appointment_date,
-      dto.start_time,
+      date,
+      dto.start_time ?? clinicNow.time,
     );
     // Derived from the minute actually used, so a nudged start does not
     // silently shorten the visit.
-    const endTime = await this.slots.walkInEndTime(
-      doctorId,
-      dto.appointment_date,
-      startTime,
-    );
+    const endTime = await this.slots.walkInEndTime(doctorId, date, startTime);
 
     // A walk-in is a full registration: it creates the account and the patient
     // exactly as a self-booking would, so the patient can log in with this
@@ -191,14 +198,14 @@ export class AppointmentsService {
       const appointment = await this.appointmentModel.create(
         {
           doctor_id: doctorId,
-          appointment_date: dto.appointment_date,
+          appointment_date: date,
           start_time: startTime,
           end_time: endTime,
           patient_profile_id: profileId,
           patient_name: dto.patient_name,
           patient_mobile: dto.patient_mobile,
           patient_gender: dto.patient_gender,
-          patient_age: dto.patient_age,
+          patient_age: ageFromDob(dto.patient_dob, date) ?? dto.patient_age ?? null,
           patient_address: dto.patient_address || null,
           patient_city: dto.patient_city || null,
           patient_state: dto.patient_state || null,
@@ -281,6 +288,7 @@ export class AppointmentsService {
     patient_mobile: string;
     patient_name: string;
     patient_gender?: string;
+    patient_dob?: string;
     // Optional: a walk-in can be booked before the desk has the address.
     patient_address?: string;
     patient_city?: string;
@@ -310,6 +318,7 @@ export class AppointmentsService {
     const created = await this.profiles.createForAccount(account.id, {
       name: dto.patient_name,
       gender: dto.patient_gender,
+      dob: dto.patient_dob,
       address_line: dto.patient_address,
       city: dto.patient_city,
       state: dto.patient_state,
