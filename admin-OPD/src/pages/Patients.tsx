@@ -25,6 +25,15 @@ function ageOf(p: ClinicPatient): string {
   return p.last_age != null ? `${p.last_age} yrs` : '—';
 }
 
+/** "Female" → "F", "Male" → "M"; anything else as written. */
+function shortGender(g: string | null | undefined) {
+  const v = (g ?? '').trim();
+  if (!v) return '';
+  const first = v[0].toUpperCase();
+  if (first === 'M' || first === 'F') return first;
+  return v[0].toUpperCase() + v.slice(1).toLowerCase();
+}
+
 function prettyDate(date: string | null) {
   if (!date) return '—';
   const d = new Date(`${date}T00:00:00`);
@@ -154,31 +163,38 @@ export default function PatientsPage() {
   );
 }
 
+/**
+ * Same two-row card as the appointment list — name, then "M · 42 yrs" and the
+ * number — so the two screens read as one app. The badge on the right is the
+ * last visit, with the visit count above it in place of the time.
+ */
 function PatientCard({ p, onOpen }: { p: ClinicPatient; onOpen: () => void }) {
-  const who = [ageOf(p), p.gender].filter(Boolean).join(' · ');
+  const who = [shortGender(p.gender), ageOf(p)].filter(Boolean).join(' · ');
   return (
     <button type="button" className="appt-card" onClick={onOpen}>
-      <span className={`appt-avatar ${avatarTone(p.name)}`} aria-hidden>
-        {initials(p.name)}
-      </span>
-      <div className="appt-body">
-        <div className="appt-card-top">
-          <span className="appt-card-name">{p.name}</span>
-        </div>
-        <div className="appt-meta">{who}</div>
-        {p.mobile && (
-          <div className="appt-phone">
-            <PhoneIcon />
-            {p.mobile}
-          </div>
-        )}
-      </div>
-      <span className="appt-time-badge is-done">
-        <span className="appt-time-date">
-          {p.visit_count} visit{p.visit_count === 1 ? '' : 's'}
+      <div className="appt-card-main">
+        <span className={`appt-avatar ${avatarTone(p.name)}`} aria-hidden>
+          {initials(p.name)}
         </span>
-        {prettyDate(p.last_visit_date)}
-      </span>
+        <div className="appt-body">
+          <div className="appt-card-top">
+            <span className="appt-card-name">{p.name}</span>
+          </div>
+          {who && <div className="appt-meta">{who}</div>}
+          {p.mobile && (
+            <div className="appt-phone">
+              <PhoneIcon />
+              {p.mobile}
+            </div>
+          )}
+        </div>
+        <span className="appt-time-badge is-done">
+          <span className="appt-time-date">
+            {p.visit_count} visit{p.visit_count === 1 ? '' : 's'}
+          </span>
+          {prettyDate(p.last_visit_date)}
+        </span>
+      </div>
     </button>
   );
 }

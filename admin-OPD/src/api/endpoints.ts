@@ -292,6 +292,14 @@ export const consultationApi = {
     api
       .delete<EPrescription>(`/appointments/${appointmentId}/prescription`)
       .then((r) => r.data),
+  /**
+   * Delete the prescription outright, draft or issued: medicines, handwriting,
+   * PDF and the patient's notice all go. The next read is a blank draft.
+   */
+  removePrescription: (appointmentId: string) =>
+    api
+      .delete<{ deleted: true }>(`/appointments/${appointmentId}/prescription/permanent`)
+      .then((r) => r.data),
   /** The issued PDF itself, for the share sheet or a download. */
   prescriptionPdf: (appointmentId: string) =>
     api
@@ -311,6 +319,18 @@ export const consultationApi = {
   prescriptionPreview: (appointmentId: string) =>
     api
       .get(`/appointments/${appointmentId}/prescription/preview`, {
+        responseType: 'blob',
+      })
+      .then((r) => r.data as Blob),
+  /**
+   * The same page with the doctor's header left blank, for printing onto the
+   * doctor's own pre-printed pad. Works for issued prescriptions too — the
+   * frozen data renders identically minus the header.
+   */
+  prescriptionPrintCopy: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/prescription/preview`, {
+        params: { letterhead: 'false' },
         responseType: 'blob',
       })
       .then((r) => r.data as Blob),

@@ -5,16 +5,23 @@ import { ApiError } from '../api/client';
 import { useToast } from './Toast';
 import { printBlob } from '../lib/printBlob';
 import { PdfPages } from './PdfPages';
-import { Loading, Modal } from './ui';
+import { ConfirmDialog, Loading, Modal } from './ui';
 import {
   CheckCircleIcon,
   DownloadIcon,
   PdfIcon,
   PrinterIcon,
   ShareIcon,
+  TrashIcon,
 } from './icons';
 
-/** Prints the visit's issued prescription. */
+/**
+ * Prints the visit's issued prescription.
+ *
+ * Printed without the letterhead: doctors print onto their own pad, which
+ * already carries the header, so the copy that goes to paper leaves that
+ * space blank. The file the patient gets (issue, share, download) keeps it.
+ */
 export function PrintPrescriptionButton({ appointmentId }: { appointmentId: string }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -22,7 +29,7 @@ export function PrintPrescriptionButton({ appointmentId }: { appointmentId: stri
   const onPrint = async () => {
     setBusy(true);
     try {
-      const { blob } = await consultationApi.prescriptionPdf(appointmentId);
+      const blob = await consultationApi.prescriptionPrintCopy(appointmentId);
       const outcome = await printBlob(blob);
       if (outcome === 'opened') {
         toast.success(
@@ -161,6 +168,7 @@ export function PrescriptionPreviewPanel({
   onEdit,
   onFinished,
   onBackToList,
+  onDeleted,
 }: {
   appointmentId: string;
   patientName: string;
@@ -177,11 +185,18 @@ export function PrescriptionPreviewPanel({
   onFinished?: () => void;
   /** Leaves for the appointment list from the success panel. */
   onBackToList?: () => void;
+  /**
+   * Called once the prescription has been deleted server-side. The caller
+   * decides where to go — usually back to a blank editor. Omitted when the
+   * document cannot be deleted from here.
+   */
+  onDeleted?: () => void;
 }) {
   const { url, blob, error } = usePreviewDocument(load, reloadKey);
   const toast = useToast();
   const qc = useQueryClient();
   const [finishedBy, setFinishedBy] = useState<FinishKind | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const finish = (kind: FinishKind) => {
     setFinishedBy(kind);
@@ -196,6 +211,30 @@ export function PrescriptionPreviewPanel({
       finish('issue');
     },
     onError: (e) => toast.error(e),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => consultationApi.removePrescription(appointmentId),
+    onSuccess: async () => {
+      // Wait for the refetch: the editor the caller sends us back to must
+      // open on the fresh blank draft, not the cached one just deleted.
+      await qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
+      qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
+      setConfirmDelete(false);
+      toast.success(
+        'Prescription deleted',
+        alreadyIssued
+          ? 'The patient no longer has it. Write a new one if the visit needs it.'
+          : 'Write a new one if the visit needs it.',
+      );
+      onDeleted?.();
+    },
+    onError: (err: unknown) => {
+      setConfirmDelete(false);
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not delete the prescription.',
+      );
+    },
   });
 
   const download = () => {
@@ -227,10 +266,25 @@ export function PrescriptionPreviewPanel({
     finish('share');
   };
 
+  const [printing, setPrinting] = useState(false);
+
+  // Not the blob on screen: the print copy is rendered again without the
+  // letterhead, because it goes onto the doctor's own pre-printed pad. The
+  // preview, and everything that reaches the patient as a file, keep it.
   const print = async () => {
     if (!blob) return;
-    await printBlob(blob);
-    finish('print');
+    setPrinting(true);
+    try {
+      const printCopy = await consultationApi.prescriptionPrintCopy(appointmentId);
+      await printBlob(printCopy);
+      finish('print');
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not prepare the print copy.',
+      );
+    } finally {
+      setPrinting(false);
+    }
   };
 
   if (finishedBy) {
@@ -299,9 +353,9 @@ export function PrescriptionPreviewPanel({
               <ShareIcon size={18} />
               <span className="prev-action-label">Share</span>
             </button>
-            <button className="prev-action-btn" disabled={!blob} onClick={print}>
+            <button className="prev-action-btn" disabled={!blob || printing} onClick={print}>
               <PrinterIcon size={18} />
-              <span className="prev-action-label">Print</span>
+              <span className="prev-action-label">{printing ? 'Preparing…' : 'Print'}</span>
             </button>
             <button className="prev-action-btn" disabled={!blob} onClick={download}>
               <DownloadIcon size={18} />
@@ -313,10 +367,55 @@ export function PrescriptionPreviewPanel({
             <p className="muted preview-note">
               Sharing, printing or issuing marks this visit complete. Only
               <strong> Issue to patient</strong> puts it in their myDigitalOPD
-              account.
+              account. Print leaves the header blank for your own pad.
             </p>
           )}
+
+          {onDeleted && (
+            <button
+              type="button"
+              className="preview-delete-btn"
+              disabled={remove.isPending}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <TrashIcon size={15} />
+              {remove.isPending ? 'Deleting…' : 'Delete prescription'}
+            </button>
+          )}
         </>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this prescription?"
+          destructive
+          busy={remove.isPending}
+          confirmLabel="Delete"
+          message={
+            alreadyIssued ? (
+              <>
+                The patient can already see this prescription. Deleting it
+                removes their copy, the PDF and the notification they were
+                sent, along with every medicine and note on it.
+                <br />
+                <br />
+                This cannot be undone. To correct it instead, use Withdraw in
+                the editor — that keeps the medicines as a draft.
+              </>
+            ) : (
+              <>
+                Every medicine, the diagnosis, advice and any handwriting on
+                this draft will be removed. Nothing has been sent to the
+                patient, so they are not affected.
+                <br />
+                <br />
+                This cannot be undone.
+              </>
+            )
+          }
+          onConfirm={() => remove.mutate()}
+          onCancel={() => setConfirmDelete(false)}
+        />
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import { NAV, type NavIconName } from '../lib/nav';
 import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
 import { useCollapsible } from '../lib/collapsePreference';
 import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
+import { TOPBAR_SLOT_ID } from './TopbarPortal';
 import {
   AccountIcon,
   BlockIcon,
@@ -140,10 +141,12 @@ export default function Layout() {
 
       <div className="main">
         {/*
-          The phone top bar is the hamburger and nothing else, as the design
-          has it. The wordmark used to sit on the right; it is on the drawer
-          the button opens, and repeating it here only ate the width the
-          screen underneath actually needs.
+          The phone top bar is the hamburger plus whatever the screen puts
+          beside it (see `TopbarPortal`) — the appointment list uses the room
+          for its title and the doctor's initials, the consultation screen
+          leaves it empty. The wordmark used to sit on the right; it is on the
+          drawer the button opens, and repeating it here only ate the width
+          the screen underneath actually needs.
         */}
         <header className="topbar">
           <button
@@ -153,6 +156,7 @@ export default function Layout() {
           >
             ☰
           </button>
+          <div className="topbar-slot" id={TOPBAR_SLOT_ID} />
         </header>
         <main className="content">
           <Outlet />

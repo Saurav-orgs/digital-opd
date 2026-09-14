@@ -13,13 +13,21 @@ import { PrescriptionMode } from '../common/enums';
 /** Layout constants for an A4 prescription. */
 const PAGE = { width: 595.28, height: 841.89 };
 const MARGIN = 44;
-/**
- * Height the "book your next visit" QR block needs, including the gap above
- * it. Reserved by the body renderers so the code always lands on the same page
- * as the prescription it belongs to rather than being pushed onto a second.
- */
-const REBOOK_H = 96;
 const CONTENT_W = PAGE.width - MARGIN * 2;
+/** Where the per-page footer (separator, disclaimer, bottom bar) begins. */
+const FOOTER_TOP = PAGE.height - 75;
+/**
+ * The "book your next visit" QR block is pinned to the bottom of the last
+ * page, directly above the footer, rather than flowing after the body. This
+ * is the height it takes including the divider above it; the body renderers
+ * stop short of it so nothing runs underneath the code.
+ */
+const REBOOK_H = 100;
+const REBOOK_TOP = FOOTER_TOP - REBOOK_H;
+/** Lowest baseline the body may write to before it must start a new page. */
+const BODY_BOTTOM = REBOOK_TOP - 12;
+/** Where the body resumes on a continuation page. */
+const CONTINUATION_Y = 56;
 const COLOR = {
   accent: '#1B6EF3', // vibrant royal blue accent bar
   ink: '#111827',    // deep dark text / headers
@@ -84,12 +92,22 @@ export class PrescriptionPdfService {
     private readonly doctors: DoctorsService,
   ) {}
 
+  /**
+   * `letterhead: false` renders the same page with the doctor's header left
+   * blank — its space is kept, nothing is drawn in it. That is the print
+   * variant: doctors print onto their own pre-printed pad, which already
+   * carries the header, so the body has to land below it, not on top of it.
+   * Everything that reaches the patient as a file (issue, share, download)
+   * keeps the letterhead.
+   */
   async render(
     prescription: EPrescription,
     medicines: EPrescriptionMedicine[],
     appointment: Appointment,
     doctor: Doctor,
+    opts: { letterhead?: boolean } = {},
   ): Promise<Buffer> {
+    const letterhead = opts.letterhead !== false;
     const doc = new PDFDocument({
       size: 'A4',
       margins: { top: MARGIN, left: MARGIN, right: MARGIN, bottom: 0 },
@@ -101,11 +119,10 @@ export class PrescriptionPdfService {
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
 
-    // Draw top accent bar
-    this.topAccentBar(doc);
-
-    // Render doctor header
-    let y = this.doctorHeader(doc, doctor);
+    // The doctor's details are the header; the accent bar rules under them
+    // and separates the letterhead from the patient's sheet.
+    let y = this.doctorHeader(doc, doctor, letterhead);
+    y = this.headerRule(doc, y, letterhead);
 
     // Render patient name & date row
     y = this.patientInfo(doc, appointment, y);
@@ -120,6 +137,7 @@ export class PrescriptionPdfService {
 
     // The patient leaves with this sheet in hand — the QR is how the next
     // visit gets booked without them having to find the clinic online again.
+    // It sits at the foot of the last page, whatever the body left above it.
     await this.rebookQr(doc, doctor, y);
 
     // Render footer & furniture on all pages
@@ -129,15 +147,37 @@ export class PrescriptionPdfService {
     return done;
   }
 
-  // ── Top Accent Line ────────────────────────────────────────
-  private topAccentBar(doc: PDFKit.PDFDocument): void {
-    const barH = 4.5;
-    const y = 36;
-    doc.save().rect(MARGIN, y, CONTENT_W, barH).fill(COLOR.accent).restore();
+  // ── Accent Line ────────────────────────────────────────────
+  private accentBar(doc: PDFKit.PDFDocument, y: number): void {
+    doc.save().rect(MARGIN, y, CONTENT_W, 4.5).fill(COLOR.accent).restore();
+  }
+
+  /** The bar under the doctor's details on the first page. */
+  private headerRule(doc: PDFKit.PDFDocument, y: number, paint = true): number {
+    if (paint) this.accentBar(doc, y);
+    return y + 4.5 + 22;
+  }
+
+  /**
+   * A continuation page: no letterhead to rule under, so the bar sits at the
+   * top to keep the page framed the same way as the first.
+   */
+  private continuationPage(doc: PDFKit.PDFDocument): number {
+    doc.addPage();
+    this.accentBar(doc, 36);
+    return CONTINUATION_Y;
   }
 
   // ── Doctor Header ──────────────────────────────────────────
-  private doctorHeader(doc: PDFKit.PDFDocument, doctor: Doctor): number {
+  /**
+   * With `paint` off the header is laid out but not drawn, so the page below
+   * it sits exactly where it would with the header present.
+   */
+  private doctorHeader(
+    doc: PDFKit.PDFDocument,
+    doctor: Doctor,
+    paint = true,
+  ): number {
     const envClinic = this.config.get<{
       name: string;
       address: string;
@@ -145,8 +185,17 @@ export class PrescriptionPdfService {
       email: string;
     }>('clinic') || { name: '', address: '', phone: '', email: '' };
 
-    const topY = 56;
+    const topY = 44;
     const halfW = (CONTENT_W - 20) / 2;
+
+    // Draws, or only measures: either way `doc.y` ends up where the text does.
+    const text = (str: string, x: number, y: number, o: PDFKit.Mixins.TextOptions) => {
+      if (paint) {
+        doc.text(str, x, y, o);
+      } else {
+        doc.y = y + doc.heightOfString(str, o);
+      }
+    };
 
     // Doctor Name on Left
     let docName = doctor.name || 'Doctor';
@@ -154,32 +203,23 @@ export class PrescriptionPdfService {
       docName = `Dr. ${docName}`;
     }
 
-    doc
-      .fillColor(COLOR.ink)
-      .font('Helvetica-Bold')
-      .fontSize(15.5)
-      .text(docName, MARGIN, topY, { width: halfW });
+    doc.fillColor(COLOR.ink).font('Helvetica-Bold').fontSize(15.5);
+    text(docName, MARGIN, topY, { width: halfW });
 
     let leftY = doc.y + 3;
 
     // Qualifications
     if (doctor.qualifications?.trim()) {
-      doc
-        .font('Helvetica')
-        .fontSize(10)
-        .fillColor(COLOR.text)
-        .text(doctor.qualifications.trim(), MARGIN, leftY, { width: halfW });
+      doc.font('Helvetica').fontSize(10).fillColor(COLOR.text);
+      text(doctor.qualifications.trim(), MARGIN, leftY, { width: halfW });
       leftY = doc.y + 2;
     }
 
     // Specialization / Subtitle
     const spec = doctor.specialization || doctor.clinic_name;
     if (spec?.trim()) {
-      doc
-        .font('Helvetica')
-        .fontSize(9.5)
-        .fillColor(COLOR.muted)
-        .text(spec.trim(), MARGIN, leftY, { width: halfW });
+      doc.font('Helvetica').fontSize(9.5).fillColor(COLOR.muted);
+      text(spec.trim(), MARGIN, leftY, { width: halfW });
       leftY = doc.y;
     }
 
@@ -190,18 +230,15 @@ export class PrescriptionPdfService {
       .join('\n');
 
     const rightX = MARGIN + halfW + 20;
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(13)
-      .fillColor(COLOR.ink)
-      .text(contactLines, rightX, topY, {
-        width: halfW,
-        align: 'right',
-        lineGap: 2,
-      });
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR.ink);
+    text(contactLines, rightX, topY, {
+      width: halfW,
+      align: 'right',
+      lineGap: 2,
+    });
 
     const rightY = doc.y;
-    return Math.max(leftY, rightY) + 26;
+    return Math.max(leftY, rightY) + 14;
   }
 
   // ── Patient Info & Date ────────────────────────────────────
@@ -321,11 +358,7 @@ export class PrescriptionPdfService {
 
     meds.forEach((m, idx) => {
       // Check for page overflow before rendering row
-      if (y > PAGE.height - 150) {
-        doc.addPage();
-        this.topAccentBar(doc);
-        y = 56;
-      }
+      if (y > BODY_BOTTOM - 40) y = this.continuationPage(doc);
 
       const medicineName = [m.medicine_name, m.strength].filter(Boolean).join(' ');
       const title = `${idx + 1}. ${medicineName.toUpperCase()}`;
@@ -407,29 +440,27 @@ export class PrescriptionPdfService {
       y += Math.max(rowHeight + 10, 24);
     });
 
-    // Doctor's General Advice
+    // Doctor's General Advice, under its own heading so the patient can tell
+    // it apart from the medicine rows above.
     if (p.advice?.trim()) {
-      y += 8;
-      if (y > PAGE.height - 150) {
-        doc.addPage();
-        this.topAccentBar(doc);
-        y = 56;
-      }
+      y += 10;
+      if (y > BODY_BOTTOM - 60) y = this.continuationPage(doc);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(12)
+        .fillColor(COLOR.ink)
+        .text('ADVICE', MARGIN, y, { characterSpacing: 0.5 });
       doc
         .font('Helvetica')
         .fontSize(10.5)
         .fillColor(COLOR.text)
-        .text(p.advice.trim(), MARGIN, y, { width: CONTENT_W, lineGap: 3 });
+        .text(p.advice.trim(), MARGIN, doc.y + 4, { width: CONTENT_W, lineGap: 3 });
       y = doc.y + 10;
     }
 
     // Follow-up Date
     if (p.follow_up_date) {
-      if (y > PAGE.height - 150) {
-        doc.addPage();
-        this.topAccentBar(doc);
-        y = 56;
-      }
+      if (y > BODY_BOTTOM - 24) y = this.continuationPage(doc);
       const formattedFollowUp = formatReadableDate(p.follow_up_date);
       doc
         .font('Helvetica-Bold')
@@ -448,9 +479,9 @@ export class PrescriptionPdfService {
     drawing: Buffer | null,
     y: number,
   ): number {
-    // Stop short of the rebook block as well as the footer, so a full-page
+    // Stop short of the rebook block pinned above the footer, so a full-page
     // drawing is scaled to fit above the QR instead of colliding with it.
-    const availH = PAGE.height - 170 - REBOOK_H - y;
+    const availH = BODY_BOTTOM - y;
     if (!drawing) {
       doc
         .font('Helvetica-Oblique')
@@ -509,15 +540,11 @@ export class PrescriptionPdfService {
       return;
     }
 
-    // Start a page only if the body genuinely left no room. `pageFurniture`
+    // Pinned to the foot of the page, above the footer furniture. A new page
+    // is started only if the body genuinely ran into that space; `pageFurniture`
     // runs after this and covers whichever page we end on.
-    if (y > PAGE.height - 100 - REBOOK_H) {
-      doc.addPage();
-      this.topAccentBar(doc);
-      y = 56;
-    } else {
-      y += 14;
-    }
+    if (y > BODY_BOTTOM) this.continuationPage(doc);
+    y = REBOOK_TOP;
 
     const qrSize = 64;
 
@@ -587,7 +614,7 @@ export class PrescriptionPdfService {
       doc.switchToPage(i);
 
       // 1. Separator thin line
-      const divY = PAGE.height - 75;
+      const divY = FOOTER_TOP;
       doc
         .save()
         .moveTo(MARGIN, divY)
@@ -611,12 +638,7 @@ export class PrescriptionPdfService {
         );
 
       // 3. Bottom blue accent line
-      const barY = PAGE.height - 40;
-      doc
-        .save()
-        .rect(MARGIN, barY, CONTENT_W, 4.5)
-        .fill(COLOR.accent)
-        .restore();
+      this.accentBar(doc, PAGE.height - 40);
     }
   }
 }

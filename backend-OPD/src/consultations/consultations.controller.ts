@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Res,
   StreamableFile,
   UploadedFile,
@@ -20,6 +21,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { ConsultationsService } from './consultations.service';
@@ -189,16 +191,21 @@ export class ConsultationsController {
   @Get('prescription/preview')
   @ApiOperation({
     summary:
-      'Render the current draft as the PDF it would be issued as — nothing is frozen or sent',
+      'Render the current draft as the PDF it would be issued as — nothing is frozen or sent. ' +
+      '`letterhead=false` leaves the doctor header blank, for printing onto a pre-printed pad.',
   })
+  @ApiQuery({ name: 'letterhead', required: false, enum: ['true', 'false'] })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
   @RawResponse()
   async prescriptionPreview(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
     @Res({ passthrough: true }) res: Response,
+    @Query('letterhead') letterhead?: string,
   ): Promise<StreamableFile> {
-    const { buffer, filename } = await this.prescriptions.previewFile(id, user);
+    const { buffer, filename } = await this.prescriptions.previewFile(id, user, {
+      letterhead: letterhead !== 'false' && letterhead !== '0',
+    });
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
@@ -221,6 +228,19 @@ export class ConsultationsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.prescriptions.withdraw(id, user);
+  }
+
+  @Delete('prescription/permanent')
+  @ApiOperation({
+    summary:
+      'Delete the prescription outright (draft or issued): medicines, handwriting, PDF and patient notice all go',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  deletePrescription(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prescriptions.remove(id, user);
   }
 
   @Post('prescription/issue')

@@ -276,10 +276,15 @@ export class PrescriptionsService {
    * Deliberately not `assertIssuable`: a half-written draft is exactly what a
    * doctor wants to preview, and refusing to render one would make the button
    * useless at the point it is most wanted.
+   *
+   * `letterhead: false` is the print copy — header space left blank for the
+   * doctor's own pre-printed pad. Also used for an issued prescription, since
+   * the stored PDF carries the header and the frozen data renders identically.
    */
   async previewFile(
     appointmentId: string,
     user: AuthUser,
+    opts: { letterhead?: boolean } = {},
   ): Promise<{ buffer: Buffer; filename: string }> {
     const appointment = await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
@@ -293,8 +298,8 @@ export class PrescriptionsService {
     }
 
     return {
-      buffer: await this.pdf.render(prescription, medicines, appointment, doctor),
-      filename: this.pdfFilename(appointment, 'preview'),
+      buffer: await this.pdf.render(prescription, medicines, appointment, doctor, opts),
+      filename: this.pdfFilename(appointment, opts.letterhead === false ? 'print' : 'preview'),
     };
   }
 
@@ -348,8 +353,88 @@ export class PrescriptionsService {
       pdf_key: null,
     } as any);
 
-    // Best-effort cleanups: the prescription is already unfrozen, and none of
-    // these failing should hand the doctor an error for work that succeeded.
+    await this.discardIssuedCopy(prescription, pdfKey);
+
+    this.logger.log(`Prescription for appointment ${appointmentId} withdrawn to draft.`);
+    return this.toView(await this.reload(prescription.id));
+  }
+
+  /**
+   * Delete the prescription outright — the row, its medicines, the handwriting
+   * image and, if it was issued, everything `withdraw` would have removed.
+   *
+   * Withdraw is the fix for "I issued the wrong thing"; this is for "this
+   * visit should not carry this prescription at all", and the doctor asks
+   * for it from the preview after seeing the page. The next read of the
+   * visit's prescription creates an empty draft again (`findOrCreate`), so
+   * the editor simply comes back blank.
+   */
+  async remove(appointmentId: string, user: AuthUser) {
+    const appointment = await this.assertAccess(appointmentId, user);
+
+    const prescription = await this.prescriptionModel.findOne({
+      where: { appointment_id: appointmentId },
+    });
+    if (!prescription) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'This visit has no prescription to delete.',
+      });
+    }
+
+    const wasIssued = prescription.status === PrescriptionStatus.ISSUED;
+    const medicines = await this.medicinesFor(prescription.id);
+    const pdfKey = prescription.pdf_key;
+    const handwritingKey = prescription.handwriting_image_key;
+
+    await this.medicineModel.destroy({
+      where: { e_prescription_id: prescription.id },
+    });
+    await prescription.destroy();
+
+    // Best-effort cleanups, same as withdraw: the row is already gone, and
+    // none of these failing should hand the doctor an error for a delete
+    // that succeeded.
+    if (wasIssued) await this.discardIssuedCopy(prescription, pdfKey);
+    if (handwritingKey) {
+      try {
+        await this.storage.delete(handwritingKey);
+      } catch (err) {
+        this.logger.warn(`Could not delete handwriting image: ${(err as Error).message}`);
+      }
+    }
+
+    this.activity.recordForUser(user, {
+      action: ActivityAction.PRESCRIPTION_DELETED,
+      summary:
+        `Deleted the ${wasIssued ? 'issued' : 'draft'} prescription for ` +
+        `${appointment.patient_name} (${appointment.appointment_date}) ` +
+        `with ${medicines.length} medicine(s).`,
+      entity_type: 'prescription',
+      entity_id: prescription.id,
+      doctor_id: appointment.doctor_id,
+      metadata: {
+        appointment_id: appointment.id,
+        patient_mobile: appointment.patient_mobile,
+        was_issued: wasIssued,
+        medicine_count: medicines.length,
+        medicines: medicines.map((m) => m.medicine_name),
+      },
+    });
+
+    this.logger.log(`Prescription for appointment ${appointmentId} deleted.`);
+    return { deleted: true };
+  }
+
+  /**
+   * Everything that only exists because the prescription was issued: the
+   * rendered PDF the patient can open, the "your prescription is ready"
+   * notification, and the training pair captured at issue. Best-effort — the
+   * prescription has already been unfrozen or removed by the time this runs.
+   */
+  private async discardIssuedCopy(
+    prescription: EPrescription,
+    pdfKey: string | null | undefined,
+  ): Promise<void> {
     if (pdfKey) {
       try {
         await this.storage.delete(pdfKey);
@@ -375,16 +460,13 @@ export class PrescriptionsService {
     try {
       await this.trainingModel.destroy({
         where: {
-          appointment_id: appointmentId,
+          appointment_id: prescription.appointment_id,
           kind: TrainingSampleKind.PRESCRIPTION,
         },
       });
     } catch (err) {
       this.logger.warn(`Could not clear the training sample: ${(err as Error).message}`);
     }
-
-    this.logger.log(`Prescription for appointment ${appointmentId} withdrawn to draft.`);
-    return this.toView(await this.reload(prescription.id));
   }
 
   // ── patient-facing ─────────────────────────────────────────

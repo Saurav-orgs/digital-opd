@@ -658,6 +658,12 @@ export default function AppointmentPage() {
             onEdit={() => setStep(2)}
             onFinished={markComplete}
             onBackToList={() => navigate('/dashboard')}
+            onDeleted={() => {
+              // Nothing to preview any more: back to a blank editor, and the
+              // preview step is locked again until something is saved.
+              setSavedOnce(false);
+              setStep(2);
+            }}
             load={async () => {
               // Whichever mode was showing gets to push its draft first —
               // except on a frozen prescription, where saving is refused and

@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi, doctorsApi, appointmentsApi } from '../api/endpoints';
 import type { Appointment, ConsultationStatus, Doctor } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { WalkInModal } from '../components/WalkInModal';
+import { TopbarPortal } from '../components/TopbarPortal';
 import { Badge, Empty, Loading } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
 import {
   CalendarIcon,
   CheckCircleIcon,
-  DocumentIcon,
   FilterIcon,
   PhoneIcon,
   PlusPersonIcon,
@@ -91,8 +91,25 @@ export default function Dashboard() {
    */
   const completedToday = Math.max(0, data.total - data.pending.today);
 
+  const doctorName = meQ.data?.name ?? user?.name ?? '';
+
   return (
     <>
+      {/* On a phone the teal band is gone — the design spends that height on
+          rows instead — and the doctor's initials live in the top bar. The
+          band itself is hidden by CSS below 700px, not unmounted, so the
+          wider layouts keep it untouched. */}
+      <TopbarPortal>
+        <span className="topbar-title">Appointments</span>
+        {meQ.data?.profile_photo_url ? (
+          <img className="topbar-avatar" src={meQ.data.profile_photo_url} alt="" />
+        ) : (
+          <span className="topbar-avatar" aria-hidden title={doctorName}>
+            {initials(doctorName)}
+          </span>
+        )}
+      </TopbarPortal>
+
       <DoctorHero doctor={meQ.data} fallbackName={user?.name ?? ''} />
 
       <div className="stat-row">
@@ -275,6 +292,37 @@ function HourglassIcon() {
       <path d="M7 3h10M7 21h10M8 3v3.5c0 2 4 3.4 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.4-4 5.5s4 3.5 4 5.5V21" />
     </svg>
   );
+}
+
+/** "Female" → "F", "Male" → "M"; anything else as written (the design's own picker is F / M / Other). */
+function shortGender(g: string | null | undefined) {
+  const v = (g ?? '').trim();
+  if (!v) return '';
+  const first = v[0].toUpperCase();
+  if (first === 'M' || first === 'F') return first;
+  return v[0].toUpperCase() + v.slice(1).toLowerCase();
+}
+
+/** "09:30:00" → "9:30 AM", the way the design prints it. */
+function fmtTime(t: string | null | undefined) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return t.slice(0, 5);
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** Heading over a day's cards: "Yesterday", "Tomorrow", or "Wed, 2 Sept". */
+function dateGroupLabel(date: string) {
+  const d = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const offset = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (offset === 0) return 'Today';
+  if (offset === -1) return 'Yesterday';
+  if (offset === 1) return 'Tomorrow';
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 /** "2026-09-04" → "4 Sep". */
@@ -479,18 +527,30 @@ function RangeTable({
    * job. A card puts the whole appointment on screen at once.
    */
   if (narrow) {
+    // The server already orders Previous newest-first and Upcoming
+    // soonest-first, so a heading goes in wherever the date changes. Today
+    // is one day and needs none.
+    let lastDate: string | null = null;
     return (
       <div className="appt-cards">
-        {filtered.map((a) => (
-          <AppointmentCard
-            key={a.id}
-            a={a}
-            bucket={bucketOf(a, range, a.id === nextId)}
-            showDate={range !== 'today'}
-            isNext={a.id === nextId}
-            onClick={() => onSelect(a.id)}
-          />
-        ))}
+        {filtered.map((a) => {
+          const heading =
+            range !== 'today' && a.appointment_date !== lastDate
+              ? dateGroupLabel(a.appointment_date)
+              : null;
+          lastDate = a.appointment_date;
+          return (
+            <Fragment key={a.id}>
+              {heading && <div className="date-group">{heading}</div>}
+              <AppointmentCard
+                a={a}
+                bucket={bucketOf(a, range, a.id === nextId)}
+                isNext={a.id === nextId}
+                onClick={() => onSelect(a.id)}
+              />
+            </Fragment>
+          );
+        })}
       </div>
     );
   }
@@ -527,66 +587,29 @@ function RangeTable({
 }
 
 /**
- * What the patient brought with them, folded away under the card.
+ * One appointment as a card — the phone and tablet equivalent of a row.
  *
- * Reports and the reason for the visit are the two things that change how the
- * doctor opens an appointment, and the design puts a one-line summary of both
- * on the card with the detail a tap away. `reports_count` already comes down
- * with the list, so this costs no extra request.
+ * Deliberately just the person, the contact and the time. The reports count
+ * and "Note added" strip the design once carried were dropped from the list:
+ * they made every card a different height and belong on the visit itself.
+ * The date is not on the card either — Previous and Upcoming group their
+ * cards under a date heading instead, so it would only repeat that.
  */
-function AttachStrip({ a }: { a: Appointment }) {
-  const [open, setOpen] = useState(false);
-  const count = a.reports_count ?? 0;
-  const note = a.description?.trim();
-  if (!count && !note) return null;
-
-  return (
-    <>
-      <button
-        type="button"
-        className={`appt-attach ${open ? 'open' : ''}`}
-        onClick={(e) => {
-          // The card behind this opens the consultation; the strip only opens
-          // itself.
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <DocumentIcon size={13} />
-        <span>
-          {count > 0 && `${count} report${count === 1 ? '' : 's'}`}
-          {count > 0 && note ? ' · ' : ''}
-          {note ? 'Note added' : ''}
-        </span>
-        <span className="chev" aria-hidden>
-          ⌄
-        </span>
-      </button>
-      {open && (
-        <div className="appt-detail" onClick={(e) => e.stopPropagation()}>
-          {note ?? 'No note for this visit.'}
-        </div>
-      )}
-    </>
-  );
-}
-
-/** One appointment as a card — the phone and tablet equivalent of a row. */
 function AppointmentCard({
   a,
   bucket,
-  showDate,
   isNext,
   onClick,
 }: {
   a: Appointment;
   bucket: string;
-  showDate: boolean;
   isNext: boolean;
   onClick: () => void;
 }) {
   const done = isDone(a.consultation_status);
-  const who = [a.patient_gender, a.patient_age && `${a.patient_age} yrs`]
+  // "M · 29 yrs", so the line has room for the number beside it and the card
+  // stays two rows tall whatever the name and number are.
+  const who = [shortGender(a.patient_gender), a.patient_age && `${a.patient_age} yrs`]
     .filter(Boolean)
     .join(' · ');
 
@@ -607,7 +630,7 @@ function AppointmentCard({
           <div className="appt-card-top">
             <span className="appt-card-name">{a.patient_name}</span>
             {isNext && <span className="appt-badge next">Next</span>}
-            {done && <span className="appt-badge done">✓ Completed</span>}
+            {done && <span className="appt-badge done">Completed</span>}
             {a.consultation_status === 'no_show' && (
               <span className="appt-badge no-show">No-show</span>
             )}
@@ -631,11 +654,9 @@ function AppointmentCard({
           </a>
         </div>
         <span className={`appt-time-badge ${done ? 'is-done' : ''}`}>
-          {showDate && <span className="appt-time-date">{a.appointment_date}</span>}
-          {a.start_time?.slice(0, 5)}
+          {fmtTime(a.start_time)}
         </span>
       </div>
-      <AttachStrip a={a} />
     </div>
   );
 }
