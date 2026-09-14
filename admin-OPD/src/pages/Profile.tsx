@@ -5,8 +5,7 @@ import { authApi, doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading, PasswordInput } from '../components/ui';
-import { ApiError } from '../api/client';
-import { downloadFile } from '../lib/shareFile';
+import { ShareQrButton } from '../components/BookingQr';
 
 /**
  * The doctor's own home in the admin — profile details, photo and a link to
@@ -19,6 +18,7 @@ export default function Profile() {
   const toast = useToast();
   const qc = useQueryClient();
   const photoRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLInputElement>(null);
   // const logoRef = useRef<HTMLInputElement>(null);
   const canEdit = can('doctors', 'update');
   const canSchedule = can('opd_schedules', 'read');
@@ -70,6 +70,38 @@ export default function Profile() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['doctor-me'] }); toast.success('Profile photo updated'); },
     onError: (e) => toast.error(e),
   });
+
+  const uploadHeader = useMutation({
+    mutationFn: (file: File) => doctorsApi.uploadMyLetterheadHeader(file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['doctor-me'] });
+      toast.success('Prescription header updated', 'Every prescription issued from now on carries it.');
+    },
+    onError: (e) => toast.error(e),
+  });
+  const removeHeader = useMutation({
+    mutationFn: () => doctorsApi.removeMyLetterheadHeader(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['doctor-me'] });
+      toast.success('Prescription header removed', 'Your name and details print as the header again.');
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  // The header is drawn into a fixed box on the page, so it has to be the
+  // right shape to fill it: checked here, with the file in hand, because the
+  // server cannot read image dimensions and would otherwise fit a wrong
+  // shape into the box with blank space either side.
+  const pickHeader = async (file: File) => {
+    const problem = await checkHeaderImage(file);
+    if (problem) {
+      // A plain string, not an ApiError — `toast.error` would swallow it
+      // and print its generic fallback, which is exactly what it did.
+      toast.push('error', 'This image will not fit the header', problem);
+      return;
+    }
+    uploadHeader.mutate(file);
+  };
 
   /*
   const uploadLogo = useMutation({
@@ -262,6 +294,60 @@ export default function Profile() {
 
       <div className="grid cols-2-1">
         <div className="card">
+          {/* The doctor's own pad header, as one image. When set it replaces
+              the composed name/address header on the PDF; the fields below
+              still print when it is not. */}
+          <div className="card-title">Header image</div>
+          <p className="muted" style={{ fontSize: 12.5, margin: '-6px 0 10px' }}>
+            Upload the top strip of your own prescription pad and it prints as
+            the header. Best at <strong>{HEADER_PX.w} × {HEADER_PX.h} px</strong> (a wide
+            strip — at least {MIN_RATIO} times wider than it is tall), PNG or JPG, under
+            5 MB. Leave it empty to print your name and details instead.
+          </p>
+          <div className="lh-header-box">
+            {meQ.data?.letterhead_header_url ? (
+              <img src={meQ.data.letterhead_header_url} alt="Prescription header" />
+            ) : (
+              <span className="muted">No header uploaded — your details print instead</span>
+            )}
+          </div>
+          {canEdit && (
+            <div className="row" style={{ gap: 8, marginTop: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              <input
+                ref={headerRef}
+                type="file"
+                accept="image/png,image/jpeg"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void pickHeader(f);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => headerRef.current?.click()}
+                disabled={uploadHeader.isPending}
+              >
+                {uploadHeader.isPending
+                  ? 'Uploading…'
+                  : meQ.data?.letterhead_header_url
+                    ? 'Replace header'
+                    : 'Upload header'}
+              </button>
+              {meQ.data?.letterhead_header_url && (
+                <button
+                  className="btn btn-sm btn-danger"
+                  onClick={() => removeHeader.mutate()}
+                  disabled={removeHeader.isPending}
+                >
+                  {removeHeader.isPending ? 'Removing…' : 'Remove'}
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="card-title" style={{ marginTop: 4 }}>Details</div>
           {/* Clinic / practice name commented out for now as requested */}
           {/*
           <Field label="Clinic / practice name">
@@ -336,6 +422,7 @@ export default function Profile() {
           <div className="card">
             <div className="card-title">Live preview</div>
             <LetterheadPreview
+              headerUrl={meQ.data?.letterhead_header_url ?? null}
               clinicName={form.clinic_name || ''}
               doctorName={form.name.startsWith('Dr.') || form.name.startsWith('Dr ') ? form.name : (form.name ? `Dr. ${form.name}` : 'Dr. Doctor Name')}
               qualifications={form.qualifications || 'M.B.B.S.'}
@@ -350,10 +437,64 @@ export default function Profile() {
   );
 }
 
+/**
+ * The pixel size that fills the PDF's header box exactly. The box is the
+ * page's content width (507pt) by 90pt — a 5.63 : 1 strip — and 2000px wide
+ * prints crisply at that size.
+ */
+const HEADER_PX = { w: 2000, h: 355 };
+
+/**
+ * The least wide-for-its-height a header may be. The PDF box is 5.63 : 1;
+ * anything at least this wide fills the box's width (a shorter strip simply
+ * gets a little air above and below), while a squarer image would be shrunk
+ * to the box's height and print as a small block on the left.
+ */
+const MIN_RATIO = 4;
+
+/**
+ * Why a file will not do as the header, or null when it will.
+ *
+ * The box is a limit, not a mould: a doctor's own pad top will not be
+ * exactly our pixels, and need not be. Two things are refused — an image too
+ * tall for its width (see `MIN_RATIO`) and one too narrow to print sharply.
+ */
+function checkHeaderImage(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (w / h < MIN_RATIO) {
+        resolve(
+          `This image is ${w} × ${h} px — too tall for the header strip. It needs to be at ` +
+            `least ${MIN_RATIO} times wider than it is tall, like ${HEADER_PX.w} × ${HEADER_PX.h} px. ` +
+            `Crop it to just the top strip of your pad and try again.`,
+        );
+      } else if (w < HEADER_PX.w / 2) {
+        resolve(
+          `This image is only ${w} px wide and would print blurry. ` +
+            `Use one at least ${HEADER_PX.w / 2} px wide (${HEADER_PX.w} × ${HEADER_PX.h} px is ideal).`,
+        );
+      } else {
+        resolve(null);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve('That file could not be read as an image.');
+    };
+    img.src = url;
+  });
+}
+
 /** A faithful mini of the new PDF letterhead layout. */
 function LetterheadPreview({
-  doctorName, qualifications, specialization, address, phone,
+  headerUrl, doctorName, qualifications, specialization, address, phone,
 }: {
+  headerUrl: string | null;
   clinicName?: string;
   doctorName: string;
   qualifications: string;
@@ -363,25 +504,32 @@ function LetterheadPreview({
 }) {
   const accent = '#1B6EF3';
   return (
-    <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff', padding: '16px 14px' }}>
-      {/* Top blue bar */}
-      <div style={{ height: 3.5, background: accent, borderRadius: 2, marginBottom: 12 }} />
+    <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff', padding: '14px 14px 16px' }}>
+      {/* The header: the doctor's own uploaded strip, or their details. */}
+      {headerUrl ? (
+        <div style={{ aspectRatio: `${HEADER_PX.w} / ${HEADER_PX.h}`, width: '100%' }}>
+          <img src={headerUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block' }} />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{doctorName}</div>
+            {qualifications && <div style={{ fontSize: 10.5, color: '#374151', marginTop: 2 }}>{qualifications}</div>}
+            {specialization && <div style={{ fontSize: 10, color: '#6B7280', marginTop: 1 }}>{specialization}</div>}
+          </div>
+          <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#111827', maxWidth: 140 }}>
+            <div>{address || 'Address'}</div>
+            {phone && <div style={{ fontSize: 10, fontWeight: 400, color: '#6B7280', marginTop: 2 }}>{phone}</div>}
+          </div>
+        </div>
+      )}
 
-      {/* Header columns */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{doctorName}</div>
-          {qualifications && <div style={{ fontSize: 10.5, color: '#374151', marginTop: 2 }}>{qualifications}</div>}
-          {specialization && <div style={{ fontSize: 10, color: '#6B7280', marginTop: 1 }}>{specialization}</div>}
-        </div>
-        <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#111827', maxWidth: 140 }}>
-          <div>{address || 'Address'}</div>
-          {phone && <div style={{ fontSize: 10, fontWeight: 400, color: '#6B7280', marginTop: 2 }}>{phone}</div>}
-        </div>
-      </div>
+      {/* The blue rule under the header — this is what separates the pad from
+          the patient's sheet; on a print copy the header above is left blank. */}
+      <div style={{ height: 3.5, background: accent, borderRadius: 2, marginTop: 10 }} />
 
       {/* Patient info row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 16, borderTop: '1px solid #F3F4F6', paddingTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 14 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#111827' }}>Patient Name</div>
           <div style={{ fontSize: 10, color: '#374151', marginTop: 1 }}>Patient Name (Age yrs, Gender)</div>
@@ -391,16 +539,31 @@ function LetterheadPreview({
         </div>
       </div>
 
-      {/* Treatment / Content */}
-      <div style={{ marginTop: 14, borderTop: '1px solid #F3F4F6', paddingTop: 8 }}>
+      {/* Body sections, in the order the PDF prints them */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: '#111827', letterSpacing: 0.3 }}>DIAGNOSIS</div>
+        <div style={{ fontSize: 9.5, color: '#6B7280', marginTop: 3, fontStyle: 'italic' }}>Diagnosis appears here.</div>
+      </div>
+      <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 10.5, fontWeight: 700, color: '#111827', letterSpacing: 0.3 }}>TREATMENT ADVICE</div>
-        <div style={{ fontSize: 9.5, color: '#6B7280', marginTop: 4, fontStyle: 'italic' }}>
-          Medicines and advice appear here.
+        <div style={{ fontSize: 9.5, color: '#6B7280', marginTop: 3, fontStyle: 'italic' }}>Medicines appear here.</div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: '#111827', letterSpacing: 0.3 }}>ADVICE</div>
+        <div style={{ fontSize: 9.5, color: '#6B7280', marginTop: 3, fontStyle: 'italic' }}>General advice and follow-up date appear here.</div>
+      </div>
+
+      {/* Booking QR, pinned above the footer */}
+      <div style={{ marginTop: 22, borderTop: '0.5px solid #E5E7EB', paddingTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ width: 26, height: 26, flexShrink: 0, borderRadius: 3, background: 'repeating-linear-gradient(90deg,#111827 0 3px,transparent 3px 6px), repeating-linear-gradient(0deg,#111827 0 3px,transparent 3px 6px)', backgroundBlendMode: 'multiply', opacity: 0.85 }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, color: '#111827' }}>Book your next appointment</div>
+          <div style={{ fontSize: 8, color: accent, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Scan the code or open the booking link</div>
         </div>
       </div>
 
       {/* Bottom disclaimer & blue bar */}
-      <div style={{ marginTop: 18, borderTop: '0.5px solid #E5E7EB', paddingTop: 6, textAlign: 'center' }}>
+      <div style={{ marginTop: 10, borderTop: '0.5px solid #E5E7EB', paddingTop: 6, textAlign: 'center' }}>
         <div style={{ fontSize: 8, fontStyle: 'italic', color: '#9CA3AF' }}>
           *This is a digitally signed prescription and does not require signature.*
         </div>
@@ -410,83 +573,6 @@ function LetterheadPreview({
   );
 }
 
-/**
- * Shares the QR image itself, not just the booking link — a doctor sending this
- * to a patient on WhatsApp wants the picture, which is what they will print or
- * forward.
- *
- * The bytes come from the API, not from `qr_code_url`. That URL points straight
- * at the S3 bucket, which serves the object publicly but sends no
- * `Access-Control-Allow-Origin` header — so `fetch`ing it from this origin is
- * blocked by the browser and this button could only ever report a failure. The
- * <img> above still uses that URL, because images are not subject to the same
- * restriction.
- *
- * Web Share level 2 (`files`) is the good path and exists on the phones this
- * matters on. Where it is missing — most desktop browsers — the image is copied
- * to the clipboard instead, so it can be pasted straight into a chat, and
- * failing that it is saved. Download remains as the button next to this one.
- */
-function ShareQrButton({
-  doctorName,
-  bookingUrl,
-}: {
-  doctorName: string;
-  bookingUrl: string;
-}) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-
-  const share = async () => {
-    setBusy(true);
-    try {
-      const { blob, filename } = await doctorsApi.myQrFile();
-      const file = new File([blob], filename, { type: blob.type || 'image/png' });
-
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Book an appointment with ${doctorName}`,
-          text: `Scan this QR or open ${bookingUrl} to book an appointment with ${doctorName}.`,
-        });
-        return;
-      }
-
-      // No file sharing here — put the image on the clipboard instead.
-      if (navigator.clipboard && 'ClipboardItem' in window) {
-        try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type || 'image/png']: blob }),
-          ]);
-          toast.success('QR code copied — paste it into a chat');
-          return;
-        } catch {
-          // Clipboard images are refused in some browsers; fall through to save.
-        }
-      }
-
-      downloadFile(file);
-      toast.success(
-        'QR code downloaded',
-        'This browser cannot open a share sheet — attach the saved image instead.',
-      );
-    } catch (err) {
-      // A user dismissing the share sheet is not an error worth shouting about.
-      if ((err as Error)?.name === 'AbortError') return;
-      toast.error(
-        err instanceof ApiError ? err.message : 'Could not share the QR code.',
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button className="btn btn-sm btn-primary" onClick={share} disabled={busy}>
-      {busy ? 'Preparing…' : '↗ Share QR'}
-    </button>
-  );
-}
 
 /**
  * Rotate your own password.

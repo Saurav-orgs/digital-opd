@@ -54,7 +54,7 @@ export class StaffPatientProfilesController {
   @Get()
   @ApiOperation({ summary: 'Every patient this clinic has seen' })
   @Permissions({
-    module: PermissionModule.APPOINTMENTS,
+    module: PermissionModule.PATIENTS,
     action: PermissionAction.READ,
   })
   async list(@CurrentUser() user: AuthUser, @Query('search') search?: string) {

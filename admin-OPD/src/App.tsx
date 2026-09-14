@@ -31,7 +31,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
 function Home() {
   const { can, isDoctor, isSuperAdmin } = useAuth();
   if (isSuperAdmin) return <Navigate to="/doctors" replace />;
-  if (can('dashboard', 'read')) return <Navigate to="/dashboard" replace />;
   if (can('appointments', 'read')) return <Navigate to="/dashboard" replace />;
   if (isDoctor) return <Navigate to="/profile" replace />;
   if (can('reports', 'read')) return <Navigate to="/reports" replace />;

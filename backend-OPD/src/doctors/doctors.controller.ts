@@ -100,6 +100,29 @@ export class DoctorsController {
     return this.doctorsService.uploadLetterheadLogo(this.selfId(user), file);
   }
 
+  @Post('me/letterhead-header')
+  @ApiOperation({
+    summary:
+      'Doctor uploads their own prescription header image (drawn into a fixed box; PNG/JPG)',
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(fileBody)
+  @UseInterceptors(FileInterceptor('file', imageUpload))
+  uploadOwnLetterheadHeader(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.doctorsService.uploadLetterheadHeader(this.selfId(user), file);
+  }
+
+  @Delete('me/letterhead-header')
+  @ApiOperation({ summary: 'Remove the uploaded header; the composed text header prints again' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
+  removeOwnLetterheadHeader(@CurrentUser() user: AuthUser) {
+    return this.doctorsService.removeLetterheadHeader(this.selfId(user));
+  }
+
   @Post('me/qr')
   @ApiOperation({ summary: 'Doctor uploads own profile QR code image' })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })

@@ -286,6 +286,40 @@ export class DoctorsService {
     return this.toView(doctor);
   }
 
+  /**
+   * Upload the doctor's own prescription header — the top strip of their pad
+   * as one image. PNG or JPEG only: those are what pdfkit can embed, and a
+   * WebP here would be accepted now and fail at the first issue.
+   */
+  async uploadLetterheadHeader(id: string, file: Express.Multer.File) {
+    const doctor = await this.getOrFail(id);
+    if (!file) throw new AppException(ErrorCode.FILE_REQUIRED);
+    if (!['image/png', 'image/jpeg'].includes(file.mimetype)) {
+      throw new AppException(ErrorCode.UNSUPPORTED_FILE_TYPE, {
+        message: 'The prescription header must be a PNG or JPG image.',
+      });
+    }
+    const { key } = await this.storage.uploadImage(file, `doctors/${id}/letterhead-header`);
+    if (doctor.letterhead_header_key) await this.storage.delete(doctor.letterhead_header_key);
+    await doctor.update({ letterhead_header_key: key } as any);
+    return this.toView(doctor);
+  }
+
+  /** Back to the composed text header. */
+  async removeLetterheadHeader(id: string) {
+    const doctor = await this.getOrFail(id);
+    const key = doctor.letterhead_header_key;
+    await doctor.update({ letterhead_header_key: null } as any);
+    if (key) {
+      try {
+        await this.storage.delete(key);
+      } catch (err) {
+        this.logger.warn(`Could not delete old letterhead header: ${(err as Error).message}`);
+      }
+    }
+    return this.toView(doctor);
+  }
+
   /** Upload a custom doctor profile QR code image. */
   async uploadQr(id: string, file: Express.Multer.File) {
     const doctor = await this.getOrFail(id);
@@ -891,6 +925,7 @@ export class DoctorsService {
       ...json,
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       clinic_logo_url: this.storage.publicUrl(d.clinic_logo_key),
+      letterhead_header_url: this.storage.publicUrl(d.letterhead_header_key),
       qr_code_url: this.storage.publicUrl(d.qr_code_key),
       // Same resolver the QR is rendered from — the link shown and the link
       // encoded must not be able to drift apart.

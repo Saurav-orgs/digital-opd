@@ -28,6 +28,13 @@ const REBOOK_TOP = FOOTER_TOP - REBOOK_H;
 const BODY_BOTTOM = REBOOK_TOP - 12;
 /** Where the body resumes on a continuation page. */
 const CONTINUATION_Y = 56;
+/**
+ * The box a doctor-uploaded header is drawn into: the full content width by
+ * a fixed height, so every pad lines up the same way. The profile page tells
+ * the doctor the pixel size that fills it exactly (2000 × 355 px ≈ 5.63 : 1);
+ * anything else is fitted inside, never cropped.
+ */
+export const HEADER_BOX = { top: 40, height: 90 };
 const COLOR = {
   accent: '#1B6EF3', // vibrant royal blue accent bar
   ink: '#111827',    // deep dark text / headers
@@ -119,9 +126,22 @@ export class PrescriptionPdfService {
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
 
-    // The doctor's details are the header; the accent bar rules under them
-    // and separates the letterhead from the patient's sheet.
-    let y = this.doctorHeader(doc, doctor, letterhead);
+    // The header is the doctor's own uploaded pad top when they have one,
+    // otherwise composed from their details; the accent bar rules under
+    // either and separates the letterhead from the patient's sheet. On a
+    // print copy neither is drawn, but the space is kept.
+    let y: number;
+    if (doctor.letterhead_header_key && !letterhead) {
+      // Print copy of a pad with its own header: keep the image box's height
+      // blank, not the text header's, so the body lands where it does on the
+      // issued copy.
+      y = HEADER_BOX.top + HEADER_BOX.height + 12;
+    } else {
+      const headerImage = letterhead ? await this.fetchHeaderImage(doctor) : null;
+      y = headerImage
+        ? this.imageHeader(doc, headerImage)
+        : this.doctorHeader(doc, doctor, letterhead);
+    }
     y = this.headerRule(doc, y, letterhead);
 
     // Render patient name & date row
@@ -166,6 +186,34 @@ export class PrescriptionPdfService {
     doc.addPage();
     this.accentBar(doc, 36);
     return CONTINUATION_Y;
+  }
+
+  // ── Uploaded Header ────────────────────────────────────────
+  /** The doctor's own header image, fitted into `HEADER_BOX`, left-aligned. */
+  private imageHeader(doc: PDFKit.PDFDocument, image: Buffer): number {
+    try {
+      doc.image(image, MARGIN, HEADER_BOX.top, {
+        fit: [CONTENT_W, HEADER_BOX.height],
+        valign: 'center',
+      });
+    } catch (err) {
+      this.logger.warn(`Could not embed the letterhead header: ${(err as Error).message}`);
+    }
+    return HEADER_BOX.top + HEADER_BOX.height + 12;
+  }
+
+  /**
+   * Best-effort: a missing or unreadable image falls back to the composed
+   * header rather than failing the prescription.
+   */
+  private async fetchHeaderImage(doctor: Doctor): Promise<Buffer | null> {
+    if (!doctor.letterhead_header_key) return null;
+    try {
+      return await this.storage.download(doctor.letterhead_header_key);
+    } catch (err) {
+      this.logger.warn(`Could not fetch the letterhead header: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   // ── Doctor Header ──────────────────────────────────────────

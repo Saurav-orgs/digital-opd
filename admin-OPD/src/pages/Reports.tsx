@@ -70,7 +70,7 @@ export default function Reports() {
   return (
     <>
       <div className="page-head">
-        <h1>Reports</h1>
+        <h1>Upload report for patients</h1>
       </div>
 
       <div className="card" style={{ marginBottom: 16, maxWidth: 480 }}>

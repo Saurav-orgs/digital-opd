@@ -7,7 +7,9 @@ export type PermModule =
   | 'appointments'
   | 'dashboard'
   | 'pathlabs'
-  | 'reports';
+  | 'reports'
+  | 'activity'
+  | 'patients';
 export type PermAction = 'create' | 'read' | 'update' | 'delete';
 
 export interface AuthUser {
@@ -70,6 +72,8 @@ export interface Doctor {
   clinic_address: string | null;
   clinic_phone: string | null;
   clinic_logo_url: string | null;
+  /** The doctor's own uploaded pad header, drawn as the PDF header when set. */
+  letterhead_header_url?: string | null;
 }
 
 /** A doctor as the super admin reviews them: profile plus the licence on file. */
@@ -118,7 +122,8 @@ export interface DaySlots {
   slots: Slot[];
 }
 
-export type AppointmentStatus = 'confirmed' | 'rejected';
+/** `cancelled` is the patient withdrawing the booking; `rejected` the clinic. */
+export type AppointmentStatus = 'confirmed' | 'rejected' | 'cancelled';
 export type ConsultationStatus =
   | 'pending'
   | 'done'

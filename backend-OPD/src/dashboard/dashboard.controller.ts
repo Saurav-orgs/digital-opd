@@ -13,7 +13,10 @@ export class DashboardController {
 
   @Get()
   @ApiOperation({ summary: 'Today’s appointments + counts per doctor' })
-  @Permissions({ module: PermissionModule.DASHBOARD, action: PermissionAction.READ })
+  // The dashboard is the appointment list with counters on top: one screen,
+  // one permission. `dashboard` stays in the catalogue for old grants but is
+  // no longer asked for anywhere.
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
   summary(@CurrentUser() user: AuthUser) {
     return this.service.summary(user);
   }

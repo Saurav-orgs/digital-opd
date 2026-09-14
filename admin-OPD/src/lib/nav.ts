@@ -37,14 +37,21 @@ export const NAV: NavItem[] = [
   { path: '/doctors', label: 'Doctors', module: 'doctors', icon: 'hospital', superAdminOnly: true },
   { path: '/settings', label: 'Settings', module: 'doctors', icon: 'settings', superAdminOnly: true },
   // Clinic-side screens: the platform super-admin manages doctors, not patients.
-  { path: '/dashboard', label: 'Appointments', module: 'dashboard', icon: 'calendar', doctorOnly: true },
-  // Hidden from the menu at the client's request. Reports are filed from the
-  // appointment they belong to now, which is where the doctor already is —
-  // both pages, their routes and their permissions still work if linked to.
-  { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: 'flask', doctorOnly: true, hidden: true },
-  { path: '/reports', label: 'Reports', module: 'reports', icon: 'document', doctorOnly: true, hidden: true },
+  // One screen, one permission: the counters on top of the list are not a
+  // separate ability, so the item and the API behind it both ask for
+  // `appointments`. `dashboard` stays in the catalogue for old grants only.
+  { path: '/dashboard', label: 'Appointments', module: 'appointments', icon: 'calendar', doctorOnly: true },
   // Everyone this clinic has seen, as people rather than as appointments.
-  { path: '/patients', label: 'Patients', module: 'appointments', icon: 'people', doctorOnly: true },
+  { path: '/patients', label: 'Patients', module: 'patients', icon: 'people', doctorOnly: true },
+  // Report upload by mobile number, for the desk and pathlab staff. Doctors
+  // still file reports from the appointment itself; this is the route for a
+  // report that arrives without a visit open — a role holding `reports`
+  // sees it.
+  { path: '/reports', label: 'Upload reports', module: 'reports', icon: 'document', doctorOnly: true },
+  // Pathlab login accounts. Still hidden from the menu: the page manages
+  // logins, not reports, and nobody has asked for it back. Route, page and
+  // permissions remain in place.
+  { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: 'flask', doctorOnly: true, hidden: true },
   { path: '/blocked-numbers', label: 'Blocked', module: 'appointments', icon: 'block', doctorOnly: true },
   // Clinic staff accounts and what each of them may do. Doctor-side only:
   // the super admin manages tenants, not a clinic's own reception desk.
@@ -60,19 +67,40 @@ export const NAV: NavItem[] = [
  * holds rather than what happens to be on screen. Purely a question of which
  * choices are worth putting in front of a clinic admin:
  *
- *   pathlabs, reports  — their screens are gone from the sidebar, so granting
- *                        them buys nothing.
+ *   pathlabs           — its screen is gone from the sidebar, so granting it
+ *                        buys nothing.
  *   doctors            — the screens behind it (Doctors, Settings) belong to
  *                        the platform super admin.
  *   opd_schedules      — the doctor's own schedule, reached from My profile.
- *                        The doctor's login bypasses permission checks anyway,
- *                        so the grant never applied to the one person using it.
+ *   activity           — the audit log has no screen in this app.
+ *   dashboard          — folded into `appointments`: the list and its
+ *                        counters are one screen, and asking twice only
+ *                        made admins wonder which box the doctor needed.
  *
  * Delete a name from this list to bring its row straight back.
  */
 export const MODULES_HIDDEN_FROM_ROLES: PermModule[] = [
   'pathlabs',
-  'reports',
   'doctors',
   'opd_schedules',
+  'activity',
+  'dashboard',
 ];
+
+/**
+ * How the role editor names a module. The sidebar label where there is one,
+ * so an admin ticking "Upload reports" can see which menu item they are
+ * granting; a plain name for the rest.
+ */
+export const MODULE_LABEL: Record<PermModule, string> = {
+  dashboard: 'Dashboard',
+  appointments: 'Appointments',
+  patients: 'Patients',
+  reports: 'Upload reports',
+  users: 'Users',
+  roles: 'Roles',
+  pathlabs: 'Pathlabs',
+  doctors: 'Doctors',
+  opd_schedules: 'OPD schedules',
+  activity: 'Activity log',
+};

@@ -87,6 +87,13 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.STRING, allowNull: true })
   clinic_logo_key: string | null;
 
+  /**
+   * S3 key of the doctor's own pad header, uploaded as one image and drawn
+   * into the fixed header box of the PDF. Null → the composed text header.
+   */
+  @Column({ type: DataType.STRING, allowNull: true })
+  letterhead_header_key: string | null;
+
   @Column({ type: DataType.TEXT, allowNull: true })
   clinic_address: string | null;
 

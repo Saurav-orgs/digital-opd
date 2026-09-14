@@ -31,6 +31,7 @@ import {
   PrinterIcon,
   SparkleIcon,
   TrashIcon,
+  EyeIcon,
 } from '../components/icons';
 
 /** "09:00" → "9:00 AM". Left alone if it is not an HH:mm string. */
@@ -894,32 +895,50 @@ function ReportCard({
 
   const { ai_summary_status: status, ai_summary: summary } = report;
   const ready = status === 'ready' && !!summary;
+  const summarising = status === 'pending' || status === 'processing';
 
   return (
     <div className="report-card">
       <div className="report-top">
         <div className="report-info">
-          <a
-            className="report-name"
-            href={report.url}
-            target="_blank"
-            rel="noreferrer"
-            title={report.title}
-          >
+          {/* Plain text: the name used to be the link that opened the file,
+              which read as a label and got missed. View is a button now. */}
+          <div className="report-name" title={report.title}>
             {report.title}
-          </a>
-          {report.createdAt && (
-            <div className="report-date">
-              {new Date(report.createdAt).toLocaleString(undefined, {
+          </div>
+          <div className="report-date">
+            {report.createdAt &&
+              new Date(report.createdAt).toLocaleString(undefined, {
                 day: 'numeric',
                 month: 'short',
                 hour: 'numeric',
                 minute: '2-digit',
               })}
-            </div>
-          )}
+            {/* The summary's state, on the row rather than behind the sparkle,
+                so "is it done yet?" is answered without opening anything. The
+                appointment is re-fetched while this runs, so it clears itself. */}
+            {summarising && (
+              <span className="report-state summarising">
+                <span className="report-state-dot" aria-hidden />
+                Summarising…
+              </span>
+            )}
+            {status === 'failed' && (
+              <span className="report-state failed">Summary failed</span>
+            )}
+          </div>
         </div>
         <div className="report-actions">
+          <a
+            className="ra-view-btn"
+            href={report.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the report"
+          >
+            <EyeIcon size={14} />
+            <span>View</span>
+          </a>
           <button
             className="ra-icon-btn"
             onClick={print}
@@ -939,10 +958,10 @@ function ReportCard({
             <DownloadIcon size={14} />
           </button>
           <button
-            className={`ra-icon-btn ${open ? 'summary-active' : ''}`}
+            className={`ra-icon-btn ${open ? 'summary-active' : ''} ${summarising ? 'is-busy' : ''}`}
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            title="AI summary"
+            title={summarising ? 'Summarising…' : 'AI summary'}
             aria-label="AI summary"
           >
             <SparkleIcon size={14} />

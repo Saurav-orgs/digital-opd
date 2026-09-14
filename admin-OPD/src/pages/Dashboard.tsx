@@ -6,6 +6,7 @@ import type { Appointment, ConsultationStatus, Doctor } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { WalkInModal } from '../components/WalkInModal';
 import { TopbarPortal } from '../components/TopbarPortal';
+import { BookingQrModal } from '../components/BookingQr';
 import { Badge, Empty, Loading } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
@@ -15,6 +16,7 @@ import {
   FilterIcon,
   PhoneIcon,
   PlusPersonIcon,
+  QrIcon,
   ResetIcon,
   SearchIcon,
 } from '../components/icons';
@@ -38,6 +40,7 @@ export default function Dashboard() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState<string | undefined>(undefined);
   const [walkInOpen, setWalkInOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim() || undefined), 300);
@@ -258,19 +261,37 @@ export default function Dashboard() {
         front desk books a walk-in while looking at the queue, not at the top
         of the page.
       */}
-      {canCreate && (
-        <button
-          className="fab-walkin"
-          disabled={!doctorId}
-          onClick={() => setWalkInOpen(true)}
-        >
-          <PlusPersonIcon size={19} />
-          <span>Walk In</span>
-        </button>
-      )}
+      <div className="fab-row">
+        {/* The booking QR next to it: the other thing the desk is asked for
+            while looking at the queue is "how do I book next time?". */}
+        {meQ.data?.public_slug && (
+          <button
+            className="fab-walkin fab-qr"
+            onClick={() => setQrOpen(true)}
+            title="Booking QR code"
+            aria-label="Booking QR code"
+          >
+            <QrIcon size={19} />
+            <span>QR</span>
+          </button>
+        )}
+        {canCreate && (
+          <button
+            className="fab-walkin"
+            disabled={!doctorId}
+            onClick={() => setWalkInOpen(true)}
+          >
+            <PlusPersonIcon size={19} />
+            <span>Walk In</span>
+          </button>
+        )}
+      </div>
 
       {walkInOpen && doctorId && (
         <WalkInModal doctorId={doctorId} onClose={() => setWalkInOpen(false)} />
+      )}
+      {qrOpen && meQ.data && (
+        <BookingQrModal doctor={meQ.data} onClose={() => setQrOpen(false)} />
       )}
     </>
   );
@@ -453,6 +474,15 @@ function isDone(status: ConsultationStatus) {
 }
 
 /**
+ * Called off, by either side: the clinic cancelling sets the consultation to
+ * `rejected`; a patient withdrawing their own booking sets the appointment
+ * itself to `cancelled`. Both read as "Cancelled" on the list.
+ */
+function isCancelled(a: Appointment) {
+  return a.consultation_status === 'rejected' || a.status === 'cancelled';
+}
+
+/**
  * Is this visit still waiting on the doctor?
  *
  * Not simply "not done": a no-show never happened and a cancelled visit was
@@ -468,7 +498,8 @@ function isOpen(status: ConsultationStatus) {
 function bucketOf(a: Appointment, range: Range, isNext: boolean): string {
   if (range === 'previous') return 'previous';
   if (range === 'upcoming') return 'upcoming';
-  if (isDone(a.consultation_status)) return 'today-done';
+  // Anything that is over — seen, missed or called off — recedes to grey.
+  if (!isOpen(a.consultation_status) || isCancelled(a)) return 'today-done';
   return isNext ? 'today-next' : 'today-wait';
 }
 
@@ -506,7 +537,9 @@ function RangeTable({
    */
   const nextId = useMemo(() => {
     if (range !== 'today') return null;
-    return filtered.find((a) => isOpen(a.consultation_status))?.id ?? null;
+    return (
+      filtered.find((a) => isOpen(a.consultation_status) && !isCancelled(a))?.id ?? null
+    );
   }, [filtered, range]);
 
   if (listQ.isLoading) return <Loading />;
@@ -607,6 +640,8 @@ function AppointmentCard({
   onClick: () => void;
 }) {
   const done = isDone(a.consultation_status);
+  const cancelled = isCancelled(a);
+  const over = done || cancelled || a.consultation_status === 'no_show';
   // "M · 29 yrs", so the line has room for the number beside it and the card
   // stays two rows tall whatever the name and number are.
   const who = [shortGender(a.patient_gender), a.patient_age && `${a.patient_age} yrs`]
@@ -631,7 +666,8 @@ function AppointmentCard({
             <span className="appt-card-name">{a.patient_name}</span>
             {isNext && <span className="appt-badge next">Next</span>}
             {done && <span className="appt-badge done">Completed</span>}
-            {a.consultation_status === 'no_show' && (
+            {cancelled && <span className="appt-badge cancelled">Cancelled</span>}
+            {!cancelled && a.consultation_status === 'no_show' && (
               <span className="appt-badge no-show">No-show</span>
             )}
             {a.on_leave && (
@@ -653,7 +689,7 @@ function AppointmentCard({
             {a.patient_mobile}
           </a>
         </div>
-        <span className={`appt-time-badge ${done ? 'is-done' : ''}`}>
+        <span className={`appt-time-badge ${over ? 'is-done' : ''}`}>
           {fmtTime(a.start_time)}
         </span>
       </div>
@@ -706,7 +742,9 @@ function AppointmentRow({
       </td>
       <td className="muted">{a.patient_mobile}</td>
       <td>
-        <Badge value={a.consultation_status} />
+        {/* A patient's own cancellation lives on the appointment, not the
+            consultation; it reads the same as the clinic's. */}
+        <Badge value={isCancelled(a) ? 'rejected' : a.consultation_status} />
       </td>
       <td className="muted" style={{ whiteSpace: 'nowrap' }}>
         {showDate ? `${a.appointment_date} · ` : ''}

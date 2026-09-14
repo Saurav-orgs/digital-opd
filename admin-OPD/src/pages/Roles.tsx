@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { rolesApi } from '../api/endpoints';
-import type { Permission, Role } from '../api/types';
+import type { PermModule, Permission, Role } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { ActionMenuDropdown, Empty, Field, Loading, Modal } from '../components/ui';
-import { MODULES_HIDDEN_FROM_ROLES } from '../lib/nav';
+import { MODULES_HIDDEN_FROM_ROLES, MODULE_LABEL } from '../lib/nav';
 
 const ACTIONS = ['create', 'read', 'update', 'delete'] as const;
 
@@ -247,7 +247,9 @@ function RoleRow({
 }) {
   return (
     <>
-      <div className="mod">{module.replace('_', ' ')}</div>
+      <div className="mod">
+        {MODULE_LABEL[module as PermModule] ?? module.replace('_', ' ')}
+      </div>
       {ACTIONS.map((a) => {
         const perm = actions[a];
         return (

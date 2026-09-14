@@ -65,6 +65,7 @@ export class MasterSetupService implements OnApplicationBootstrap {
       // Super admin is the platform owner only — no doctor profile attached.
       await this.ensureSuperAdminUser(role.id);
       await this.ensurePathlabRole();
+      await this.ensureTenantDoctorRolesCurrent();
     } catch (err) {
       // Never crash the app over setup — surface it loudly and move on so
       // health checks still pass and the issue is visible in logs.
@@ -176,6 +177,53 @@ export class MasterSetupService implements OnApplicationBootstrap {
     return (
       await this.permissionModel.findAll({ attributes: ['id'] })
     ).map((p) => p.id);
+  }
+
+  /**
+   * Brings every tenant "Doctor" role up to the current module list.
+   *
+   * A tenant's Doctor role is written once, at registration, with every
+   * clinical permission that existed on that day. A module added later —
+   * `patients` was the first — would otherwise be missing from every clinic
+   * that signed up before it, and the doctor would lose a screen on deploy.
+   * Same rule as registration: everything except doctors:create/delete.
+   */
+  private async ensureTenantDoctorRolesCurrent(): Promise<void> {
+    const doctorRoles = await this.roleModel.findAll({
+      where: { name: 'Doctor', is_system: false },
+      attributes: ['id', 'doctor_id'],
+    });
+    const tenantRoles = doctorRoles.filter((r) => r.doctor_id);
+    if (!tenantRoles.length) return;
+
+    const wanted = (
+      await this.permissionModel.findAll({ attributes: ['id', 'module', 'action'] })
+    ).filter(
+      (p) =>
+        !(
+          p.module === PermModule.DOCTORS &&
+          (p.action === PermissionAction.CREATE || p.action === PermissionAction.DELETE)
+        ),
+    );
+
+    const linked = await this.rolePermissionModel.findAll({
+      where: { role_id: tenantRoles.map((r) => r.id) },
+      attributes: ['role_id', 'permission_id'],
+    });
+    const held = new Set(linked.map((l) => `${l.role_id}:${l.permission_id}`));
+
+    const toAdd = tenantRoles.flatMap((r) =>
+      wanted
+        .filter((p) => !held.has(`${r.id}:${p.id}`))
+        .map((p) => ({ role_id: r.id, permission_id: p.id })),
+    );
+    if (toAdd.length) {
+      await this.rolePermissionModel.bulkCreate(toAdd as any);
+      this.logger.log(
+        `Master setup: granted ${toAdd.length} missing permission(s) across ` +
+          `${tenantRoles.length} tenant Doctor role(s).`,
+      );
+    }
   }
 
   /** Ensures the protected SuperAdmin role exists and holds every permission. */

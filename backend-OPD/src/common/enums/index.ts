@@ -17,6 +17,8 @@ export enum PermissionModule {
   PATHLABS = 'pathlabs',
   REPORTS = 'reports',
   ACTIVITY = 'activity',
+  /** The clinic's patient list, as people rather than as appointments. */
+  PATIENTS = 'patients',
 }
 
 /**

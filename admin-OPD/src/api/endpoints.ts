@@ -126,6 +126,10 @@ export const doctorsApi = {
     api.patch<Doctor>('/doctors/me', body).then((r) => r.data),
   uploadMyPhoto: (file: File) => upload('/doctors/me/photo', file),
   uploadMyLetterheadLogo: (file: File) => upload('/doctors/me/letterhead-logo', file),
+  /** The doctor's own pad header, PNG/JPG, drawn into the PDF's fixed header box. */
+  uploadMyLetterheadHeader: (file: File) => upload('/doctors/me/letterhead-header', file),
+  removeMyLetterheadHeader: () =>
+    api.delete<Doctor>('/doctors/me/letterhead-header').then((r) => r.data),
   uploadMyQr: (file: File) => upload('/doctors/me/qr', file),
   removeMyQr: () => api.delete<Doctor>('/doctors/me/qr').then((r) => r.data),
   /**

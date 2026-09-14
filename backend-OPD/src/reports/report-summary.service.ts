@@ -53,6 +53,28 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     return this.queue;
   }
 
+  /**
+   * Reports whose summary is queued or running right now. A second request
+   * for one of these — the doctor pressing "Summarise now" twice, or a retry
+   * arriving while the upload's own run is still in the lane — must not add a
+   * second job: the model would be asked twice for the same file and the two
+   * results would race to write the row.
+   */
+  private readonly inFlight = new Set<string>();
+
+  /** `enqueue`, but at most one queued-or-running job per report. */
+  private enqueueReport(reportId: string, job: () => Promise<void>): Promise<void> {
+    if (this.inFlight.has(reportId)) return this.queue;
+    this.inFlight.add(reportId);
+    return this.enqueue(async () => {
+      try {
+        await job();
+      } finally {
+        this.inFlight.delete(reportId);
+      }
+    });
+  }
+
   constructor(
     @InjectModel(PatientReport) private readonly reportModel: typeof PatientReport,
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
@@ -95,7 +117,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     file: Express.Multer.File,
   ): Promise<void> {
     if (!this.enabled) return;
-    await this.enqueue(async () => {
+    await this.enqueueReport(reportId, async () => {
       try {
         await this.runOne(reportId, file);
       } catch (err) {
@@ -112,8 +134,11 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     const report = await this.reportModel.findByPk(reportId);
     if (!report) throw new Error('Report not found.');
 
+    // Already queued or running: nothing to add, hand back the row as it is.
+    if (this.inFlight.has(reportId)) return report;
+
     const file = await this.downloadAsUpload(report);
-    await this.enqueue(() => this.runOne(reportId, file));
+    await this.enqueueReport(reportId, () => this.runOne(reportId, file));
     return (await this.reportModel.findByPk(reportId))!;
   }
 
@@ -642,7 +667,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     for (const report of stranded) {
       try {
         const file = await this.downloadAsUpload(report);
-        await this.enqueue(() => this.runOne(report.id, file));
+        await this.enqueueReport(report.id, () => this.runOne(report.id, file));
       } catch (err) {
         this.logger.warn(
           `Skipping report ${report.id}: ${(err as Error).message}`,
