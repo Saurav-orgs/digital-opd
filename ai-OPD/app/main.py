@@ -26,6 +26,7 @@ from rapidfuzz import fuzz
 from .spellfix import TRUSTED_THRESHOLD, speller
 from .config import settings
 from .prompts import consolidate as consolidate_prompt
+from .prompts import imaging as imaging_prompt
 from .prompts import prescription as prescription_prompt
 from .prompts import prescription_claude as prescription_claude_prompt
 from .prompts import progress as progress_prompt
@@ -218,6 +219,46 @@ def _unreadable_reason(text: str) -> str | None:
     return None
 
 
+# A picture of a report reads as text — a photographed lab sheet OCRs to
+# hundreds of words. A picture that *is* the report (an X-ray film, an ECG
+# strip) OCRs to a handful: the patient label, the machine's own numbers. That
+# gap is how the two are told apart without a classifier, and only the second
+# kind is sent to the vision model — lab reports keep the path that works.
+_IMAGING_MAX_WORDS = 40
+
+
+def _looks_like_imaging(text: str) -> bool:
+    return len(_WORDS.findall(text)) < _IMAGING_MAX_WORDS
+
+
+async def _summarise_from_image(path: str, content_type: str) -> ReportSummary | None:
+    """Read the report off the image itself, or None if that is not possible.
+
+    Only Claude does this here: it is the one backend in the chain that takes
+    an image. Without it — no key, an outage, a refusal — the caller falls
+    back to the "could not be read" answer it has always given.
+    """
+    if not (settings.claude_enabled and settings.claude_api_key):
+        return None
+    prepared = await asyncio.to_thread(documents.image_for_vision, path, content_type)
+    if prepared is None:
+        return None
+    image, media_type = prepared
+    try:
+        raw = await claude_llm.generate_json_from_image(
+            system=imaging_prompt.SYSTEM,
+            user=imaging_prompt.USER,
+            image=image,
+            media_type=media_type,
+            schema=REPORT_SUMMARY_JSON_SCHEMA,
+            effort="high",
+        )
+    except Exception as err:
+        log.warning("Vision read of the report failed (%s); reporting unreadable.", err)
+        return None
+    return ReportSummary.model_validate(raw)
+
+
 def _unreadable_response(reason: str, chars: int, method) -> SummarizeReportResponse:
     return SummarizeReportResponse(
         summary=ReportSummary(
@@ -240,14 +281,43 @@ async def summarize_report(file: UploadFile = File(...)) -> SummarizeReportRespo
             text, method = await asyncio.to_thread(
                 documents.extract_text, path, file.content_type or ""
             )
+        # The vision read below needs the file too, so it is removed once the
+        # whole decision is made rather than straight after OCR.
+        path_for_vision = path
+        return await _summarize_extracted(file, path_for_vision, text, method)
     finally:
         os.unlink(path)
 
+
+async def _summarize_extracted(
+    file: UploadFile, path_for_vision: str, text: str, method
+) -> SummarizeReportResponse:
     # Say why it is unreadable, rather than failing blankly or — worse — running
     # a summariser over noise. This returns 200 with an explicit "could not be
     # read" summary so the doctor sees the reason where they expect the report,
     # instead of a generic failure they can only retry.
     reason = _unreadable_reason(text)
+
+    # No words, or almost none: this may be an image rather than a page of
+    # text — an X-ray, an ECG strip — which the OCR path can only refuse.
+    # Those are read off the picture. The file must be one we can render
+    # (any image, or a PDF's first page); text files have no picture to read.
+    if (reason or _looks_like_imaging(text)) and not (file.content_type or "").startswith("text/"):
+        vision = await _summarise_from_image(path_for_vision, file.content_type or "")
+        if vision is not None:
+            log.info(
+                "Summarised from the image (%s; %d chars of text via %s)",
+                vision.report_type,
+                len(text),
+                method,
+            )
+            return SummarizeReportResponse(
+                summary=vision,
+                extracted_chars=len(text),
+                extraction_method="vision",
+                model_version=settings.model_version,
+            )
+
     if reason:
         log.info("Refusing to summarise: %s (%d chars via %s)", reason[:60], len(text), method)
         return _unreadable_response(reason, len(text), method)

@@ -162,3 +162,78 @@ async def generate_json(
     except json.JSONDecodeError as err:
         log.error("Claude output failed to parse as JSON: %s", text[:500])
         raise ClaudeError(f"Claude produced invalid JSON: {err}") from err
+
+
+async def generate_json_from_image(
+    system: str,
+    user: str,
+    image: bytes,
+    media_type: str,
+    schema: dict[str, Any],
+    *,
+    effort: str | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """`generate_json`, with an image in the user turn.
+
+    For reports that are pictures rather than text — an X-ray film, an ECG
+    strip, a scan — where OCR has nothing to give the text path. The image
+    goes first and the instruction after it, which is the order the model
+    reads best. Same structured output and the same refusal/truncation
+    handling as the text call; a failure here is a ClaudeError for the caller
+    to fall back on, never a summary.
+    """
+    import base64
+
+    client = _get_client()
+    data = base64.standard_b64encode(image).decode("ascii")
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=max_tokens or settings.claude_max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data,
+                            },
+                        },
+                        {"type": "text", "text": user},
+                    ],
+                }
+            ],
+            output_config={
+                "effort": effort or settings.claude_effort,
+                "format": {"type": "json_schema", "schema": _strict(schema)},
+            },
+        )
+    except Exception as err:
+        raise ClaudeError(f"Claude API call failed: {err}") from err
+
+    if response.stop_reason == "refusal":
+        raise ClaudeError("Claude declined this request.")
+    if response.stop_reason == "max_tokens":
+        raise ClaudeError("Claude hit max_tokens; the JSON is truncated.")
+
+    text = next((b.text for b in response.content if b.type == "text"), "").strip()
+    if not text:
+        raise ClaudeError("Claude returned an empty response.")
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as err:
+        log.error("Claude output failed to parse as JSON: %s", text[:500])
+        raise ClaudeError(f"Claude produced invalid JSON: {err}") from err

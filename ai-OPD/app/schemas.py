@@ -58,7 +58,9 @@ class ReportSummary(BaseModel):
 class SummarizeReportResponse(BaseModel):
     summary: ReportSummary
     extracted_chars: int
-    extraction_method: Literal["pdf_text", "ocr", "none"]
+    # "vision": the file carried no usable text, so the summary was read off
+    # the image itself (an X-ray, an ECG strip).
+    extraction_method: Literal["pdf_text", "ocr", "none", "vision"]
     model_version: str
 
 

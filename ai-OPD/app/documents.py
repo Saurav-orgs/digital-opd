@@ -115,6 +115,47 @@ def _ocr_image(path: str) -> str:
         return best_ocr
 
 
+# Claude reads images best under ~1600px on the long side, and a phone photo
+# or a 300-dpi scan is several times that. Downscaling also keeps the request
+# well inside the size limit without touching the file the clinic stored.
+_VISION_MAX_SIDE = 1568
+
+
+def image_for_vision(path: str, content_type: str) -> tuple[bytes, str] | None:
+    """The report as one JPEG for a vision model, or None if it cannot be made.
+
+    An image file is used as it is (downscaled); a PDF contributes its first
+    page, rendered — imaging reports are one page, and a scanned multi-page
+    document with no text on any page is not something a picture of page one
+    would rescue anyway. Never raises.
+    """
+    import io
+
+    from PIL import Image
+
+    is_pdf = content_type == "application/pdf" or path.lower().endswith(".pdf")
+    try:
+        if is_pdf:
+            import pdfplumber
+
+            with pdfplumber.open(path) as pdf:
+                if not pdf.pages:
+                    return None
+                image = pdf.pages[0].to_image(resolution=150).original.copy()
+        else:
+            with Image.open(path) as opened:
+                image = opened.copy()
+
+        image = image.convert("RGB")
+        image.thumbnail((_VISION_MAX_SIDE, _VISION_MAX_SIDE))
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=88)
+        return buf.getvalue(), "image/jpeg"
+    except Exception as err:
+        log.warning("Could not prepare the image for the vision model: %s", err)
+        return None
+
+
 def extract_text(path: str, content_type: str) -> tuple[str, ExtractionMethod]:
     """Return (text, method). Never raises — an unreadable file yields ("", "none")."""
     is_pdf = content_type == "application/pdf" or path.lower().endswith(".pdf")
