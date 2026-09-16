@@ -12,7 +12,6 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [forgotNote, setForgotNote] = useState(false);
 
   if (user) navigate('/', { replace: true });
 
@@ -58,18 +57,10 @@ export default function Login() {
             />
           </Field>
           <div className="login-forgot">
-            <button type="button" className="link-btn" onClick={() => setForgotNote(true)}>
+            <Link className="link-btn" to="/forgot-password">
               Forgot password?
-            </button>
+            </Link>
           </div>
-          {forgotNote && (
-            <div className="muted login-forgot-note">
-              Ask your administrator to reset it — a doctor's password is reset by
-              the platform admin from the Doctors screen, and staff passwords by
-              their doctor from Users. Once you are signed in you can change it
-              yourself under My profile.
-            </div>
-          )}
           {error && (
             <div className="err" style={{ marginBottom: 12, textAlign: 'left' }}>
               {error}
