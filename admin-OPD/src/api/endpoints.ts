@@ -29,6 +29,28 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post<LoginResponse>('/auth/login', { email, password }).then((r) => r.data),
   me: () => api.get<AuthUser>('/auth/me').then((r) => r.data),
+  // Sign-up: the address is verified with an emailed code before the
+  // account is created, so registration still ends on the dashboard.
+  sendEmailCode: (email: string) =>
+    api
+      .post<{ ok: true; resendAfter: number }>('/auth/email-verification/send', { email })
+      .then((r) => r.data),
+  confirmEmailCode: (email: string, code: string) =>
+    api
+      .post<{ verified: true }>('/auth/email-verification/confirm', { email, code })
+      .then((r) => r.data),
+  // Forgot / reset: a code by email, then a short-lived token for the new
+  // password — the same shape as sign-up verification.
+  forgotPassword: (email: string) =>
+    api
+      .post<{ ok: true; resendAfter: number }>('/auth/forgot-password', { email })
+      .then((r) => r.data),
+  verifyResetCode: (email: string, code: string) =>
+    api
+      .post<{ token: string }>('/auth/forgot-password/verify', { email, code })
+      .then((r) => r.data),
+  resetPassword: (token: string, password: string) =>
+    api.post<{ ok: true }>('/auth/reset-password', { token, password }).then((r) => r.data),
   /** Rotate your own password — the current one is required. */
   changePassword: (currentPassword: string, newPassword: string) =>
     api

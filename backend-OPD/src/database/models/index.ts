@@ -19,6 +19,8 @@ import { EPrescriptionMedicine } from './e-prescription-medicine.model';
 import { MedicineCatalog } from './medicine-catalog.model';
 import { AiTrainingSample } from './ai-training-sample.model';
 import { ActivityLog } from './activity-log.model';
+import { EmailVerification } from './email-verification.model';
+import { PasswordReset } from './password-reset.model';
 
 export const models = [
   Role,
@@ -42,6 +44,8 @@ export const models = [
   AiTrainingSample,
   AppSetting,
   ActivityLog,
+  EmailVerification,
+  PasswordReset,
 ];
 
 export {

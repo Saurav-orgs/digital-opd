@@ -6,11 +6,15 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { SequelizeModule } from '@nestjs/sequelize';
+import { EmailVerification } from '../database/models/email-verification.model';
+import { PasswordReset } from '../database/models/password-reset.model';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
+    SequelizeModule.forFeature([EmailVerification, PasswordReset]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

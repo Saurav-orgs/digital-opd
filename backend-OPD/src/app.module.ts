@@ -11,6 +11,7 @@ import { ActivityModule } from './activity/activity.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
+import { MailModule } from './mail/mail.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
 import { DoctorsModule } from './doctors/doctors.module';
@@ -65,6 +66,8 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     MasterSetupModule,
     // Global: every module records activity through it.
     ActivityModule,
+    // Global: verification codes and reset links go out through it.
+    MailModule,
     UploadsModule,
     // Global: the local inference sidecar is used by reports and consultations.
     AiModule,

@@ -6,6 +6,19 @@ export interface AppConfig {
   clinic: { name: string; address: string; phone: string; email: string };
   /** Base URL of the patient web app (no trailing slash), used to build QR URLs. */
   patientWebBase: string;
+  /**
+   * Outgoing mail. `user` empty means "no mailer": messages are written to
+   * the log instead of sent, so a developer machine needs no SMTP account
+   * and the verification / reset flows still work end to end.
+   */
+  mail: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    pass: string;
+    from: string;
+  };
   bookingWindowDays: number;
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
@@ -46,6 +59,15 @@ export default (): AppConfig => ({
     email: process.env.CLINIC_EMAIL || '',
   },
   patientWebBase: process.env.PATIENT_WEB_BASE || 'http://localhost:5174',
+  mail: {
+    host: process.env.MAIL_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.MAIL_PORT || '465', 10),
+    // 465 is implicit TLS ("ssl://" in the old PHP config); 587 would be STARTTLS.
+    secure: process.env.MAIL_SECURE ? process.env.MAIL_SECURE === 'true' : true,
+    user: process.env.MAIL_USER || '',
+    pass: process.env.MAIL_PASS || '',
+    from: process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@mydigitalopd.in',
+  },
   bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
   jwt: {

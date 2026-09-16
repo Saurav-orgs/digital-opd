@@ -1349,6 +1349,31 @@ tr.appt-row.upcoming td:first-child {
   font-size: 24px;
   margin-bottom: 14px;
 }
+/* ── Sign-up email verification ─────────────────────────────── */
+.verify-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--sage-line);
+  border-radius: 12px;
+  background: var(--sage-tint);
+}
+.verify-title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.verify-code {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  letter-spacing: 0.35em;
+  text-align: center;
+}
+.verify-ok {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal-dark);
+}
+
 .login-forgot {
   display: flex;
   justify-content: flex-end;
@@ -1366,15 +1391,6 @@ tr.appt-row.upcoming td:first-child {
 }
 .link-btn:hover {
   text-decoration: underline;
-}
-.login-forgot-note {
-  font-size: 12.5px;
-  line-height: 1.5;
-  text-align: left;
-  background: var(--primary-tint);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 14px;
 }
 
 /* ── Dashboard ───────────────────────────────────────────────

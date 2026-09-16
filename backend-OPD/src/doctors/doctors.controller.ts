@@ -229,12 +229,18 @@ export class DoctorsController {
       letterhead_header?: Express.Multer.File[];
     },
   ) {
+    // The address must have been verified with the emailed code first; a
+    // form that skipped that step gets nothing. Checked before anything is
+    // written and spent only once the account exists, so a sign-up that
+    // fails on some other field does not send the doctor back to their inbox.
+    await this.auth.assertEmailVerified(dto.email);
     const registered = await this.doctorsService.registerSelf(
       dto,
       files?.license?.[0],
       files?.photo?.[0],
       files?.letterhead_header?.[0],
     );
+    await this.auth.markEmailVerificationUsed(dto.email);
     // The account is live, so the answer is a session — the same shape
     // `POST /auth/login` returns — and the form takes the doctor straight to
     // their dashboard. Nothing about the tenant beyond what `/auth/me` would

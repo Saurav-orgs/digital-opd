@@ -1,7 +1,8 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { doctorRegistrationApi } from '../api/endpoints';
+import { authApi, doctorRegistrationApi } from '../api/endpoints';
+import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { PasswordInput } from '../components/ui';
 import { TermsDialog } from '../components/TermsDialog';
@@ -82,6 +83,21 @@ export default function DoctorRegisterPage() {
     clinic_address: '',
   });
   const [confirmPassword, setConfirmPassword] = useState('');
+  // ── Email verification ────────────────────────────────────
+  // The address is proven before the account exists: Continue on stage 1
+  // sends a code, the code unlocks stage 2. `verifiedEmail` remembers which
+  // address passed, so editing it afterwards asks again.
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
   const [specChoice, setSpecChoice] = useState('');
   const [license, setLicense] = useState<File | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
@@ -169,10 +185,41 @@ export default function DoctorRegisterPage() {
    * explicit: sign-in is by email — the design's "email or mobile" would have
    * meant a second login path the server does not have.
    */
-  const stage1Valid =
-    /\S+@\S+\.\S+/.test(form.email.trim()) &&
-    form.password.length >= 8 &&
-    passwordsMatch;
+  const emailOk = /\S+@\S+\.\S+/.test(form.email.trim());
+  const emailVerified = verifiedEmail === form.email.trim().toLowerCase();
+  const stage1Valid = emailOk && form.password.length >= 8 && passwordsMatch && emailVerified;
+  /** Stage 1 minus the verification — what has to be right before a code is sent. */
+  const stage1Typed = emailOk && form.password.length >= 8 && passwordsMatch;
+
+  const sendCode = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      const res = await authApi.sendEmailCode(form.email.trim());
+      setCodeSentTo(form.email.trim().toLowerCase());
+      setCode('');
+      setResendIn(res.resendAfter);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not send the code. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const confirmCode = async () => {
+    if (!codeSentTo) return;
+    setChecking(true);
+    setError(null);
+    try {
+      await authApi.confirmEmailCode(codeSentTo, code);
+      setVerifiedEmail(codeSentTo);
+      setStage(2);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'That code did not work. Please try again.');
+    } finally {
+      setChecking(false);
+    }
+  };
 
   /*
    * Stage 2 holds everything the profile cannot be created without. The
@@ -291,6 +338,57 @@ export default function DoctorRegisterPage() {
             />
             {confirmPassword.length > 0 && !passwordsMatch && (
               <p className="field-err">Passwords do not match.</p>
+            )}
+
+            {emailVerified ? (
+              <p className="verify-ok">✓ {form.email.trim()} is verified.</p>
+            ) : codeSentTo === form.email.trim().toLowerCase() ? (
+              <div className="verify-box">
+                <div className="verify-title">Check your email</div>
+                <p className="muted" style={{ fontSize: 12.5, margin: '2px 0 10px' }}>
+                  We sent a 6-digit code to <strong>{codeSentTo}</strong>. It expires in 10 minutes.
+                </p>
+                <input
+                  className="input verify-code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="000000"
+                  autoFocus
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                    setError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && code.length === 6) void confirmCode();
+                  }}
+                />
+                <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={sending || resendIn > 0}
+                    onClick={() => void sendCode()}
+                  >
+                    {sending ? 'Sending…' : resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      setCodeSentTo(null);
+                      setCode('');
+                    }}
+                  >
+                    Change email
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+                We will email you a code to confirm this address before you continue.
+              </p>
             )}
           </section>
         )}
@@ -647,12 +745,41 @@ export default function DoctorRegisterPage() {
               Back
             </button>
           )}
-          {stage < 3 ? (
+          {stage === 1 ? (
+            emailVerified ? (
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                disabled={!stage1Valid}
+                onClick={() => goStage(2)}
+              >
+                Continue
+              </button>
+            ) : codeSentTo === form.email.trim().toLowerCase() ? (
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                disabled={code.length !== 6 || checking}
+                onClick={() => void confirmCode()}
+              >
+                {checking ? 'Checking…' : 'Verify & continue'}
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                disabled={!stage1Typed || sending}
+                onClick={() => void sendCode()}
+              >
+                {sending ? 'Sending code…' : 'Send verification code'}
+              </button>
+            )
+          ) : stage === 2 ? (
             <button
               className="btn btn-primary"
               style={{ flex: 1 }}
-              disabled={stage === 1 ? !stage1Valid : !stage2Valid}
-              onClick={() => goStage((stage + 1) as Stage)}
+              disabled={!stage2Valid}
+              onClick={() => goStage(3)}
             >
               Continue
             </button>

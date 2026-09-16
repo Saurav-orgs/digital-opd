@@ -19,6 +19,7 @@ import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
 import DoctorRegisterPage from './pages/DoctorRegister';
 import LetterheadPage from './pages/Letterhead';
+import ForgotPassword from './pages/ForgotPassword';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -46,6 +47,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<DoctorRegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route
         element={
           <RequireAuth>
