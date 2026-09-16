@@ -153,10 +153,58 @@ function formatDate(d: string) {
   });
 }
 
+/** The day after a YYYY-MM-DD date, as YYYY-MM-DD. */
+function nextDay(d: string): string {
+  const [y, m, day] = d.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day + 1));
+  return dt.toISOString().slice(0, 10);
+}
+
+/** A run of leave days: one date, or a first-to-last span. */
+interface LeaveSpan {
+  from: string;
+  to: string;
+  reason: string | null;
+}
+
+/**
+ * Leave is kept a day at a time, but a vacation is one thing to the doctor.
+ * Consecutive dates with the same reason fold into one span, so a fortnight
+ * off reads as "12 – 25 Oct", not fourteen rows.
+ */
+function groupLeave(rows: { date: string; reason: string | null }[]): LeaveSpan[] {
+  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const spans: LeaveSpan[] = [];
+  for (const r of sorted) {
+    const last = spans[spans.length - 1];
+    if (last && nextDay(last.to) === r.date && (last.reason ?? '') === (r.reason ?? '')) {
+      last.to = r.date;
+    } else {
+      spans.push({ from: r.date, to: r.date, reason: r.reason ?? null });
+    }
+  }
+  return spans;
+}
+
+/** "Sat, 12 Oct 2026" or "12 Oct – 25 Oct 2026" for a span. */
+function formatSpan(s: LeaveSpan): string {
+  if (s.from === s.to) return formatDate(s.from);
+  const short = (d: string) => {
+    const [y, m, day] = d.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    });
+  };
+  const year = s.to.slice(0, 4);
+  return `${short(s.from)} – ${short(s.to)} ${year}`;
+}
+
 function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [date, setDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
 
   const leaveQ = useQuery({
@@ -170,11 +218,17 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
   };
 
   const mark = useMutation({
-    mutationFn: () => schedulesApi.markLeave(doctorId, date, reason || undefined),
+    mutationFn: () =>
+      schedulesApi.markLeave(doctorId, date, reason || undefined, endDate || undefined),
     onSuccess: () => {
       refresh();
-      toast.success('Leave marked', `${date} is now blocked for booking.`);
+      const span = formatSpan({ from: date, to: endDate || date, reason: null });
+      toast.success(
+        'Leave marked',
+        `${span} ${endDate && endDate !== date ? 'are' : 'is'} now blocked for booking.`,
+      );
       setDate('');
+      setEndDate('');
       setReason('');
     },
     onError: (e) => {
@@ -189,7 +243,7 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
   });
 
   const remove = useMutation({
-    mutationFn: (d: string) => schedulesApi.removeLeave(doctorId, d),
+    mutationFn: (span: LeaveSpan) => schedulesApi.removeLeave(doctorId, span.from, span.to),
     onSuccess: () => {
       refresh();
       toast.success('Leave removed');
@@ -197,25 +251,61 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
     onError: (e) => toast.error(e),
   });
 
+  const rangeInvalid = !!endDate && !!date && endDate < date;
+  const spans = groupLeave(leaveQ.data ?? []);
+
   return (
     <div className="card">
-      <div className="card-title">Leave days</div>
-      <Field label="Date">
-        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </Field>
+      <div className="card-title">Vacation &amp; leave</div>
+      <div className="time-row">
+        <div>
+          <label className="form-label">From</label>
+          <input
+            className="input"
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value);
+              // A single day is the common case: the end follows the start
+              // until the doctor moves it.
+              if (!endDate || endDate < e.target.value) setEndDate(e.target.value);
+            }}
+          />
+        </div>
+        <div>
+          <label className="form-label">To</label>
+          <input
+            className="input"
+            type="date"
+            min={date || undefined}
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
+      </div>
+      {rangeInvalid && <div className="field-err">Leave cannot end before it starts.</div>}
       <Field label="Reason (optional)">
-        <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <input
+          className="input"
+          placeholder="e.g. Family vacation"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
       </Field>
       <button
         className="btn btn-primary btn-sm"
         style={{ width: '100%', justifyContent: 'center' }}
-        disabled={!canEdit || !date || mark.isPending}
+        disabled={!canEdit || !date || rangeInvalid || mark.isPending}
         onClick={() => mark.mutate()}
       >
-        Mark this date as leave
+        {mark.isPending
+          ? 'Marking…'
+          : endDate && endDate !== date
+            ? 'Mark these dates as leave'
+            : 'Mark this date as leave'}
       </button>
       <p className="muted" style={{ fontSize: 12, margin: '10px 0' }}>
-        Blocked if the day already has confirmed bookings.
+        Blocked if any of the days already has confirmed bookings.
       </p>
 
       <div style={{ borderTop: 'var(--hairline)', paddingTop: 12 }}>
@@ -224,13 +314,13 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
         </div>
         {leaveQ.isLoading ? (
           <span className="muted">Loading…</span>
-        ) : !leaveQ.data?.length ? (
+        ) : !spans.length ? (
           <span className="muted">No leave marked.</span>
         ) : (
-          leaveQ.data.map((l) => (
-            <div key={l.id} className="leave-item">
+          spans.map((l) => (
+            <div key={l.from} className="leave-item">
               <div>
-                <div>{formatDate(l.date)}</div>
+                <div>{formatSpan(l)}</div>
                 {l.reason && (
                   <div className="muted" style={{ fontSize: 12 }}>
                     {l.reason}
@@ -241,7 +331,7 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
                 <button
                   className="btn btn-sm btn-danger"
                   disabled={remove.isPending}
-                  onClick={() => remove.mutate(l.date)}
+                  onClick={() => remove.mutate(l)}
                 >
                   Remove
                 </button>

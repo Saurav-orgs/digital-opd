@@ -18,6 +18,8 @@ export interface AuthUser {
   name: string;
   type: UserType;
   roleId: string | null;
+  /** The role's name, shown beside the user's own on the header. */
+  roleName: string | null;
   doctorId: string | null;
   permissions: string[]; // "module:action"
 }
@@ -348,4 +350,8 @@ export interface BlockedNumber {
   reason: string | null;
   createdAt?: string;
   created_at?: string;
+  /** Who pressed Block — null for a row written before this was recorded. */
+  blocked_by?: { id: string; name: string } | null;
+  /** Everyone registered on the number; empty when nobody is yet. */
+  patients?: { id: string; name: string; patient_code: string }[];
 }

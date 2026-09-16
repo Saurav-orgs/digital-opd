@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi } from '../api/endpoints';
 import type { ConsultationSession } from '../api/types';
 import { useToast } from './Toast';
+import { flushDraft, type DraftFlushRef } from '../lib/draftFlush';
 import { ConfirmDialog } from './ui';
 import { MicIcon, StopIcon } from './icons';
 
@@ -27,9 +28,17 @@ export function ConsultationRecorder({
   appointmentId,
   disabled,
   onBusyChange,
+  flushRef,
 }: {
   appointmentId: string;
   disabled?: boolean;
+  /**
+   * The editor's "save what I hold" hook, when it is on screen under the
+   * microphone. A second recording adds to the draft rather than replacing
+   * it, so the draft the server adds to has to be the one the doctor is
+   * looking at — including a Clear all they pressed a moment ago.
+   */
+  flushRef?: DraftFlushRef;
   /**
    * Told when the doctor is mid-dictation or the recording is still on its
    * way up. Server-side work after that (transcribing, drafting) is visible
@@ -61,7 +70,10 @@ export function ConsultationRecorder({
   });
 
   const upload = useMutation({
-    mutationFn: (audio: Blob) => consultationApi.uploadAudio(appointmentId, audio),
+    mutationFn: async (audio: Blob) => {
+      await flushDraft(flushRef);
+      return consultationApi.uploadAudio(appointmentId, audio);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sessionKey });
       toast.success('Recording sent', 'Writing the prescription draft…');

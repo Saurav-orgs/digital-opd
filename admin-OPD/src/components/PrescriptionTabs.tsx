@@ -197,6 +197,7 @@ export function PrescriptionTabs({
               appointmentId={appointmentId}
               disabled={disabled}
               onBusyChange={onRecorderBusy}
+              flushRef={flushRef}
             />
           )}
 

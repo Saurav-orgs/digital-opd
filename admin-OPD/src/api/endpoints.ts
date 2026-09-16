@@ -42,9 +42,11 @@ export const authApi = {
 // ── Users ────────────────────────────────────────────────────
 export const usersApi = {
   list: () => api.get<User[]>('/users').then((r) => r.data),
-  create: (body: Partial<User> & { password: string }) =>
+  // `permissionIds` grants abilities directly (the server keeps a personal
+  // role for them); `role_id` is the older way and still works.
+  create: (body: Partial<User> & { password: string; permissionIds?: string[] }) =>
     api.post<User>('/users', body).then((r) => r.data),
-  update: (id: string, body: Partial<User> & { password?: string }) =>
+  update: (id: string, body: Partial<User> & { password?: string; permissionIds?: string[] }) =>
     api.patch<User>(`/users/${id}`, body).then((r) => r.data),
   remove: (id: string) => api.delete(`/users/${id}`).then((r) => r.data),
 };
@@ -179,10 +181,22 @@ export const schedulesApi = {
         `/doctors/${doctorId}/leave`,
       )
       .then((r) => r.data),
-  markLeave: (doctorId: string, date: string, reason?: string) =>
-    api.post(`/doctors/${doctorId}/leave`, { date, reason }).then((r) => r.data),
-  removeLeave: (doctorId: string, date: string) =>
-    api.delete(`/doctors/${doctorId}/leave/${date}`).then((r) => r.data),
+  // A span is one call: `end_date` marks every day from `date` to it, and
+  // `to` on the delete clears the same span. Omit both for a single day.
+  markLeave: (doctorId: string, date: string, reason?: string, endDate?: string) =>
+    api
+      .post(`/doctors/${doctorId}/leave`, {
+        date,
+        reason,
+        ...(endDate && endDate !== date ? { end_date: endDate } : {}),
+      })
+      .then((r) => r.data),
+  removeLeave: (doctorId: string, date: string, to?: string) =>
+    api
+      .delete(`/doctors/${doctorId}/leave/${date}`, {
+        params: to && to !== date ? { to } : undefined,
+      })
+      .then((r) => r.data),
   // Authenticated preview — works for disabled doctors too (unlike the public route).
   slots: (doctorId: string, date: string) =>
     api
@@ -195,6 +209,9 @@ export const appointmentsApi = {
   list: (params: {
     doctorId?: string;
     date?: string;
+    /** Inclusive span, narrowed within `range`; either end may stand alone. */
+    from?: string;
+    to?: string;
     status?: string;
     search?: string;
     range?: 'today' | 'upcoming' | 'previous';
@@ -474,9 +491,12 @@ export const blockedNumbersApi = {
  * cannot be used until the super admin approves it.
  */
 export const doctorRegistrationApi = {
+  // The answer is a session: the doctor is signed in the moment the account
+  // exists. `accessToken` is optional only so a form talking to an API that
+  // predates this still lands somewhere sensible (the login screen).
   register: (form: FormData) =>
     api
-      .post<{ ok: boolean; message: string }>('/doctors/register', form, {
+      .post<{ ok: boolean; message: string } & Partial<LoginResponse>>('/doctors/register', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data),

@@ -92,6 +92,34 @@ export class AuthService {
   }
 
   /**
+   * A signed-in session for an account that was just created — the doctor
+   * who has finished registering should land on their dashboard, not on the
+   * login form to type the same email and password a second time.
+   *
+   * Same token and principal as `login`, minus the password check: the
+   * caller has just set that password, and the row is seconds old.
+   */
+  async sessionForNewUser(userId: string) {
+    const principal = await this.usersService.buildAuthUser(userId);
+    if (!principal) throw new AppException(ErrorCode.ACCOUNT_DISABLED);
+
+    this.activity.recordForUser(principal, {
+      action: ActivityAction.LOGIN,
+      summary: `${principal.name} signed in after registering.`,
+      entity_type: 'user',
+      entity_id: principal.id,
+      metadata: { type: principal.type, via: 'registration' },
+    });
+
+    const token = await this.jwtService.signAsync({
+      sub: principal.id,
+      email: principal.email,
+      type: principal.type,
+    });
+    return { accessToken: token, user: principal };
+  }
+
+  /**
    * Rotate your own password.
    *
    * The current password is required even though the caller is already

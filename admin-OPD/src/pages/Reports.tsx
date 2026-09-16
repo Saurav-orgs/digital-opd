@@ -4,6 +4,7 @@ import { patientProfilesApi, reportsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
+import { DocumentIcon, EyeIcon } from '../components/icons';
 
 /**
  * Upload + view patient reports by mobile number. For a pathlab login (whose
@@ -169,21 +170,36 @@ export default function Reports() {
             <div className="stack">
               {reportsQ.data.map((r) => (
                 <div key={r.id} className="leave-item">
-                  <div>
-                    <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a>
+                  <div style={{ minWidth: 0 }}>
+                    <a href={r.url} target="_blank" rel="noreferrer">
+                      <DocumentIcon size={14} /> {r.title}
+                    </a>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {new Date(r.createdAt).toLocaleDateString()}
                     </div>
                   </div>
-                  {canCreate && (
-                    <button
-                      className="btn btn-sm btn-danger"
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate(r.id)}
+                  {/* The title is a link, but a link in a list of titles does
+                      not look like one — the desk asked for a button that says
+                      what it does. */}
+                  <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                    <a
+                      className="btn btn-sm"
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      Delete
-                    </button>
-                  )}
+                      <EyeIcon size={14} /> View report
+                    </a>
+                    {canCreate && (
+                      <button
+                        className="btn btn-sm btn-danger"
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(r.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

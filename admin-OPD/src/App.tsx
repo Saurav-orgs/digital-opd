@@ -18,6 +18,7 @@ import BlockedNumbersPage from './pages/BlockedNumbers';
 import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
 import DoctorRegisterPage from './pages/DoctorRegister';
+import LetterheadPage from './pages/Letterhead';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/roles" element={<Roles />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile/schedule" element={<DoctorSchedule />} />
+        <Route path="/profile/letterhead" element={<LetterheadPage />} />
         <Route path="/appointments/:id" element={<AppointmentPage />} />
         <Route path="/appointments/:id/history" element={<PatientHistoryPage />} />
         <Route path="/doctors" element={<DoctorsPage />} />

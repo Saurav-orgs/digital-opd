@@ -4,6 +4,7 @@ import { appointmentsApi } from '../api/endpoints';
 import { Empty, Loading } from '../components/ui';
 import { avatarTone, initials } from '../lib/avatar';
 import { HistoryVisit } from '../components/HistoryVisit';
+import { VisitRangeFilter, useVisitRange } from '../components/VisitRangeFilter';
 
 /**
  * One patient's whole record, reached from the Patients list.
@@ -24,9 +25,11 @@ export default function PatientDetailPage() {
     enabled: !!profileId,
   });
 
+  const visits = visitsQ.data ?? [];
+  const range = useVisitRange(visits);
+
   if (visitsQ.isLoading) return <Loading />;
 
-  const visits = visitsQ.data ?? [];
   const latest = visits[0];
 
   if (!latest) {
@@ -77,12 +80,11 @@ export default function PatientDetailPage() {
         </div>
       </div>
 
-      <h2 className="section-label">
-        Visits ({visits.length})
-      </h2>
+      <h2 className="section-label">Visits</h2>
+      <VisitRangeFilter range={range} total={visits.length} />
 
       <div className="stack" style={{ gap: 12 }}>
-        {visits.map((v) => (
+        {range.filtered.map((v) => (
           <HistoryVisit key={v.id} visit={v} />
         ))}
       </div>

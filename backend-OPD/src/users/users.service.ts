@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Op } from 'sequelize';
+import { Op, Transaction } from 'sequelize';
+import { Sequelize } from 'sequelize-typescript';
 import * as bcrypt from 'bcrypt';
 import { User } from '../database/models/user.model';
 import { Role } from '../database/models/role.model';
@@ -17,6 +18,8 @@ export class UsersService {
   constructor(
     @InjectModel(User) private readonly userModel: typeof User,
     @InjectModel(Role) private readonly roleModel: typeof Role,
+    @InjectModel(Permission) private readonly permissionModel: typeof Permission,
+    private readonly sequelize: Sequelize,
   ) {}
 
   private readonly roleWithPerms = {
@@ -36,17 +39,41 @@ export class UsersService {
     overrides: { type?: UserType } = {},
   ): Promise<User> {
     await this.assertEmailFree(dto.email);
+    if (!dto.role_id && !dto.permissionIds) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, {
+        message: 'Choose what this team member may do.',
+      });
+    }
     await this.assertAssignableRole(dto.role_id, caller);
+    if (dto.permissionIds) await this.assertPermissionsExist(dto.permissionIds);
     const password_hash = await bcrypt.hash(dto.password, 10);
-    const user = await this.userModel.create({
-      name: dto.name,
-      email: dto.email.toLowerCase(),
-      password_hash,
-      type: overrides.type ?? UserType.ADMIN,
-      role_id: dto.role_id,
-      doctor_id: caller.doctorId ?? null,
-      is_active: dto.is_active ?? true,
-    } as any);
+
+    const user = await this.sequelize.transaction(async (t) => {
+      const roleId =
+        dto.role_id ??
+        (
+          await this.personalRole(
+            null,
+            dto.name,
+            dto.permissionIds!,
+            dto.role_name,
+            caller,
+            t,
+          )
+        ).id;
+      return this.userModel.create(
+        {
+          name: dto.name,
+          email: dto.email.toLowerCase(),
+          password_hash,
+          type: overrides.type ?? UserType.ADMIN,
+          role_id: roleId,
+          doctor_id: caller.doctorId ?? null,
+          is_active: dto.is_active ?? true,
+        } as any,
+        { transaction: t },
+      );
+    });
     return this.findOne(user.id);
   }
 
@@ -87,6 +114,7 @@ export class UsersService {
     if (dto.role_id && dto.role_id !== user.role_id) {
       await this.assertAssignableRole(dto.role_id, caller);
     }
+    if (dto.permissionIds) await this.assertPermissionsExist(dto.permissionIds);
     // `type` and `doctor_id` are server-owned — an edit never moves an account
     // between kinds or doctors.
     const patch: Partial<User> = {
@@ -98,8 +126,110 @@ export class UsersService {
     if (dto.password) {
       patch.password_hash = await bcrypt.hash(dto.password, 10);
     }
-    await user.update(patch as any);
+    await this.sequelize.transaction(async (t) => {
+      if (dto.permissionIds && !dto.role_id) {
+        const role = await this.personalRole(
+          user,
+          patch.name!,
+          dto.permissionIds,
+          dto.role_name,
+          caller,
+          t,
+        );
+        patch.role_id = role.id;
+      }
+      await user.update(patch as any, { transaction: t });
+    });
     return this.findOne(id);
+  }
+
+  /**
+   * The role that carries a team member's directly-granted permissions.
+   *
+   * Permissions hang off roles and nothing else, so "tick what Sunita may
+   * do" still needs a role row — it is just one the doctor never sees or
+   * names. If the member already has one of their own (in this tenant, not
+   * a system role, held by nobody else) its grants are replaced in place;
+   * otherwise a fresh one is made, named after them, so the Roles screen
+   * still makes sense to anyone who opens it.
+   */
+  private async personalRole(
+    user: User | null,
+    memberName: string,
+    permissionIds: string[],
+    roleName: string | undefined,
+    caller: AuthUser,
+    t: Transaction,
+  ): Promise<Role> {
+    const tenant = caller.doctorId ?? null;
+    // The title the doctor gave them, or a plain default. It is the role's
+    // name, which is what the header shows beside theirs after sign-in.
+    const base = roleName?.trim() || `${memberName.trim()}'s access`;
+
+    if (user?.role) {
+      const held = user.role;
+      const ownedHere = held.doctor_id === tenant && !held.is_system;
+      const others = ownedHere
+        ? await this.userModel.count({
+            where: { role_id: held.id, id: { [Op.ne]: user.id } },
+            transaction: t,
+          })
+        : 1;
+      if (ownedHere && others === 0) {
+        await (held as any).$set('permissions', permissionIds, { transaction: t });
+        if (roleName !== undefined && base !== held.name) {
+          await held.update(
+            { name: await this.freeRoleName(base, tenant, t, held.id) } as any,
+            { transaction: t },
+          );
+        }
+        return held;
+      }
+    }
+
+    const name = await this.freeRoleName(base, tenant, t);
+    const role = await this.roleModel.create(
+      {
+        name,
+        description: 'Permissions set from My Team.',
+        is_system: false,
+        doctor_id: tenant,
+      } as any,
+      { transaction: t },
+    );
+    await (role as any).$set('permissions', permissionIds, { transaction: t });
+    return role;
+  }
+
+  /**
+   * `base`, or `base 2`, `base 3`… — whichever is not already a role name in
+   * this tenant. Two receptionists may both be called "Receptionist"; the
+   * roles behind them cannot share the name, and neither should fail over it.
+   */
+  private async freeRoleName(
+    base: string,
+    tenant: string | null,
+    t: Transaction,
+    exceptRoleId?: string,
+  ): Promise<string> {
+    let name = base;
+    for (let n = 2; ; n++) {
+      const where: any = { name, doctor_id: tenant };
+      if (exceptRoleId) where.id = { [Op.ne]: exceptRoleId };
+      const clash = await this.roleModel.findOne({ where, transaction: t });
+      if (!clash) return name;
+      name = `${base} ${n}`;
+    }
+  }
+
+  private async assertPermissionsExist(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids)];
+    const found = await this.permissionModel.count({ where: { id: { [Op.in]: unique } } });
+    if (found !== unique.length) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, {
+        message: 'One or more permissions do not exist.',
+      });
+    }
   }
 
   /**
@@ -183,6 +313,7 @@ export class UsersService {
       name: user.name,
       type: user.type,
       roleId: user.role_id,
+      roleName: user.role?.name ?? null,
       doctorId: user.doctor_id,
       permissions,
     };

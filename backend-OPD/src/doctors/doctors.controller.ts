@@ -25,6 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { SettingsService } from '../settings/settings.service';
+import { AuthService } from '../auth/auth.service';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
@@ -58,6 +59,7 @@ export class DoctorsController {
     private readonly doctorsService: DoctorsService,
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
+    private readonly auth: AuthService,
   ) {}
 
   // ── Doctor self-service (declared before :id) ──────────────
@@ -202,6 +204,7 @@ export class DoctorsController {
       [
         { name: 'license', maxCount: 1 },
         { name: 'photo', maxCount: 1 },
+        { name: 'letterhead_header', maxCount: 1 },
       ],
       {
         storage: memoryStorage(),
@@ -222,18 +225,25 @@ export class DoctorsController {
     files: {
       license?: Express.Multer.File[];
       photo?: Express.Multer.File[];
+      /** The prescription pad header — optional, the form offers a skip. */
+      letterhead_header?: Express.Multer.File[];
     },
   ) {
-    await this.doctorsService.registerSelf(
+    const registered = await this.doctorsService.registerSelf(
       dto,
       files?.license?.[0],
       files?.photo?.[0],
+      files?.letterhead_header?.[0],
     );
-    // Deliberately thin: the caller is an unauthenticated form, so it gets a
-    // confirmation and nothing about the tenant it just created.
+    // The account is live, so the answer is a session — the same shape
+    // `POST /auth/login` returns — and the form takes the doctor straight to
+    // their dashboard. Nothing about the tenant beyond what `/auth/me` would
+    // say to that same token a moment later.
+    const session = await this.auth.sessionForNewUser(registered.userId);
     return {
       ok: true,
-      message: 'Registration complete. You can sign in now.',
+      message: 'Registration complete.',
+      ...session,
     };
   }
 

@@ -56,9 +56,19 @@ export class ReplaceSchedulesDto {
 }
 
 export class MarkLeaveDto {
-  @ApiProperty({ example: '2026-07-28' })
+  @ApiProperty({ example: '2026-07-28', description: 'First (or only) day of leave.' })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD.' })
   date: string;
+
+  /**
+   * Last day of leave, inclusive. Omit for a single day. A vacation is one
+   * thing to the doctor even though the table keeps a row per date, so the
+   * whole span is marked in one call and one transaction.
+   */
+  @ApiPropertyOptional({ example: '2026-08-02' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'end_date must be YYYY-MM-DD.' })
+  end_date?: string;
 
   @ApiPropertyOptional({ example: 'On conference leave' })
   @IsOptional()

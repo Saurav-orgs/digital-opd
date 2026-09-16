@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { expandDates } from '../common/utils/clinic-time';
 import { SettingsService } from '../settings/settings.service';
 import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
@@ -167,7 +168,9 @@ function parseAvailability(raw?: string): ParsedAvailability | null {
   return { sessions, slot_duration_min: duration };
 }
 
-function parseVacations(raw?: string): { from: string; to: string }[] {
+function parseVacations(
+  raw?: string,
+): { from: string; to: string; reason: string | null }[] {
   if (!raw?.trim()) return [];
   let parsed: any;
   try {
@@ -183,21 +186,9 @@ function parseVacations(raw?: string): { from: string; to: string }[] {
       badRequest('Vacation dates must be real dates.');
     }
     if (to < from) badRequest('A vacation cannot end before it starts.');
-    return { from, to };
+    const reason = typeof v?.reason === 'string' ? v.reason.trim().slice(0, 200) : '';
+    return { from, to, reason: reason || null };
   });
-}
-
-/** Every date from `from` to `to`, inclusive. Capped so one typo in the year
- *  cannot write thousands of leave rows. */
-function expandDates(from: string, to: string): string[] {
-  const out: string[] = [];
-  const cursor = new Date(`${from}T00:00:00Z`);
-  const last = new Date(`${to}T00:00:00Z`);
-  while (cursor <= last && out.length < 366) {
-    out.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return out;
 }
 
 @Injectable()
@@ -375,7 +366,8 @@ export class DoctorsService {
     dto: RegisterDoctorDto,
     license?: Express.Multer.File,
     photo?: Express.Multer.File,
-  ): Promise<{ id: string; status: DoctorVerificationStatus }> {
+    letterheadHeader?: Express.Multer.File,
+  ): Promise<{ id: string; userId: string; status: DoctorVerificationStatus }> {
     const existing = await this.userModel.findOne({
       where: { email: dto.email.toLowerCase() },
       paranoid: false,
@@ -406,6 +398,20 @@ export class DoctorsService {
     if (photo) {
       ({ key: photoKey } = await this.storage.uploadImage(photo, 'doctor-photos'));
     }
+    // The pad header is optional at sign-up — the form says "skip" — and it
+    // is the one upload here with a shape rule, the same one the letterhead
+    // screen applies later. The key is written before the doctor id exists,
+    // so it lives under the registrations prefix rather than the doctor's.
+    let headerKey: string | null = null;
+    if (letterheadHeader) {
+      if (!['image/png', 'image/jpeg'].includes(letterheadHeader.mimetype)) {
+        badRequest('The letterhead header must be a PNG or JPG image.');
+      }
+      ({ key: headerKey } = await this.storage.uploadImage(
+        letterheadHeader,
+        'doctor-letterheads',
+      ));
+    }
 
     const registered = await this.sequelize.transaction(async (t) => {
       const slug = await this.uniqueSlug(dto.name);
@@ -418,6 +424,7 @@ export class DoctorsService {
           license_number: dto.license_number,
           license_file_key: key,
           profile_photo_url: photoKey,
+          letterhead_header_key: headerKey,
           clinic_name: dto.clinic_name ?? null,
           clinic_address: dto.clinic_address ?? null,
           public_slug: slug,
@@ -455,7 +462,7 @@ export class DoctorsService {
         t,
       );
 
-      await this.userModel.create(
+      const login = await this.userModel.create(
         {
           name: dto.name,
           email: dto.email.toLowerCase(),
@@ -492,20 +499,26 @@ export class DoctorsService {
       // Leave is stored a date at a time, so a range is expanded here rather
       // than kept as a span — that is the shape the slot grid already reads.
       if (vacations.length) {
-        const dates = vacations.flatMap((v) => expandDates(v.from, v.to));
-        if (dates.length) {
-          await this.exceptionModel.bulkCreate(
-            dates.map((date) => ({
-              doctor_id: doctor.id,
-              date,
-              type: ScheduleExceptionType.LEAVE,
-            })) as any,
-            { transaction: t },
-          );
+        const rows = vacations.flatMap((v) =>
+          expandDates(v.from, v.to).map((date) => ({
+            doctor_id: doctor.id,
+            date,
+            type: ScheduleExceptionType.LEAVE,
+            // Kept per date so the schedule screen can fold the span back
+            // together — same reason on consecutive days reads as one entry.
+            reason: v.reason,
+          })),
+        );
+        if (rows.length) {
+          await this.exceptionModel.bulkCreate(rows as any, { transaction: t });
         }
       }
 
-      return { id: doctor.id, status: DoctorVerificationStatus.APPROVED };
+      return {
+        id: doctor.id,
+        userId: login.id,
+        status: DoctorVerificationStatus.APPROVED,
+      };
     });
 
     // Same reasoning as createTenant: the tenant exists, the picture of its

@@ -1,12 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { BlockedNumber } from '../database/models/blocked-number.model';
+import { Patient } from '../database/models/patient.model';
+import { PatientProfile } from '../database/models/patient-profile.model';
+import { User } from '../database/models/user.model';
+import { Op } from 'sequelize';
 import { ActivityLogService } from '../activity/activity-log.service';
 import { ActivityAction } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { BlockNumberDto } from './dto/blocked-number.dto';
+
+/** One person registered on a blocked number. */
+export interface BlockedPatient {
+  id: string;
+  name: string;
+  patient_code: string;
+}
+
+/** A blocked number with the people on it, as the Blocked screen lists them. */
+export interface BlockedNumberView {
+  id: string;
+  mobile: string;
+  reason: string | null;
+  created_at: Date;
+  blocked_by: { id: string; name: string } | null;
+  patients: BlockedPatient[];
+}
 
 /**
  * Numbers a clinic refuses bookings from.
@@ -22,6 +43,9 @@ export class BlockedNumbersService {
   constructor(
     @InjectModel(BlockedNumber)
     private readonly model: typeof BlockedNumber,
+    @InjectModel(Patient) private readonly patientModel: typeof Patient,
+    @InjectModel(PatientProfile)
+    private readonly profileModel: typeof PatientProfile,
     private readonly activity: ActivityLogService,
   ) {}
 
@@ -45,11 +69,55 @@ export class BlockedNumbersService {
     }
   }
 
-  async list(user: AuthUser): Promise<BlockedNumber[]> {
-    return this.model.findAll({
+  /**
+   * The blocked list as people, not numbers.
+   *
+   * A number on its own tells the desk nothing a month later; the names
+   * registered on it are what make the row recognisable. They are looked up
+   * here rather than stored with the block, because a family can add a member
+   * after the block and the row should still show everyone it covers. A
+   * number nobody has registered on yet simply has no names.
+   */
+  async list(user: AuthUser): Promise<BlockedNumberView[]> {
+    const rows = await this.model.findAll({
       where: { doctor_id: this.tenant(user) },
       order: [['created_at', 'DESC']],
+      include: [{ model: User, as: 'blockedBy', attributes: ['id', 'name'] }],
     });
+    if (!rows.length) return [];
+
+    const accounts = await this.patientModel.findAll({
+      where: { mobile: { [Op.in]: rows.map((r) => r.mobile) } },
+      attributes: ['id', 'mobile'],
+    });
+    const profiles = accounts.length
+      ? await this.profileModel.findAll({
+          where: {
+            patient_id: { [Op.in]: accounts.map((a) => a.id) },
+            archived_at: null,
+          },
+          attributes: ['id', 'patient_id', 'name', 'patient_code'],
+          order: [['created_at', 'ASC']],
+        })
+      : [];
+    const byAccount = new Map<string, BlockedPatient[]>();
+    for (const p of profiles) {
+      const list = byAccount.get(p.patient_id) ?? [];
+      list.push({ id: p.id, name: p.name, patient_code: p.patient_code });
+      byAccount.set(p.patient_id, list);
+    }
+    const byMobile = new Map<string, BlockedPatient[]>();
+    for (const a of accounts) byMobile.set(a.mobile, byAccount.get(a.id) ?? []);
+
+    return rows.map((r) => ({
+      id: r.id,
+      mobile: r.mobile,
+      reason: r.reason,
+      // `underscored` maps the column, but the attribute is still camelCase.
+      created_at: (r.get('createdAt') ?? r.get('created_at')) as Date,
+      blocked_by: r.blockedBy ? { id: r.blockedBy.id, name: r.blockedBy.name } : null,
+      patients: byMobile.get(r.mobile) ?? [],
+    }));
   }
 
   async block(dto: BlockNumberDto, user: AuthUser): Promise<BlockedNumber> {

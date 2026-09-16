@@ -1,13 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { rolesApi } from '../api/endpoints';
-import type { PermModule, Permission, Role } from '../api/types';
+import type { Role } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { ActionMenuDropdown, Empty, Field, Loading, Modal } from '../components/ui';
-import { MODULES_HIDDEN_FROM_ROLES, MODULE_LABEL } from '../lib/nav';
-
-const ACTIONS = ['create', 'read', 'update', 'delete'] as const;
+import {
+  PermissionMatrix,
+  useDefaultGrants,
+  usePermissionRows,
+} from '../components/PermissionMatrix';
 
 export default function Roles() {
   const { can } = useAuth();
@@ -160,25 +162,15 @@ function RoleActionMenu({
 function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const permsQ = useQuery({ queryKey: ['permissions'], queryFn: rolesApi.permissions });
+  const { rows, loading } = usePermissionRows();
 
   const [name, setName] = useState(role?.name ?? '');
   const [description, setDescription] = useState(role?.description ?? '');
   const [selected, setSelected] = useState<Set<string>>(
     new Set(role?.permissions?.map((p) => p.id) ?? []),
   );
-
-  // Group permissions by module for the checkbox grid, skipping modules with
-  // no screen a clinic role can reach — a row nobody can act on is only a
-  // question the admin has to answer wrongly.
-  const byModule = useMemo(() => {
-    const map: Record<string, Record<string, Permission>> = {};
-    for (const p of permsQ.data ?? []) {
-      if ((MODULES_HIDDEN_FROM_ROLES as string[]).includes(p.module)) continue;
-      (map[p.module] ??= {})[p.action] = p;
-    }
-    return map;
-  }, [permsQ.data]);
+  // A new role starts with the defaults; an existing one opens with what it holds.
+  useDefaultGrants(rows, !role, setSelected);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -198,8 +190,6 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
     onError: (e) => toast.error(e),
   });
 
-  if (permsQ.isLoading) return <Modal title="Role" onClose={onClose}><Loading /></Modal>;
-
   return (
     <Modal title={role ? 'Edit role' : 'Add role'} onClose={onClose} large>
       <div className="grid cols-2">
@@ -214,15 +204,7 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
       <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>
         Modules a role can <strong>read</strong> appear in that user’s sidebar.
       </div>
-      <div className="matrix-scroll">
-        <div className="checkbox-grid">
-          <div />
-          {ACTIONS.map((a) => <div key={a} className="muted" style={{ textAlign: 'center', fontSize: 12 }}>{a}</div>)}
-          {Object.entries(byModule).map(([module, actions]) => (
-            <RoleRow key={module} module={module} actions={actions} selected={selected} toggle={toggle} />
-          ))}
-        </div>
-      </div>
+      <PermissionMatrix rows={rows} loading={loading} selected={selected} onToggle={toggle} />
 
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>Cancel</button>
@@ -231,41 +213,5 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
         </button>
       </div>
     </Modal>
-  );
-}
-
-function RoleRow({
-  module,
-  actions,
-  selected,
-  toggle,
-}: {
-  module: string;
-  actions: Record<string, Permission>;
-  selected: Set<string>;
-  toggle: (id: string) => void;
-}) {
-  return (
-    <>
-      <div className="mod">
-        {MODULE_LABEL[module as PermModule] ?? module.replace('_', ' ')}
-      </div>
-      {ACTIONS.map((a) => {
-        const perm = actions[a];
-        return (
-          <div key={a} style={{ textAlign: 'center' }}>
-            {perm ? (
-              <input
-                type="checkbox"
-                checked={selected.has(perm.id)}
-                onChange={() => toggle(perm.id)}
-              />
-            ) : (
-              <span className="muted">—</span>
-            )}
-          </div>
-        );
-      })}
-    </>
   );
 }

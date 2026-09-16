@@ -21,8 +21,10 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
+  // The catalogue of what *can* be granted, not what anyone holds. Any signed-in
+  // account may read it: the team screen draws its permission grid from this
+  // for whoever can add a team member, and that person need not manage roles.
   @Get('permissions')
-  @Permissions({ module: PermissionModule.ROLES, action: PermissionAction.READ })
   listPermissions() {
     return this.rolesService.listPermissions();
   }

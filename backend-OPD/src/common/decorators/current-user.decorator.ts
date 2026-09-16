@@ -8,6 +8,8 @@ export interface AuthUser {
   name: string;
   type: UserType;
   roleId: string | null;
+  /** The role's display name, for the header — null for a role-less account. */
+  roleName: string | null;
   doctorId: string | null;
   permissions: string[]; // "module:action" strings
 }

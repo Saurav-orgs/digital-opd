@@ -4,11 +4,13 @@ import { consultationApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { useToast } from './Toast';
 import { printBlob } from '../lib/printBlob';
-import { PdfPages } from './PdfPages';
+import { PdfPages, type PdfFit } from './PdfPages';
 import { ConfirmDialog, Loading, Modal } from './ui';
 import {
   CheckCircleIcon,
+  CloseIcon,
   DownloadIcon,
+  MaximizeIcon,
   PdfIcon,
   PrinterIcon,
   ShareIcon,
@@ -132,14 +134,61 @@ function PreviewFrame({
   blob,
   error,
   height,
+  fit,
+  onPageCount,
 }: {
   blob: Blob | null;
   error: string | null;
   height: string;
+  fit?: PdfFit;
+  onPageCount?: (n: number) => void;
 }) {
   if (error) return <div className="empty">{error}</div>;
   if (!blob) return <Loading label="Rendering the prescription…" />;
-  return <PdfPages blob={blob} height={height} />;
+  return <PdfPages blob={blob} height={height} fit={fit} onPageCount={onPageCount} />;
+}
+
+/**
+ * The document over everything else, as large as the screen allows.
+ *
+ * The inline preview fits the whole page into its box so the step never
+ * scrolls, which on a phone makes the text small. This is the other half of
+ * that bargain: one tap opens the same document at full width, scrolling,
+ * for the doctor who wants to read a dosage rather than check a layout.
+ */
+function MaximisedPreview({
+  blob,
+  name,
+  onClose,
+}: {
+  blob: Blob;
+  name: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="pdf-max-backdrop" role="dialog" aria-modal="true" aria-label="Prescription preview">
+      <div className="pdf-max">
+        <div className="pdf-bar">
+          <PdfIcon size={16} />
+          <span className="pdf-bar-name">{name}</span>
+          <button className="pdf-bar-icon" onClick={onClose} aria-label="Close" title="Close">
+            <CloseIcon size={16} />
+          </button>
+        </div>
+        <div className="pdf-max-body">
+          <PdfPages blob={blob} height="100%" fit="width" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -197,6 +246,8 @@ export function PrescriptionPreviewPanel({
   const qc = useQueryClient();
   const [finishedBy, setFinishedBy] = useState<FinishKind | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [maximised, setMaximised] = useState(false);
+  const [pageCount, setPageCount] = useState(1);
 
   const finish = (kind: FinishKind) => {
     setFinishedBy(kind);
@@ -309,26 +360,65 @@ export function PrescriptionPreviewPanel({
     );
   }
 
+  const fileName = `Prescription_${patientName.replace(/\s+/g, '_')}.pdf`;
+  const canDelete = canIssue && !!onDeleted;
+
   return (
     <div>
       {/* The document, in a viewer rather than bare — the design frames it as
-          the file it is about to become. */}
+          the file it is about to become. The whole page fits the box (no
+          scrolling, at the client's request); the maximise button is the
+          way to read it at size. Delete sits top-right of the document, where
+          a file's own controls live, rather than as a button under the page. */}
       <div className="pdf-viewer">
         <div className="pdf-bar">
           <PdfIcon size={16} />
-          <span className="pdf-bar-name">
-            Prescription_{patientName.replace(/\s+/g, '_')}.pdf
-          </span>
+          <span className="pdf-bar-name">{fileName}</span>
           {onEdit && (
             <button className="pdf-bar-edit" onClick={onEdit}>
               Edit
             </button>
           )}
+          <button
+            className="pdf-bar-icon"
+            disabled={!blob}
+            onClick={() => setMaximised(true)}
+            aria-label="Open full view"
+            title="Open full view"
+          >
+            <MaximizeIcon size={15} />
+          </button>
+          {canDelete && (
+            <button
+              className="pdf-bar-icon danger"
+              disabled={remove.isPending}
+              onClick={() => setConfirmDelete(true)}
+              aria-label="Delete prescription"
+              title="Delete prescription"
+            >
+              <TrashIcon size={15} />
+            </button>
+          )}
         </div>
-        <div className="pdf-scroll">
-          <PreviewFrame blob={blob} error={error} height="58vh" />
+        <div className="pdf-scroll pdf-fit-page">
+          <PreviewFrame
+            blob={blob}
+            error={error}
+            height="var(--pdf-fit-height)"
+            fit="page"
+            onPageCount={setPageCount}
+          />
+          {pageCount > 1 && (
+            <div className="pdf-more-pages">
+              Page 1 of {pageCount} — open the full view to read the rest.
+            </div>
+          )}
         </div>
       </div>
+
+      {maximised && blob && (
+        <MaximisedPreview blob={blob} name={fileName} onClose={() => setMaximised(false)} />
+      )}
 
       {canIssue && (
         <>
@@ -369,18 +459,6 @@ export function PrescriptionPreviewPanel({
               <strong> Issue to patient</strong> puts it in their myDigitalOPD
               account. Print leaves the header blank for your own pad.
             </p>
-          )}
-
-          {onDeleted && (
-            <button
-              type="button"
-              className="preview-delete-btn"
-              disabled={remove.isPending}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <TrashIcon size={15} />
-              {remove.isPending ? 'Deleting…' : 'Delete prescription'}
-            </button>
           )}
         </>
       )}

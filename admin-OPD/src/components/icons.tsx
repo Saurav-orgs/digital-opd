@@ -183,6 +183,16 @@ export function DocumentIcon(props: IconProps) {
   );
 }
 
+/** A prescription pad: a sheet with a ruled header band. */
+export function LetterheadIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="5" y="3" width="14" height="18" rx="2" />
+      <path d="M5 8.5h14M8 12.5h8M8 16h5" />
+    </Icon>
+  );
+}
+
 // ── Sidebar rail ───────────────────────────────────────────
 
 export function ChevronIcon({
@@ -361,6 +371,15 @@ export function QrIcon(props: IconProps) {
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <path d="M14 14h3v3M21 14v3M14 21h3M21 21h-1" />
+    </Icon>
+  );
+}
+
+/** Four corners pulling outward: open this bigger. */
+export function MaximizeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
     </Icon>
   );
 }

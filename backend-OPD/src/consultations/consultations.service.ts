@@ -16,6 +16,40 @@ import {
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 
+/** "Paracetamol  650" and "paracetamol 650" are the same medicine. */
+function medicineKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** The old text, the new text, or both joined — never the same text twice. */
+function mergeText(
+  current: string | null | undefined,
+  incoming: string | null | undefined,
+  joiner: string,
+): string | null {
+  const a = current?.trim() ?? '';
+  const b = incoming?.trim() ?? '';
+  if (!a) return b || null;
+  if (!b || a.toLowerCase().includes(b.toLowerCase())) return a;
+  return `${a}${joiner}${b}`;
+}
+
+/** Advice is one line per point; new points go under the ones already there. */
+function mergeLines(current: string | null | undefined, incoming: string[]): string | null {
+  const lines = (current ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const seen = new Set(lines.map((l) => l.toLowerCase()));
+  for (const l of incoming) {
+    if (!seen.has(l.toLowerCase())) {
+      lines.push(l);
+      seen.add(l.toLowerCase());
+    }
+  }
+  return lines.length ? lines.join('\n') : null;
+}
+
 /**
  * Turns a recorded consultation into a draft prescription.
  *
@@ -355,7 +389,21 @@ export class ConsultationsService {
     return true;
   }
 
-  /** Replace the appointment's draft with the AI's suggestion. */
+  /**
+   * Fold the AI's suggestion into the appointment's draft.
+   *
+   * Folded in, not written over. A doctor who records twice — the second
+   * time because they remembered one more medicine — expects the second
+   * draft to add to the first, not to throw away what was already on the
+   * page (and any dosage they had typed into it since). So medicines already
+   * on the draft stay exactly as they are, new ones are appended below them,
+   * and one the model hears again is not added twice. Diagnosis and advice
+   * merge the same way: the earlier text stays, new text joins it.
+   *
+   * Starting over is the doctor's call, and the editor's Clear all is how
+   * they make it: the recorder saves the editor's state before it uploads,
+   * so a cleared draft is an empty one and the next recording begins clean.
+   */
   private async saveDraft(
     appointmentId: string,
     sessionId: string,
@@ -382,22 +430,34 @@ export class ConsultationsService {
         status: PrescriptionStatus.DRAFT,
       } as any));
 
+    const newAdvice = draft.advice?.map((l) => l.trim()).filter(Boolean) ?? [];
     await prescription.update({
       consultation_session_id: sessionId,
-      diagnosis: draft.diagnosis || null,
-      advice: draft.advice?.length ? draft.advice.join('\n') : null,
-      follow_up_date: this.followUpDate(draft.follow_up_days),
+      diagnosis: mergeText(prescription.diagnosis, draft.diagnosis, '; '),
+      advice: mergeLines(prescription.advice, newAdvice),
+      follow_up_date:
+        prescription.follow_up_date ?? this.followUpDate(draft.follow_up_days),
     } as any);
 
-    await this.medicineModel.destroy({
+    const held = await this.medicineModel.findAll({
       where: { e_prescription_id: prescription.id },
+      order: [['position', 'ASC']],
     });
+    const already = new Set(held.map((m) => medicineKey(m.medicine_name)));
+    let position = held.length ? Math.max(...held.map((m) => m.position)) + 1 : 0;
 
     const rows = (draft.medicines ?? [])
       .filter((m) => m.name?.trim())
-      .map((m, index) => ({
+      // Heard again — the row on the page wins, edits and all.
+      .filter((m) => {
+        const key = medicineKey(m.name);
+        if (already.has(key)) return false;
+        already.add(key);
+        return true;
+      })
+      .map((m) => ({
         e_prescription_id: prescription.id,
-        position: index,
+        position: position++,
         medicine_name: m.name.trim(),
         strength: m.strength || null,
         form: m.form || null,

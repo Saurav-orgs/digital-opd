@@ -486,6 +486,18 @@ export function PrescriptionEditor({
   useEffect(() => {
     if (flushRef) flushRef.current = flush;
   });
+  // On the way out: anything not yet autosaved goes now — a Clear all
+  // followed by a quick tab switch must reach the server, or the next
+  // recording adds to the draft that was cleared — and the hook is handed
+  // back, so nothing flushes a form that is no longer on screen.
+  useEffect(() => {
+    return () => {
+      cancelPendingAutosave();
+      if (dirtyRef.current) void saveNow('auto');
+      if (flushRef) flushRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const patchRow = (i: number, patch: Partial<PrescriptionMedicine>) => {
     markDirty();

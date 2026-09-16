@@ -4,6 +4,7 @@ import { appointmentsApi } from '../api/endpoints';
 import { Empty, Loading } from '../components/ui';
 import { avatarTone, initials } from '../lib/avatar';
 import { HistoryVisit } from '../components/HistoryVisit';
+import { VisitRangeFilter, useVisitRange } from '../components/VisitRangeFilter';
 
 /**
  * Everything this patient has been seen for before, on its own screen.
@@ -33,6 +34,9 @@ export default function PatientHistoryPage() {
     queryFn: () => appointmentsApi.history(a!.patient_profile_id!, id!),
     enabled: !!a?.patient_profile_id && !!id,
   });
+
+  const visits = historyQ.data ?? [];
+  const range = useVisitRange(visits);
 
   if (loadingAppointment) return <Loading />;
   if (!a) return <Empty>Could not load this patient.</Empty>;
@@ -68,14 +72,17 @@ export default function PatientHistoryPage() {
 
       {historyQ.isLoading ? (
         <Loading />
-      ) : !historyQ.data?.length ? (
+      ) : !visits.length ? (
         <Empty>No earlier visits for this patient.</Empty>
       ) : (
-        <div className="stack" style={{ gap: 12 }}>
-          {historyQ.data.map((h) => (
-            <HistoryVisit key={h.id} visit={h} />
-          ))}
-        </div>
+        <>
+          <VisitRangeFilter range={range} total={visits.length} />
+          <div className="stack" style={{ gap: 12 }}>
+            {range.filtered.map((h) => (
+              <HistoryVisit key={h.id} visit={h} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

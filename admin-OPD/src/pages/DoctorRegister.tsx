@@ -2,6 +2,7 @@ import { Fragment, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { doctorRegistrationApi } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
 import { PasswordInput } from '../components/ui';
 import { TermsDialog } from '../components/TermsDialog';
 import { PoweredByIttitude } from '../components/Brand';
@@ -11,6 +12,7 @@ import {
   workingDays,
   type DayTimings,
 } from '../components/DayAvailabilityEditor';
+import { HEADER_PX, LetterheadHeaderPicker, MIN_RATIO } from '../components/Letterhead';
 
 const MAX_LICENSE_BYTES = 6 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
@@ -57,12 +59,15 @@ interface Vacation {
  *
  * The third stage writes opening hours and any booked leave along with the
  * account, so a doctor who finishes this form has a booking link that already
- * works.
+ * works — and it ends on their dashboard, signed in, because the server
+ * answers the registration with a session.
  */
 export default function DoctorRegisterPage() {
   const navigate = useNavigate();
+  const { setSession } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLInputElement>(null);
 
   const [stage, setStage] = useState<Stage>(1);
 
@@ -81,6 +86,11 @@ export default function DoctorRegisterPage() {
   const [license, setLicense] = useState<File | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // The prescription pad header. Optional — the letterhead screen takes it
+  // later just as well — but a doctor who has the file to hand at sign-up
+  // should not have to come back for it.
+  const [header, setHeader] = useState<File | null>(null);
+  const [headerPreview, setHeaderPreview] = useState<string | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +120,7 @@ export default function DoctorRegisterPage() {
       });
       if (license) fd.append('license', license);
       if (photo) fd.append('photo', photo);
+      if (header) fd.append('letterhead_header', header);
       // Only send hours if some were set — the server treats an empty set as
       // "not configured" rather than "closed every day".
       if (openDays.length) {
@@ -134,7 +145,18 @@ export default function DoctorRegisterPage() {
       fd.append('terms_version', PROVIDER_TERMS_VERSION);
       return doctorRegistrationApi.register(fd);
     },
-    onSuccess: () => setDone(true),
+    onSuccess: (res) => {
+      // The account is live and the server has already signed the doctor in,
+      // so the next screen is their dashboard — not a login form asking for
+      // the email and password they typed a minute ago. The "sign in" card
+      // stays only for an API that has not started returning a session.
+      if (res.accessToken && res.user) {
+        setSession({ accessToken: res.accessToken, user: res.user });
+        navigate('/', { replace: true });
+        return;
+      }
+      setDone(true);
+    },
     onError: (e: any) =>
       setError(e?.response?.data?.message ?? e?.message ?? 'Something went wrong.'),
   });
@@ -448,6 +470,68 @@ export default function DoctorRegisterPage() {
               </select>
 
               {notice && <p className="form-notice">{notice}</p>}
+            </section>
+
+            {/* ── Letterhead ──
+                Skippable, and says so: the header prints on every
+                prescription, but nothing about booking depends on it. */}
+            <section className="box sky-accent">
+              <h2 className="box-title">Prescription letterhead</h2>
+              <div className="box-sub">
+                Optional — upload the top strip of your prescription pad and it
+                prints as the header on every prescription. You can skip this and
+                add it later from the Letterhead menu.
+              </div>
+              <LetterheadHeaderPicker
+                inputRef={headerRef}
+                onPick={(f) => {
+                  if (f.size > MAX_PHOTO_BYTES) {
+                    setError('That image is larger than 6 MB. Please choose a smaller one.');
+                    return;
+                  }
+                  setHeader(f);
+                  setHeaderPreview(URL.createObjectURL(f));
+                  setError(null);
+                }}
+                onReject={(problem) => setError(problem)}
+              />
+              {headerPreview ? (
+                <div className="lh-header-box">
+                  <img src={headerPreview} alt="Your prescription header" />
+                </div>
+              ) : (
+                <button type="button" className="file-drop" onClick={() => headerRef.current?.click()}>
+                  <span className="file-drop-icon" aria-hidden>🖼</span>
+                  <span className="file-drop-main">Tap to upload your pad header</span>
+                  <span className="file-drop-sub">
+                    PNG or JPG, a wide strip — best at {HEADER_PX.w} × {HEADER_PX.h} px, at
+                    least {MIN_RATIO}× wider than tall
+                  </span>
+                </button>
+              )}
+              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                {headerPreview ? (
+                  <>
+                    <button type="button" className="btn btn-sm" onClick={() => headerRef.current?.click()}>
+                      Choose a different image
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => {
+                        setHeader(null);
+                        setHeaderPreview(null);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : (
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    Skip for now — your name, qualifications and address print instead.
+                  </span>
+                )}
+              </div>
             </section>
 
             {/* ── Vacation ── */}

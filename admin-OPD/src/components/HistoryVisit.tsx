@@ -64,15 +64,24 @@ export function HistoryVisit({ visit: h }: { visit: Appointment }) {
           <div className="history-sub-label">Reports</div>
           <div className="stack" style={{ gap: 4 }}>
             {h.reports.map((r) => (
-              <a
+              <div
                 key={r.id}
-                href={r.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 12.5 }}
+                className="row"
+                style={{ justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}
               >
-                📄 {r.title}
-              </a>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  📄 {r.title}
+                </span>
+                <a
+                  className="btn btn-sm"
+                  href={r.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ flexShrink: 0 }}
+                >
+                  View report
+                </a>
+              </div>
             ))}
           </div>
         </>

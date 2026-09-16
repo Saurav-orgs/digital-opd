@@ -54,9 +54,14 @@ export const NAV: NavItem[] = [
   { path: '/pathlabs', label: 'Pathlabs', module: 'pathlabs', icon: 'flask', doctorOnly: true, hidden: true },
   { path: '/blocked-numbers', label: 'Blocked', module: 'appointments', icon: 'block', doctorOnly: true },
   // Clinic staff accounts and what each of them may do. Doctor-side only:
-  // the super admin manages tenants, not a clinic's own reception desk.
-  { path: '/users', label: 'Users', module: 'users', icon: 'users', doctorOnly: true },
-  { path: '/roles', label: 'Roles', module: 'roles', icon: 'roles', doctorOnly: true },
+  // the super admin manages tenants, not a clinic's own reception desk. The
+  // route and the permission module keep the old name; only the words the
+  // doctor sees changed.
+  { path: '/users', label: 'My Team', module: 'users', icon: 'users', doctorOnly: true },
+  // Out of the menu: permissions are ticked straight on the team member now
+  // (My Team keeps a role per person behind the scenes), so a separate Roles
+  // screen only asked the doctor to name things twice. Route and page stay.
+  { path: '/roles', label: 'Roles', module: 'roles', icon: 'roles', doctorOnly: true, hidden: true },
 ];
 
 /**
@@ -97,10 +102,29 @@ export const MODULE_LABEL: Record<PermModule, string> = {
   appointments: 'Appointments',
   patients: 'Patients',
   reports: 'Upload reports',
-  users: 'Users',
+  users: 'My Team',
   roles: 'Roles',
   pathlabs: 'Pathlabs',
   doctors: 'Doctors',
   opd_schedules: 'OPD schedules',
   activity: 'Activity log',
 };
+
+/**
+ * The rows of the role editor, top to bottom.
+ *
+ * Fixed here rather than left to the order the API happens to return, because
+ * the order carries meaning: the client asked that a new role start with
+ * everything ticked *except the last two rows* — the team and role screens
+ * are the ones a receptionist should not get by default, so they sit last.
+ */
+export const ROLE_MODULE_ORDER: PermModule[] = [
+  'appointments',
+  'patients',
+  'reports',
+  'users',
+  'roles',
+];
+
+/** How many rows at the bottom of the matrix a new role starts *without*. */
+export const ROLE_MODULES_UNTICKED_BY_DEFAULT = 2;

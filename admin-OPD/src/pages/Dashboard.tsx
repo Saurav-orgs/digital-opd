@@ -32,11 +32,15 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
 };
 
 export default function Dashboard() {
-  const { user, can } = useAuth();
+  const { user, isDoctor } = useAuth();
   const navigate = useNavigate();
   const [range, setRange] = useState<Range>('today');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [date, setDate] = useState<string | undefined>(undefined);
+  // The Previous tab filters by span rather than by day — "who did I see in
+  // March" is the question there, not "who came on the 3rd".
+  const [from, setFrom] = useState<string | undefined>(undefined);
+  const [to, setTo] = useState<string | undefined>(undefined);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState<string | undefined>(undefined);
   const [walkInOpen, setWalkInOpen] = useState(false);
@@ -73,15 +77,28 @@ export default function Dashboard() {
   });
   const doctorId = user?.doctorId ?? doctorsQ.data?.[0]?.id;
 
-  const canCreate = can('appointments', 'create');
-  const filtersActive = !!search || status !== 'all' || !!date;
+  // Walk-ins — and with them new patients — are the doctor's to add. A staff
+  // login with a role sees the queue and works it, but does not register
+  // people into it; the client was explicit about that.
+  const canCreate = isDoctor;
+  const spanActive = range === 'previous' && (!!from || !!to);
+  const filtersActive = !!search || status !== 'all' || !!date || spanActive;
 
   const resetFilters = () => {
     setSearchInput('');
     setSearch(undefined);
     setStatus('all');
     setDate(undefined);
+    setFrom(undefined);
+    setTo(undefined);
   };
+
+  const spanLabel = (() => {
+    if (from && to) return `${prettyShortDate(from)} – ${prettyShortDate(to)}`;
+    if (from) return `From ${prettyShortDate(from)}`;
+    if (to) return `Until ${prettyShortDate(to)}`;
+    return 'Date range';
+  })();
 
   if (isLoading) return <Loading />;
   if (error) return <Empty>Could not load the appointments.</Empty>;
@@ -103,7 +120,20 @@ export default function Dashboard() {
           band itself is hidden by CSS below 700px, not unmounted, so the
           wider layouts keep it untouched. */}
       <TopbarPortal>
-        <span className="topbar-title">Appointments</span>
+        <span className="topbar-title">
+          {!isDoctor && user ? (
+            // Staff on a phone: who is signed in, and whose clinic it is.
+            <>
+              <span className="topbar-who">
+                {user.name}
+                {user.roleName && <span className="role-chip">{user.roleName}</span>}
+              </span>
+              <span className="topbar-sub">{doctorName}</span>
+            </>
+          ) : (
+            'Appointments'
+          )}
+        </span>
         {meQ.data?.profile_photo_url ? (
           <img className="topbar-avatar" src={meQ.data.profile_photo_url} alt="" />
         ) : (
@@ -113,7 +143,15 @@ export default function Dashboard() {
         )}
       </TopbarPortal>
 
-      <DoctorHero doctor={meQ.data} fallbackName={user?.name ?? ''} />
+      <DoctorHero
+        doctor={meQ.data}
+        fallbackName={user?.name ?? ''}
+        staff={
+          !isDoctor && user
+            ? { name: user.name, role: user.roleName }
+            : null
+        }
+      />
 
       <div className="stat-row">
         <StatTile accent="teal" icon={<CalendarIcon size={20} />} num={data.total} label="Today" />
@@ -173,10 +211,64 @@ export default function Dashboard() {
                 }
               </FilterPopover>
 
+              {range === 'previous' ? (
+                <FilterPopover label={spanLabel} active={spanActive} icon={<CalendarIcon size={16} />}>
+                  {(close) => (
+                    <>
+                      <button
+                        type="button"
+                        className={`filter-opt ${!spanActive ? 'selected' : ''}`}
+                        onClick={() => {
+                          setFrom(undefined);
+                          setTo(undefined);
+                          close();
+                        }}
+                      >
+                        Any date
+                      </button>
+                      <div className="filter-date">
+                        <label className="form-label">From</label>
+                        <input
+                          className="input"
+                          type="date"
+                          value={from ?? ''}
+                          max={to}
+                          onChange={(e) => setFrom(e.target.value || undefined)}
+                          aria-label="From date"
+                        />
+                      </div>
+                      <div className="filter-date">
+                        <label className="form-label">To</label>
+                        <input
+                          className="input"
+                          type="date"
+                          value={to ?? ''}
+                          min={from}
+                          onChange={(e) => setTo(e.target.value || undefined)}
+                          aria-label="To date"
+                        />
+                      </div>
+                      <div className="filter-date">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          style={{ width: '100%', justifyContent: 'center' }}
+                          onClick={close}
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </FilterPopover>
+              ) : (
               <FilterPopover
                 label={date ? prettyShortDate(date) : 'Date'}
                 active={!!date}
                 icon={<CalendarIcon size={16} />}
+                // Today is one date already; a date picker on it can only
+                // empty the list.
+                disabled={range === 'today'}
               >
                 {(close) => (
                   <>
@@ -205,6 +297,7 @@ export default function Dashboard() {
                   </>
                 )}
               </FilterPopover>
+              )}
 
               <button
                 className="reset-filters-btn"
@@ -232,7 +325,10 @@ export default function Dashboard() {
               active={range === 'today'}
               count={data.total}
               pending={data.pending.today}
-              onClick={() => setRange('today')}
+              onClick={() => {
+                setRange('today');
+                setDate(undefined);
+              }}
             />
             <TabButton
               label="Upcoming"
@@ -248,6 +344,8 @@ export default function Dashboard() {
           range={range}
           search={search}
           date={date}
+          from={range === 'previous' ? from : undefined}
+          to={range === 'previous' ? to : undefined}
           status={status}
           filtersActive={filtersActive}
           onSelect={(id) => navigate(`/appointments/${id}`)}
@@ -364,11 +462,14 @@ function FilterPopover({
   label,
   active,
   icon,
+  disabled,
   children,
 }: {
   label: string;
   active: boolean;
   icon: React.ReactNode;
+  /** Greyed out and closed — the filter makes no sense on this tab. */
+  disabled?: boolean;
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -396,11 +497,14 @@ function FilterPopover({
         className={`filter-btn ${active ? 'active-filter' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        disabled={disabled}
       >
         {icon}
         <span>{label}</span>
       </button>
-      {open && <div className="filter-panel">{children(() => setOpen(false))}</div>}
+      {open && !disabled && (
+        <div className="filter-panel">{children(() => setOpen(false))}</div>
+      )}
     </div>
   );
 }
@@ -409,32 +513,53 @@ function FilterPopover({
  * Who the doctor is. The clinic line and the date that used to sit under the
  * name are gone — the updated design drops both, and neither was telling the
  * doctor something they did not know.
+ *
+ * For a staff login the band answers a different question — who *you* are and
+ * whose clinic you are working in — so it leads with the staff member's name
+ * and role, and puts the doctor underneath. The doctor's own login is
+ * unchanged.
  */
 function DoctorHero({
   doctor,
   fallbackName,
+  staff,
 }: {
   doctor: Doctor | undefined;
   fallbackName: string;
+  /** The signed-in staff member, when the account is not the doctor's own. */
+  staff: { name: string; role: string | null } | null;
 }) {
-  const name = doctor?.name ?? fallbackName;
+  const doctorName = doctor?.name ?? fallbackName;
   const meta = [doctor?.qualifications, doctor?.specialization]
     .filter(Boolean)
     .join(' · ');
+  const avatarName = staff?.name ?? doctorName;
 
   return (
     <header className="doc-hero">
       <div className="doc-hero-top">
-        {doctor?.profile_photo_url ? (
+        {!staff && doctor?.profile_photo_url ? (
           <img className="doc-avatar" src={doctor.profile_photo_url} alt="" />
         ) : (
           <span className="doc-avatar" aria-hidden>
-            {initials(name)}
+            {initials(avatarName)}
           </span>
         )}
         <div style={{ minWidth: 0 }}>
-          <h1 className="doc-name">{name}</h1>
-          {meta && <div className="doc-meta">{meta}</div>}
+          {staff ? (
+            <>
+              <h1 className="doc-name">
+                {staff.name}
+                {staff.role && <span className="role-chip">{staff.role}</span>}
+              </h1>
+              <div className="doc-meta">{doctorName}</div>
+            </>
+          ) : (
+            <>
+              <h1 className="doc-name">{doctorName}</h1>
+              {meta && <div className="doc-meta">{meta}</div>}
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -507,6 +632,8 @@ function RangeTable({
   range,
   search,
   date,
+  from,
+  to,
   status,
   filtersActive,
   onSelect,
@@ -514,14 +641,16 @@ function RangeTable({
   range: Range;
   search?: string;
   date?: string;
+  from?: string;
+  to?: string;
   status: StatusFilter;
   filtersActive: boolean;
   onSelect: (id: string) => void;
 }) {
   const narrow = useMediaQuery(NARROW);
   const listQ = useQuery({
-    queryKey: ['appointments', { range, search, date }],
-    queryFn: () => appointmentsApi.list({ range, search, date }),
+    queryKey: ['appointments', { range, search, date, from, to }],
+    queryFn: () => appointmentsApi.list({ range, search, date, from, to }),
   });
 
   const filtered = useMemo(() => {

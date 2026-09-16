@@ -45,8 +45,9 @@ export function prettyTime(t: string) {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
-export function summariseSlots(slots: DaySlot[]) {
-  return slots.map((s) => `${prettyTime(s.start_time)} – ${prettyTime(s.end_time)}`).join(', ');
+/** One line per session: "10:00 AM – 2:00 PM", "5:00 PM – 7:00 PM". */
+export function summariseSlots(slots: DaySlot[]): string[] {
+  return slots.map((s) => `${prettyTime(s.start_time)} – ${prettyTime(s.end_time)}`);
 }
 
 /** An error message, or null when the day is fit to save. */
@@ -75,7 +76,8 @@ export function workingDays(timings: DayTimings): number[] {
 }
 
 function blankDay(): DayAvailability {
-  return { slots: [{ start_time: '09:00', end_time: '13:00' }], saved: false };
+  // The client's usual morning OPD, so most days need no typing at all.
+  return { slots: [{ start_time: '10:00', end_time: '14:00' }], saved: false };
 }
 
 /**
@@ -185,8 +187,14 @@ export function DayAvailabilityEditor({
               aria-expanded={isOpen}
             >
               <span className="dr-day">{DAY_LABEL[day]}</span>
+              {/* A split day reads as two lines — morning above evening — rather
+                  than one comma-joined line the eye has to parse. */}
               <span className={`dr-summary ${isSet ? 'set' : ''}`}>
-                {isSet ? summariseSlots(e.slots) : 'Day off — no timings set'}
+                {isSet
+                  ? summariseSlots(e.slots).map((line) => (
+                      <span key={line} className="dr-session">{line}</span>
+                    ))
+                  : 'Day off — no timings set'}
               </span>
               {isSet && <span className="dr-badge">Saved</span>}
               <span className="dr-chevron" aria-hidden>

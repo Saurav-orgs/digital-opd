@@ -9,12 +9,14 @@ import {
 } from 'react';
 import { authApi } from '../api/endpoints';
 import { tokenStore } from '../api/client';
-import type { AuthUser, PermAction, PermModule } from '../api/types';
+import type { AuthUser, LoginResponse, PermAction, PermModule } from '../api/types';
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Adopt a session the server already minted — after registering. */
+  setSession: (session: LoginResponse) => void;
   logout: () => void;
   can: (module: PermModule, action: PermAction) => boolean;
   /** True when the logged-in account is a doctor user (has a doctorId). */
@@ -52,6 +54,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user);
   }, []);
 
+  const setSession = useCallback((res: LoginResponse) => {
+    tokenStore.set(res.accessToken);
+    setUser(res.user);
+  }, []);
+
   const logout = useCallback(() => {
     tokenStore.clear();
     setUser(null);
@@ -71,8 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isSuperAdmin = user?.type === 'super_admin';
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, can, isDoctor, isSuperAdmin }),
-    [user, loading, login, logout, can, isDoctor, isSuperAdmin],
+    () => ({ user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin }),
+    [user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

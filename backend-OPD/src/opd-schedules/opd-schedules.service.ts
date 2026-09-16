@@ -16,7 +16,8 @@ import {
   AppointmentStatus,
   ScheduleExceptionType,
 } from '../common/enums';
-import { toMinutes } from '../common/utils/clinic-time';
+import { expandDates, isValidDate, toMinutes } from '../common/utils/clinic-time';
+import { Op } from 'sequelize';
 
 @Injectable()
 export class OpdSchedulesService {
@@ -86,22 +87,27 @@ export class OpdSchedulesService {
    * existing bookings stand (to be rescheduled), while new bookings see the day
    * as on-leave (SlotsService treats a LEAVE exception as unavailable).
    */
-  async markLeave(doctorId: string, dto: MarkLeaveDto): Promise<ScheduleException> {
+  async markLeave(doctorId: string, dto: MarkLeaveDto): Promise<ScheduleException[]> {
     await this.assertDoctor(doctorId);
+    const dates = this.leaveDates(dto.date, dto.end_date);
 
     if (!dto.force) {
       const bookings = await this.appointmentModel.findAll({
         where: {
           doctor_id: doctorId,
-          appointment_date: dto.date,
+          appointment_date: dates.length === 1 ? dates[0] : { [Op.in]: dates },
           status: AppointmentStatus.CONFIRMED,
         },
-        order: [['start_time', 'ASC']],
+        order: [
+          ['appointment_date', 'ASC'],
+          ['start_time', 'ASC'],
+        ],
       });
       if (bookings.length > 0) {
         throw new AppException(ErrorCode.LEAVE_HAS_BOOKINGS, {
           details: bookings.map((b) => ({
             id: b.id,
+            appointment_date: b.appointment_date,
             start_time: b.start_time,
             end_time: b.end_time,
             patient_name: b.patient_name,
@@ -111,34 +117,61 @@ export class OpdSchedulesService {
       }
     }
 
-    const [record] = await this.exceptionModel.upsert(
-      {
-        doctor_id: doctorId,
-        date: dto.date,
-        type: ScheduleExceptionType.LEAVE,
-        start_time: null,
-        end_time: null,
-        slot_duration_min: null,
-        reason: dto.reason ?? null,
-      } as any,
-    );
-    return record;
+    // One transaction for the span: a vacation half-marked because the
+    // connection dropped on day four would be worse than not marked at all.
+    return this.sequelize.transaction(async (t) => {
+      const rows: ScheduleException[] = [];
+      for (const date of dates) {
+        const [record] = await this.exceptionModel.upsert(
+          {
+            doctor_id: doctorId,
+            date,
+            type: ScheduleExceptionType.LEAVE,
+            start_time: null,
+            end_time: null,
+            slot_duration_min: null,
+            reason: dto.reason ?? null,
+          } as any,
+          { transaction: t },
+        );
+        rows.push(record);
+      }
+      return rows;
+    });
   }
 
-  async removeLeave(doctorId: string, date: string): Promise<void> {
+  /** Remove leave on one date, or on every date from `date` to `to` inclusive. */
+  async removeLeave(doctorId: string, date: string, to?: string): Promise<void> {
     await this.assertDoctor(doctorId);
+    const dates = this.leaveDates(date, to);
     const deleted = await this.exceptionModel.destroy({
       where: {
         doctor_id: doctorId,
-        date,
+        date: dates.length === 1 ? dates[0] : { [Op.in]: dates },
         type: ScheduleExceptionType.LEAVE,
       },
     });
     if (!deleted) {
       throw new AppException(ErrorCode.NOT_FOUND, {
-        message: 'No leave found for this date.',
+        message: to ? 'No leave found in these dates.' : 'No leave found for this date.',
       });
     }
+  }
+
+  /** The dates a leave call names — a single day, or an inclusive span. */
+  private leaveDates(date: string, end?: string): string[] {
+    if (!isValidDate(date) || (end && !isValidDate(end))) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'Please choose a valid date.',
+      });
+    }
+    if (!end || end === date) return [date];
+    if (end < date) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'Leave cannot end before it starts.',
+      });
+    }
+    return expandDates(date, end);
   }
 
   // ── helpers ────────────────────────────────────────────────

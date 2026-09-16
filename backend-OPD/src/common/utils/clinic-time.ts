@@ -65,3 +65,19 @@ export function isValidDate(date: string): boolean {
     dt.getUTCDate() === d
   );
 }
+
+/**
+ * Every YYYY-MM-DD from `from` to `to` inclusive, oldest first. Capped at a
+ * year so a mistyped year cannot ask for ten thousand rows; empty when the
+ * range is backwards.
+ */
+export function expandDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const last = new Date(`${to}T00:00:00Z`);
+  while (cursor <= last && out.length < 366) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}

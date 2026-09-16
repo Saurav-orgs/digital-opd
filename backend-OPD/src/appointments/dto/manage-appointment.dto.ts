@@ -39,6 +39,21 @@ export class ListAppointmentsQueryDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD.' })
   date?: string;
 
+  /**
+   * An inclusive span, for the "previous" list — "everyone seen in March".
+   * Either end may stand alone. Like `date`, a span takes precedence over the
+   * relative `range` window.
+   */
+  @ApiPropertyOptional({ example: '2026-03-01' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must be YYYY-MM-DD.' })
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-31' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must be YYYY-MM-DD.' })
+  to?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   status?: string;

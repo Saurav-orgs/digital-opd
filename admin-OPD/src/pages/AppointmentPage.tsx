@@ -19,6 +19,7 @@ import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
 import { CombinedSummaryDetail } from '../components/CombinedSummaryDetail';
 import { CollapseToggle } from '../components/CollapseToggle';
 import { ReportUpload } from '../components/ReportUpload';
+import { FlashNotice } from '../components/FlashNotice';
 import { printBlob } from '../lib/printBlob';
 import { downloadFile } from '../lib/shareFile';
 import { useCollapsible } from '../lib/collapsePreference';
@@ -237,11 +238,21 @@ export default function AppointmentPage() {
     setRDate(null);
     setRSlot(null);
   };
+  // What the doctor sees for a moment after the move: from when, to when.
+  const [rescheduledNotice, setRescheduledNotice] = useState<string | null>(null);
   const reschedule = useMutation({
-    mutationFn: () => appointmentsApi.reschedule(id!, rDate!, rSlot!.start_time),
-    onSuccess: () => {
+    mutationFn: async () => {
+      // Read the old slot before the server overwrites it — the message is
+      // about the change, and the change is gone from `a` once it succeeds.
+      const was = a ? `${prettyDate(a.appointment_date)} at ${prettyTime(a.start_time)}` : '';
+      await appointmentsApi.reschedule(id!, rDate!, rSlot!.start_time);
+      return was;
+    },
+    onSuccess: (was) => {
       invalidate();
-      toast.success('Appointment rescheduled');
+      setRescheduledNotice(
+        `${a?.patient_name ?? 'The appointment'}'s appointment has been rescheduled from ${was} to ${prettyDate(rDate!)} at ${prettyTime(rSlot!.start_time)}.`,
+      );
       closeReschedule();
     },
     onError: (e) => toast.error(e),
@@ -373,8 +384,11 @@ export default function AppointmentPage() {
                 <>
                   <div className="opts-backdrop" onClick={() => setOptsOpen(false)} />
                   <div className="opts-menu" role="menu">
+                    {/* Plain, not red: a no-show records what happened, it
+                        does not act against the patient the way blocking or
+                        cancelling does — the client wanted it in black. */}
                     <button
-                      className="opts-item danger"
+                      className="opts-item"
                       role="menuitem"
                       disabled={consult.isPending || a.consultation_status === 'no_show'}
                       onClick={() => {
@@ -776,6 +790,14 @@ export default function AppointmentPage() {
         />
       )}
 
+      {rescheduledNotice && (
+        <FlashNotice
+          title="Appointment rescheduled"
+          message={rescheduledNotice}
+          onDone={() => setRescheduledNotice(null)}
+        />
+      )}
+
       {/* ── Reschedule ───────────────────────────────────────── */}
       {rescheduling && a && (
         <Modal
@@ -901,11 +923,18 @@ function ReportCard({
     <div className="report-card">
       <div className="report-top">
         <div className="report-info">
-          {/* Plain text: the name used to be the link that opened the file,
-              which read as a label and got missed. View is a button now. */}
-          <div className="report-name" title={report.title}>
+          {/* The name opens the file, as does the View button beside it —
+              the client wanted both: the button says what it does, the
+              name is where the eye already is. */}
+          <a
+            className="report-name"
+            href={report.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open ${report.title}`}
+          >
             {report.title}
-          </div>
+          </a>
           <div className="report-date">
             {report.createdAt &&
               new Date(report.createdAt).toLocaleString(undefined, {

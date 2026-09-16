@@ -434,19 +434,26 @@ export class AppointmentsService {
     } else {
       return []; // super admin has no clinical scope
     }
-    // An explicit date narrows to that single day; otherwise fall back to the
-    // relative window (clinic timezone) for the dashboard tabs.
+    // An explicit date narrows to that single day. Otherwise the relative
+    // window (clinic timezone) for the dashboard tabs applies, and a from/to
+    // span narrows *within* it — "Previous, in March" must not surface next
+    // week's bookings because the doctor typed a generous end date.
     if (query.date) {
       where.appointment_date = query.date;
-    } else if (query.range) {
-      const today = nowInClinic(
-        this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
-      ).date;
-      if (query.range === 'today') where.appointment_date = today;
-      else if (query.range === 'upcoming')
-        where.appointment_date = { [Op.gt]: today };
-      else if (query.range === 'previous')
-        where.appointment_date = { [Op.lt]: today };
+    } else {
+      const bounds: Record<symbol, string>[] = [];
+      if (query.from) bounds.push({ [Op.gte]: query.from });
+      if (query.to) bounds.push({ [Op.lte]: query.to });
+      if (query.range) {
+        const today = nowInClinic(
+          this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
+        ).date;
+        if (query.range === 'today') bounds.push({ [Op.eq]: today });
+        else if (query.range === 'upcoming') bounds.push({ [Op.gt]: today });
+        else if (query.range === 'previous') bounds.push({ [Op.lt]: today });
+      }
+      if (bounds.length === 1) where.appointment_date = bounds[0];
+      else if (bounds.length > 1) where.appointment_date = { [Op.and]: bounds };
     }
     if (query.status) where.status = query.status;
 

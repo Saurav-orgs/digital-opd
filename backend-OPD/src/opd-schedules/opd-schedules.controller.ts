@@ -9,7 +9,7 @@ import {
   Put,
 } from '@nestjs/common';
 import { Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { OpdSchedulesService } from './opd-schedules.service';
 import { MarkLeaveDto, ReplaceSchedulesDto } from './dto/schedule.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -68,7 +68,7 @@ export class OpdSchedulesController {
   @Post('leave')
   @ApiOperation({
     summary:
-      'Mark a date as leave (409 + booking list if bookings exist; resend with force:true to override)',
+      'Mark a date — or a span, with end_date — as leave (409 + booking list if bookings exist; resend with force:true to override)',
   })
   @Permissions({ module: PermissionModule.OPD_SCHEDULES, action: PermissionAction.UPDATE })
   markLeave(
@@ -79,11 +79,14 @@ export class OpdSchedulesController {
   }
 
   @Delete('leave/:date')
+  @ApiOperation({ summary: 'Remove leave on a date, or through `?to=` for a span' })
+  @ApiQuery({ name: 'to', required: false, example: '2026-08-02' })
   @Permissions({ module: PermissionModule.OPD_SCHEDULES, action: PermissionAction.UPDATE })
   removeLeave(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('date') date: string,
+    @Query('to') to?: string,
   ) {
-    return this.service.removeLeave(id, date);
+    return this.service.removeLeave(id, date, to || undefined);
   }
 }
