@@ -25,10 +25,15 @@ export class CreateUserDto {
   @IsEmail({}, { message: 'Please enter a valid email address.' })
   email: string;
 
-  @ApiProperty({ example: 'StrongPass@123', minLength: 8 })
+  /**
+   * Optional: the team screen no longer asks the doctor for one. Left out, the
+   * server makes a temporary password and emails it to the new member.
+   */
+  @ApiPropertyOptional({ example: 'StrongPass@123', minLength: 8 })
+  @IsOptional()
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters.' })
-  password: string;
+  password?: string;
 
   /**
    * Either a saved role, or the permissions themselves. The team screen sends

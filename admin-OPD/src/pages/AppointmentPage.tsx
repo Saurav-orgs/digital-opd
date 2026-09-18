@@ -699,7 +699,7 @@ export default function AppointmentPage() {
           <div className="visit-bottom-inner">
             {step === 2 && (
               <button className="btn btn-secondary-cta" onClick={() => setStep(1)}>
-                Back
+                Back to report
               </button>
             )}
             <button

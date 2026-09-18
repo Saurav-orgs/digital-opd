@@ -6,6 +6,8 @@ export interface AppConfig {
   clinic: { name: string; address: string; phone: string; email: string };
   /** Base URL of the patient web app (no trailing slash), used to build QR URLs. */
   patientWebBase: string;
+  /** Base URL of the admin web app (no trailing slash): the sign-in link in staff emails. */
+  adminWebBase: string;
   /**
    * Outgoing mail. `user` empty means "no mailer": messages are written to
    * the log instead of sent, so a developer machine needs no SMTP account
@@ -59,6 +61,7 @@ export default (): AppConfig => ({
     email: process.env.CLINIC_EMAIL || '',
   },
   patientWebBase: process.env.PATIENT_WEB_BASE || 'http://localhost:5174',
+  adminWebBase: process.env.ADMIN_WEB_BASE || 'http://localhost:5173',
   mail: {
     host: process.env.MAIL_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.MAIL_PORT || '465', 10),

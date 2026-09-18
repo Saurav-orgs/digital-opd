@@ -139,12 +139,12 @@ h4 {
 }
 
 /* Header Navbar */
+/* Solid, not frosted: scrolled content showing through read as the bar not
+   being there at all. */
 .web-navbar {
   width: 100%;
   max-width: 100%;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: #fff;
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;

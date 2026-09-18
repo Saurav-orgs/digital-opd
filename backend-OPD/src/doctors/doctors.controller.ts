@@ -105,7 +105,7 @@ export class DoctorsController {
   @Post('me/letterhead-header')
   @ApiOperation({
     summary:
-      'Doctor uploads their own prescription header image (drawn into a fixed box; PNG/JPG)',
+      'Doctor uploads their own prescription header image (drawn into a fixed box; any common image format, stored as PNG/JPG)',
   })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
   @ApiConsumes('multipart/form-data')

@@ -259,10 +259,20 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
         permissionIds: [...selected],
         is_active: form.is_active,
       };
-      if (form.password) body.password = form.password;
-      return user ? usersApi.update(user.id, body) : usersApi.create({ ...body, password: form.password });
+      // A new member gets a temporary password made and emailed by the
+      // server; only an edit carries one, and only when the doctor typed it.
+      if (user && form.password) body.password = form.password;
+      return user ? usersApi.update(user.id, body) : usersApi.create(body);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success(user ? 'Team member updated' : 'Team member added'); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success(
+        user
+          ? 'Team member updated'
+          : `Team member added — sign-in details emailed to ${form.email.trim()}`,
+      );
+      onClose();
+    },
     onError: (e) => toast.error(e),
   });
 
@@ -270,15 +280,21 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
     form.name.trim() &&
     form.email.trim() &&
     selected.size > 0 &&
-    (user || form.password.length >= 8);
+    // Editing: a typed new password must be long enough; blank keeps the old one.
+    (!form.password || form.password.length >= 8);
 
   return (
-    <Modal title={user ? 'Edit team member' : 'Add team member'} onClose={onClose} large>
+    <Modal title={user ? 'Edit team member' : 'Add team member'} onClose={onClose} large persistent>
       <Field label="Name">
         <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
       <Field label="Email">
         <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        {!user && (
+          <span className="hint">
+            Their sign-in details, with a temporary password, are sent to this address.
+          </span>
+        )}
       </Field>
       <Field label="Role name">
         <input
@@ -290,20 +306,22 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
         />
         <span className="hint">Shown next to their name when they sign in.</span>
       </Field>
-      <Field
-        label={user ? 'New password (leave blank to keep)' : 'Password'}
-        error={
-          !user && form.password && form.password.length < 8
-            ? 'Password must be at least 8 characters.'
-            : undefined
-        }
-      >
-        <PasswordInput
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-        />
-        <span className="hint">Must be at least 8 characters.</span>
-      </Field>
+      {user && (
+        <Field
+          label="New password (leave blank to keep)"
+          error={
+            form.password && form.password.length < 8
+              ? 'Password must be at least 8 characters.'
+              : undefined
+          }
+        >
+          <PasswordInput
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+          <span className="hint">Must be at least 8 characters.</span>
+        </Field>
+      )}
       <label className="form-label">What they can do</label>
       <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
         Screens they can <strong>read</strong> appear in their menu. Untick what

@@ -23,9 +23,26 @@ const FOOTER_TOP = PAGE.height - 75;
  * stop short of it so nothing runs underneath the code.
  */
 const REBOOK_H = 100;
-const REBOOK_TOP = FOOTER_TOP - REBOOK_H;
-/** Lowest baseline the body may write to before it must start a new page. */
-const BODY_BOTTOM = REBOOK_TOP - 12;
+/**
+ * On the print copy the sheet goes onto the doctor's own pad, whose footer
+ * is already printed where ours would be. Ours is left off and the QR block
+ * is lifted this much (≈1.5 cm) clear of it, so the body stops higher too.
+ */
+const PRINT_FOOTER_LIFT = 43;
+
+/**
+ * The vertical frame the body and QR block work within — where the QR sits
+ * and the lowest baseline the body may reach before starting a new page.
+ * Two of them: the issued copy's, and the print copy's with its lifted QR.
+ */
+interface Frame {
+  rebookTop: number;
+  bodyBottom: number;
+}
+function frameFor(print: boolean): Frame {
+  const rebookTop = FOOTER_TOP - REBOOK_H - (print ? PRINT_FOOTER_LIFT : 0);
+  return { rebookTop, bodyBottom: rebookTop - 12 };
+}
 /** Where the body resumes on a continuation page. */
 const CONTINUATION_Y = 56;
 /**
@@ -104,8 +121,10 @@ export class PrescriptionPdfService {
    * blank — its space is kept, nothing is drawn in it. That is the print
    * variant: doctors print onto their own pre-printed pad, which already
    * carries the header, so the body has to land below it, not on top of it.
+   * The pad's footer is pre-printed too, so the print copy draws no footer
+   * of its own and lifts the QR block clear of that space (`frameFor`).
    * Everything that reaches the patient as a file (issue, share, download)
-   * keeps the letterhead.
+   * keeps the letterhead and the footer.
    */
   async render(
     prescription: EPrescription,
@@ -115,6 +134,7 @@ export class PrescriptionPdfService {
     opts: { letterhead?: boolean } = {},
   ): Promise<Buffer> {
     const letterhead = opts.letterhead !== false;
+    const frame = frameFor(!letterhead);
     const doc = new PDFDocument({
       size: 'A4',
       margins: { top: MARGIN, left: MARGIN, right: MARGIN, bottom: 0 },
@@ -149,19 +169,20 @@ export class PrescriptionPdfService {
 
     if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
       const drawing = await this.fetchHandwriting(prescription);
-      y = this.handwritingBody(doc, drawing, y);
+      y = this.handwritingBody(doc, drawing, y, frame);
     } else {
       y = this.diagnosis(doc, prescription, y);
-      y = this.treatmentAdvice(doc, medicines, prescription, y);
+      y = this.treatmentAdvice(doc, medicines, prescription, y, frame);
     }
 
     // The patient leaves with this sheet in hand — the QR is how the next
     // visit gets booked without them having to find the clinic online again.
     // It sits at the foot of the last page, whatever the body left above it.
-    await this.rebookQr(doc, doctor, y);
+    await this.rebookQr(doc, doctor, y, frame);
 
-    // Render footer & furniture on all pages
-    this.pageFurniture(doc);
+    // Render footer & furniture on all pages — not on the print copy, whose
+    // pad carries its own.
+    if (letterhead) this.pageFurniture(doc);
 
     doc.end();
     return done;
@@ -374,6 +395,7 @@ export class PrescriptionPdfService {
     meds: EPrescriptionMedicine[],
     p: EPrescription,
     y: number,
+    frame: Frame,
   ): number {
     doc
       .font('Helvetica-Bold')
@@ -406,7 +428,7 @@ export class PrescriptionPdfService {
 
     meds.forEach((m, idx) => {
       // Check for page overflow before rendering row
-      if (y > BODY_BOTTOM - 40) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 40) y = this.continuationPage(doc);
 
       const medicineName = [m.medicine_name, m.strength].filter(Boolean).join(' ');
       const title = `${idx + 1}. ${medicineName.toUpperCase()}`;
@@ -492,7 +514,7 @@ export class PrescriptionPdfService {
     // it apart from the medicine rows above.
     if (p.advice?.trim()) {
       y += 10;
-      if (y > BODY_BOTTOM - 60) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 60) y = this.continuationPage(doc);
       doc
         .font('Helvetica-Bold')
         .fontSize(12)
@@ -508,7 +530,7 @@ export class PrescriptionPdfService {
 
     // Follow-up Date
     if (p.follow_up_date) {
-      if (y > BODY_BOTTOM - 24) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 24) y = this.continuationPage(doc);
       const formattedFollowUp = formatReadableDate(p.follow_up_date);
       doc
         .font('Helvetica-Bold')
@@ -526,10 +548,11 @@ export class PrescriptionPdfService {
     doc: PDFKit.PDFDocument,
     drawing: Buffer | null,
     y: number,
+    frame: Frame,
   ): number {
     // Stop short of the rebook block pinned above the footer, so a full-page
     // drawing is scaled to fit above the QR instead of colliding with it.
-    const availH = BODY_BOTTOM - y;
+    const availH = frame.bodyBottom - y;
     if (!drawing) {
       doc
         .font('Helvetica-Oblique')
@@ -563,6 +586,7 @@ export class PrescriptionPdfService {
     doc: PDFKit.PDFDocument,
     doctor: Doctor,
     y: number,
+    frame: Frame,
   ): Promise<void> {
     let url: string;
     try {
@@ -591,8 +615,8 @@ export class PrescriptionPdfService {
     // Pinned to the foot of the page, above the footer furniture. A new page
     // is started only if the body genuinely ran into that space; `pageFurniture`
     // runs after this and covers whichever page we end on.
-    if (y > BODY_BOTTOM) this.continuationPage(doc);
-    y = REBOOK_TOP;
+    if (y > frame.bodyBottom) this.continuationPage(doc);
+    y = frame.rebookTop;
 
     const qrSize = 64;
 

@@ -22,6 +22,7 @@ export function Modal({
   children,
   large,
   footer,
+  persistent,
 }: {
   title: string;
   onClose: () => void;
@@ -37,9 +38,15 @@ export function Modal({
    * untouched.
    */
   footer?: ReactNode;
+  /**
+   * Ignore clicks on the backdrop. For a form the doctor is part-way through:
+   * a stray click outside should not throw away what they typed. The header
+   * × and the dialog's own Cancel still close it.
+   */
+  persistent?: boolean;
 }) {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={persistent ? undefined : onClose}>
       <div
         className={`modal ${large ? 'modal-lg' : ''} ${footer ? 'modal-pinned' : ''}`}
         onClick={(e) => e.stopPropagation()}
@@ -329,6 +336,25 @@ export function ActionMenuDropdown({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+/** A labelled read-only value, monospaced, with an optional copy button. */
+export function InfoRow({ label, value, copyable }: { label: string; value: string; copyable?: boolean }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <code style={{ flex: 1, fontSize: 13, wordBreak: 'break-all', background: 'var(--surface-2, #f4f4f5)', padding: '4px 8px', borderRadius: 6 }}>
+          {value}
+        </code>
+        {copyable && (
+          <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(value)} style={{ flexShrink: 0 }}>
+            Copy
+          </button>
+        )}
+      </div>
     </div>
   );
 }

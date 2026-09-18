@@ -16,6 +16,7 @@ import { ScheduleException } from '../database/models/schedule-exception.model';
 import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
 import { RegisterDoctorDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
+import { toEmbeddableImage } from '../uploads/letterhead-image';
 import { ActivityLogService } from '../activity/activity-log.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -279,18 +280,15 @@ export class DoctorsService {
 
   /**
    * Upload the doctor's own prescription header — the top strip of their pad
-   * as one image. PNG or JPEG only: those are what pdfkit can embed, and a
-   * WebP here would be accepted now and fail at the first issue.
+   * as one image. Any common image format is accepted; what is stored is
+   * always PNG or JPEG, because those are what pdfkit can embed (see
+   * `toEmbeddableImage`).
    */
   async uploadLetterheadHeader(id: string, file: Express.Multer.File) {
     const doctor = await this.getOrFail(id);
     if (!file) throw new AppException(ErrorCode.FILE_REQUIRED);
-    if (!['image/png', 'image/jpeg'].includes(file.mimetype)) {
-      throw new AppException(ErrorCode.UNSUPPORTED_FILE_TYPE, {
-        message: 'The prescription header must be a PNG or JPG image.',
-      });
-    }
-    const { key } = await this.storage.uploadImage(file, `doctors/${id}/letterhead-header`);
+    const image = await toEmbeddableImage(file);
+    const { key } = await this.storage.uploadImage(image, `doctors/${id}/letterhead-header`);
     if (doctor.letterhead_header_key) await this.storage.delete(doctor.letterhead_header_key);
     await doctor.update({ letterhead_header_key: key } as any);
     return this.toView(doctor);
@@ -404,11 +402,8 @@ export class DoctorsService {
     // so it lives under the registrations prefix rather than the doctor's.
     let headerKey: string | null = null;
     if (letterheadHeader) {
-      if (!['image/png', 'image/jpeg'].includes(letterheadHeader.mimetype)) {
-        badRequest('The letterhead header must be a PNG or JPG image.');
-      }
       ({ key: headerKey } = await this.storage.uploadImage(
-        letterheadHeader,
+        await toEmbeddableImage(letterheadHeader),
         'doctor-letterheads',
       ));
     }

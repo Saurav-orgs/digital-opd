@@ -37,6 +37,7 @@ export enum NotificationType {
   APPOINTMENT_REMINDER = 'appointment_reminder',
   PRESCRIPTION_READY = 'prescription_ready',
   APPOINTMENT_CANCELLED = 'appointment_cancelled',
+  APPOINTMENT_RESCHEDULED = 'appointment_rescheduled',
 }
 
 /**

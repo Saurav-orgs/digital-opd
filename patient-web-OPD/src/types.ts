@@ -171,7 +171,8 @@ export interface PatientNotification {
     | 'report_available'
     | 'appointment_reminder'
     | 'prescription_ready'
-    | 'appointment_cancelled';
+    | 'appointment_cancelled'
+    | 'appointment_rescheduled';
   title: string;
   body: string | null;
   data: Record<string, unknown> | null;

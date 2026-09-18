@@ -48,6 +48,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   IconData _iconFor(String type) => switch (type) {
         'report_available' => Icons.description_outlined,
         'appointment_reminder' => Icons.event_repeat,
+        'appointment_rescheduled' => Icons.event_repeat,
         _ => Icons.notifications_outlined,
       };
 

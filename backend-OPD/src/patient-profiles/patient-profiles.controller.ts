@@ -19,7 +19,9 @@ import {
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
-import { PermissionAction, PermissionModule } from '../common/enums';
+import { PermissionAction, PermissionModule, UserType } from '../common/enums';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCode } from '../common/errors/error-codes';
 import { PatientAuthGuard } from '../patient-auth/patient-auth.guard';
 import {
   CurrentPatient,
@@ -62,6 +64,26 @@ export class StaffPatientProfilesController {
     // — the platform super admin — has no such list rather than everyone's.
     if (!user.doctorId) return [];
     return this.service.listForDoctor(user.doctorId, search);
+  }
+
+  @Get('for-doctor/:doctorId')
+  @ApiOperation({ summary: "Super-admin: every patient one doctor's clinic has seen" })
+  @Permissions({
+    module: PermissionModule.PATIENTS,
+    action: PermissionAction.READ,
+  })
+  async listForDoctor(
+    @CurrentUser() user: AuthUser,
+    @Param('doctorId', ParseUUIDPipe) doctorId: string,
+    @Query('search') search?: string,
+  ) {
+    // Read-only, from the doctor's card on the Doctors screen. Clinic staff
+    // reach their own list through `GET /patient-profiles`; only the platform
+    // admin may name a doctor.
+    if (user.type !== UserType.SUPER_ADMIN) {
+      throw new AppException(ErrorCode.FORBIDDEN);
+    }
+    return this.service.listForDoctor(doctorId, search);
   }
 }
 

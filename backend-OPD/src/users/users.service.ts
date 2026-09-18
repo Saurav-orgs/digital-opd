@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op, Transaction } from 'sequelize';
 import { Sequelize } from 'sequelize-typescript';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import { User } from '../database/models/user.model';
 import { Role } from '../database/models/role.model';
 import { Permission } from '../database/models/permission.model';
@@ -12,6 +14,24 @@ import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { UserType } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { MailService } from '../mail/mail.service';
+import { teamMemberCredentialsEmail } from '../mail/templates';
+
+/**
+ * Letters and digits a person can read back from an email without a
+ * mistake: no 0/O, 1/l/I. Twelve of these is ~62 bits, well past a
+ * dictionary attack and short enough to type on a phone.
+ */
+const TEMP_PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+const TEMP_PASSWORD_LENGTH = 12;
+
+function makeTempPassword(): string {
+  let out = '';
+  for (let i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+    out += TEMP_PASSWORD_ALPHABET[randomInt(TEMP_PASSWORD_ALPHABET.length)];
+  }
+  return out;
+}
 
 @Injectable()
 export class UsersService {
@@ -20,6 +40,8 @@ export class UsersService {
     @InjectModel(Role) private readonly roleModel: typeof Role,
     @InjectModel(Permission) private readonly permissionModel: typeof Permission,
     private readonly sequelize: Sequelize,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
   ) {}
 
   private readonly roleWithPerms = {
@@ -32,6 +54,13 @@ export class UsersService {
    * `overrides` is for internal callers that manage their own kind of login
    * (see PathlabsService). The caller's `doctorId` becomes the new account's
    * `doctor_id` — this keeps staff siloed to their doctor's tenant.
+   *
+   * A team member (no `overrides.type`) is emailed their sign-in details. The
+   * doctor no longer chooses their password: with none in the request the
+   * server makes a temporary one, and the email is the only place it exists
+   * in the clear. The mail goes inside the transaction so a member is never
+   * left with an account and no way to learn its password — if the email
+   * cannot be sent, nothing is created and the doctor sees why.
    */
   async create(
     dto: CreateUserDto,
@@ -46,7 +75,9 @@ export class UsersService {
     }
     await this.assertAssignableRole(dto.role_id, caller);
     if (dto.permissionIds) await this.assertPermissionsExist(dto.permissionIds);
-    const password_hash = await bcrypt.hash(dto.password, 10);
+    const password = dto.password ?? makeTempPassword();
+    const password_hash = await bcrypt.hash(password, 10);
+    const emailCredentials = !overrides.type;
 
     const user = await this.sequelize.transaction(async (t) => {
       const roleId =
@@ -61,7 +92,7 @@ export class UsersService {
             t,
           )
         ).id;
-      return this.userModel.create(
+      const created = await this.userModel.create(
         {
           name: dto.name,
           email: dto.email.toLowerCase(),
@@ -73,6 +104,19 @@ export class UsersService {
         } as any,
         { transaction: t },
       );
+      if (emailCredentials) {
+        await this.mail.send({
+          to: created.email,
+          ...teamMemberCredentialsEmail({
+            name: dto.name,
+            doctorName: caller.name,
+            email: created.email,
+            password,
+            loginUrl: `${this.config.get<string>('adminWebBase')}/login`,
+          }),
+        });
+      }
+      return created;
     });
     return this.findOne(user.id);
   }

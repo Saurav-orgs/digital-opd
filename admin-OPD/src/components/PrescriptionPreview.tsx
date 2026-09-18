@@ -20,9 +20,10 @@ import {
 /**
  * Prints the visit's issued prescription.
  *
- * Printed without the letterhead: doctors print onto their own pad, which
- * already carries the header, so the copy that goes to paper leaves that
- * space blank. The file the patient gets (issue, share, download) keeps it.
+ * Printed without the letterhead or footer: doctors print onto their own
+ * pad, which already carries both, so the copy that goes to paper leaves
+ * those spaces blank. The file the patient gets (issue, share, download)
+ * keeps them.
  */
 export function PrintPrescriptionButton({ appointmentId }: { appointmentId: string }) {
   const toast = useToast();
@@ -320,8 +321,9 @@ export function PrescriptionPreviewPanel({
   const [printing, setPrinting] = useState(false);
 
   // Not the blob on screen: the print copy is rendered again without the
-  // letterhead, because it goes onto the doctor's own pre-printed pad. The
-  // preview, and everything that reaches the patient as a file, keep it.
+  // letterhead or footer, because it goes onto the doctor's own pre-printed
+  // pad. The preview, and everything that reaches the patient as a file,
+  // keep them.
   const print = async () => {
     if (!blob) return;
     setPrinting(true);

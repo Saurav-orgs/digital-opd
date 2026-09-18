@@ -192,7 +192,7 @@ export class ConsultationsController {
   @ApiOperation({
     summary:
       'Render the current draft as the PDF it would be issued as — nothing is frozen or sent. ' +
-      '`letterhead=false` leaves the doctor header blank, for printing onto a pre-printed pad.',
+      '`letterhead=false` leaves the doctor header and footer blank, for printing onto a pre-printed pad.',
   })
   @ApiQuery({ name: 'letterhead', required: false, enum: ['true', 'false'] })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })

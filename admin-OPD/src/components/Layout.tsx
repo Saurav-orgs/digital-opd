@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { NAV, type NavIconName } from '../lib/nav';
 import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
@@ -15,7 +15,6 @@ import {
   FlaskIcon,
   GearIcon,
   HospitalIcon,
-  LetterheadIcon,
   PeopleIcon,
   ShieldIcon,
   UserCogIcon,
@@ -88,13 +87,15 @@ export default function Layout() {
           </button>
         )}
 
-        <div className="sidebar-logo">
+        {/* Home: `/` picks the first screen this account may see — the
+            appointments list for anyone who can read it. */}
+        <Link to="/" className="sidebar-logo" title="Home">
           {expanded ? (
             <LogoFull markSize={34} />
           ) : (
             <LogoMark size={36} />
           )}
-        </div>
+        </Link>
 
         <nav className="sidebar-items">
           {items.map((n) => {
@@ -112,37 +113,19 @@ export default function Layout() {
             );
           })}
           {isDoctor && (
-            <>
-              <NavLink
-                to="/profile"
-                // Lit for the profile and its schedule, but not for the
-                // letterhead, which has its own item just below.
-                className={() =>
-                  `nav-item ${
-                    location.pathname.startsWith('/profile') &&
-                    !location.pathname.startsWith('/profile/letterhead')
-                      ? 'active'
-                      : ''
-                  }`
-                }
-                title={expanded ? undefined : 'My profile'}
-              >
-                <AccountIcon size={19} />
-                <span className="nav-label">My profile</span>
-              </NavLink>
-              {/* The prescription pad header, in the menu at the client's
-                  request — it was buried at the foot of My profile. Doctor
-                  only, like the profile itself: no permission stands behind
-                  it, the account does. */}
-              <NavLink
-                to="/profile/letterhead"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                title={expanded ? undefined : 'Letterhead'}
-              >
-                <LetterheadIcon size={19} />
-                <span className="nav-label">Letterhead</span>
-              </NavLink>
-            </>
+            // Lit for the profile and everything under it — schedule and the
+            // letterhead, which is reached from the profile rather than from
+            // its own menu item.
+            <NavLink
+              to="/profile"
+              className={() =>
+                `nav-item ${location.pathname.startsWith('/profile') ? 'active' : ''}`
+              }
+              title={expanded ? undefined : 'My profile'}
+            >
+              <AccountIcon size={19} />
+              <span className="nav-label">My profile</span>
+            </NavLink>
           )}
         </nav>
 

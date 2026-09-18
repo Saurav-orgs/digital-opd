@@ -284,6 +284,9 @@ export function ConsultationRecorder({
         {(recording || processing) && (
           <div className="mic-timer">{mmss(recording ? elapsed : waited)}</div>
         )}
+        {/* The stop control is the same round button that started it, which
+            is not obvious mid-recording — say so under the clock. */}
+        {recording && <div className="mic-hint">Tap to stop recording</div>}
 
         {/*
           Transcription can genuinely take minutes here, and a model that has

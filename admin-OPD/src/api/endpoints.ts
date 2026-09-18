@@ -66,7 +66,8 @@ export const usersApi = {
   list: () => api.get<User[]>('/users').then((r) => r.data),
   // `permissionIds` grants abilities directly (the server keeps a personal
   // role for them); `role_id` is the older way and still works.
-  create: (body: Partial<User> & { password: string; permissionIds?: string[] }) =>
+  // No password: the server makes a temporary one and emails it to them.
+  create: (body: Partial<User> & { permissionIds?: string[] }) =>
     api.post<User>('/users', body).then((r) => r.data),
   update: (id: string, body: Partial<User> & { password?: string; permissionIds?: string[] }) =>
     api.patch<User>(`/users/${id}`, body).then((r) => r.data),
@@ -494,6 +495,11 @@ export const patientProfilesApi = {
   list: (search?: string) =>
     api
       .get<ClinicPatient[]>('/patient-profiles', { params: { search } })
+      .then((r) => r.data),
+  /** Super-admin: the same list for one doctor's clinic. */
+  listForDoctor: (doctorId: string, search?: string) =>
+    api
+      .get<ClinicPatient[]>(`/patient-profiles/for-doctor/${doctorId}`, { params: { search } })
       .then((r) => r.data),
 };
 

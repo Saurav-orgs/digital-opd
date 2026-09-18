@@ -65,7 +65,12 @@ export const Notifications: React.FC = () => {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {items.map((n) => {
-            const Icon = n.type === 'report_available' ? FileCheck : n.type === 'appointment_reminder' ? CalendarClock : Bell;
+            const Icon =
+              n.type === 'report_available'
+                ? FileCheck
+                : n.type === 'appointment_reminder' || n.type === 'appointment_rescheduled'
+                  ? CalendarClock
+                  : Bell;
             return (
               <div
                 key={n.id}

@@ -114,8 +114,8 @@ export default function LetterheadPage() {
           <p className="muted" style={{ fontSize: 12.5, margin: '-6px 0 10px' }}>
             Upload the top strip of your own prescription pad and it prints as
             the header. Best at <strong>{HEADER_PX.w} × {HEADER_PX.h} px</strong> (a wide
-            strip — at least {MIN_RATIO} times wider than it is tall), PNG or JPG, under
-            5 MB. Leave it empty to print your name and details instead.
+            strip — at least {MIN_RATIO} times wider than it is tall), any image format
+            (PNG, JPG, WebP…), under 5 MB. Leave it empty to print your name and details instead.
           </p>
           <div className="lh-header-box">
             {me.letterhead_header_url ? (

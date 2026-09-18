@@ -19,6 +19,7 @@ import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
 import DoctorRegisterPage from './pages/DoctorRegister';
 import LetterheadPage from './pages/Letterhead';
+import DoctorDetailPage from './pages/DoctorDetail';
 import ForgotPassword from './pages/ForgotPassword';
 import type { ReactNode } from 'react';
 
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/appointments/:id" element={<AppointmentPage />} />
         <Route path="/appointments/:id/history" element={<PatientHistoryPage />} />
         <Route path="/doctors" element={<DoctorsPage />} />
+        <Route path="/doctors/:doctorId" element={<DoctorDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/blocked-numbers" element={<BlockedNumbersPage />} />
         <Route path="/patients" element={<PatientsPage />} />

@@ -81,3 +81,27 @@ export function expandDates(from: string, to: string): string[] {
   }
   return out;
 }
+
+/** `2026-09-21` → `Mon, 21 Sept 2026`, for messages a patient reads. */
+export function readableDate(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  const weekday = d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+  const rest = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+  return `${weekday}, ${rest}`;
+}
+
+/** `14:30` → `2:30 PM`. Anything that is not HH:MM comes back as given. */
+export function to12Hour(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm);
+  if (!m) return hhmm;
+  const h = Number(m[1]);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m[2]} ${suffix}`;
+}

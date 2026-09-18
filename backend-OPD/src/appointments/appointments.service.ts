@@ -34,7 +34,7 @@ import {
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { ageFromDob } from '../common/utils/age';
-import { nowInClinic } from '../common/utils/clinic-time';
+import { nowInClinic, readableDate, to12Hour } from '../common/utils/clinic-time';
 
 @Injectable()
 export class AppointmentsService {
@@ -589,6 +589,26 @@ export class AppointmentsService {
         throw new AppException(ErrorCode.SLOT_ALREADY_BOOKED);
       }
       throw err;
+    }
+
+    // The patient planned around the old slot; a move they are not told
+    // about is a missed visit. Nothing is sent when the clinic saved the
+    // same slot again.
+    if (!unchanged) {
+      await this.notifications.create(
+        appointment.patient_mobile,
+        NotificationType.APPOINTMENT_RESCHEDULED,
+        'Appointment rescheduled',
+        `${appointment.patient_name}'s appointment has been moved to ` +
+          `${readableDate(dto.appointment_date)} at ${to12Hour(dto.start_time)}.`,
+        {
+          appointmentId: appointment.id,
+          date: dto.appointment_date,
+          startTime: dto.start_time,
+        },
+        appointment.doctor_id,
+        appointment.patient_profile_id,
+      );
     }
 
     this.activity.recordForUser(user, {

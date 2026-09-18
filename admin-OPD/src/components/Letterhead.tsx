@@ -50,7 +50,11 @@ export function checkHeaderImage(file: File): Promise<string | null> {
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      resolve('That file could not be read as an image.');
+      // The shape check needs the browser to decode the file; a format it
+      // cannot show (TIFF, HEIC outside Safari) cannot be measured here.
+      resolve(
+        'Your browser cannot open this image format. Save it as a PNG or JPG and try again.',
+      );
     };
     img.src = url;
   });
@@ -76,7 +80,7 @@ export function LetterheadHeaderPicker({
     <input
       ref={inputRef}
       type="file"
-      accept="image/png,image/jpeg"
+      accept="image/*"
       hidden
       onChange={(e) => {
         const f = e.target.files?.[0];
