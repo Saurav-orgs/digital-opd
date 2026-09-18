@@ -74,6 +74,16 @@ export class EPrescription extends Model<EPrescription> {
   @Column({ type: DataType.DATE, allowNull: true })
   issued_at: Date | null;
 
+  /**
+   * Random token behind the no-login link a doctor sends over WhatsApp
+   * (`GET /rx/:token`). Null until first asked for; cleared on withdraw.
+   */
+  @Column({ type: DataType.STRING(64), allowNull: true, unique: true })
+  share_token: string | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  share_token_expires_at: Date | null;
+
   @BelongsTo(() => Appointment)
   appointment: Appointment;
 

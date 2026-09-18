@@ -217,6 +217,16 @@ export class ConsultationsController {
     return new StreamableFile(buffer);
   }
 
+  @Post('prescription/whatsapp-link')
+  @ApiOperation({
+    summary:
+      'A no-login link to the issued PDF plus a ready wa.me URL that opens the patient’s chat with it. Issues a draft first.',
+  })
+  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  whatsappLink(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.prescriptions.whatsappLink(id, user);
+  }
+
   @Delete('prescription')
   @ApiOperation({
     summary:

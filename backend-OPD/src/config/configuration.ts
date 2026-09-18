@@ -9,6 +9,12 @@ export interface AppConfig {
   /** Base URL of the admin web app (no trailing slash): the sign-in link in staff emails. */
   adminWebBase: string;
   /**
+   * This API's own public base including the prefix (no trailing slash),
+   * for links that must open without a login — the prescription link a
+   * doctor sends over WhatsApp.
+   */
+  apiPublicBase: string;
+  /**
    * Outgoing mail. `user` empty means "no mailer": messages are written to
    * the log instead of sent, so a developer machine needs no SMTP account
    * and the verification / reset flows still work end to end.
@@ -62,6 +68,9 @@ export default (): AppConfig => ({
   },
   patientWebBase: process.env.PATIENT_WEB_BASE || 'http://localhost:5174',
   adminWebBase: process.env.ADMIN_WEB_BASE || 'http://localhost:5173',
+  apiPublicBase:
+    process.env.API_PUBLIC_BASE ||
+    `http://localhost:${process.env.PORT || '3000'}/${process.env.API_PREFIX || 'api'}`,
   mail: {
     host: process.env.MAIL_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.MAIL_PORT || '465', 10),

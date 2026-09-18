@@ -4,6 +4,7 @@ import { consultationApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { useToast } from './Toast';
 import { printBlob } from '../lib/printBlob';
+import { openPrescriptionOnWhatsApp } from '../lib/whatsappPrescription';
 import { PdfPages, type PdfFit } from './PdfPages';
 import { ConfirmDialog, Loading, Modal } from './ui';
 import {
@@ -15,6 +16,7 @@ import {
   PrinterIcon,
   ShareIcon,
   TrashIcon,
+  WhatsAppIcon,
 } from './icons';
 
 /**
@@ -56,6 +58,37 @@ export function PrintPrescriptionButton({ appointmentId }: { appointmentId: stri
   );
 }
 
+/** Opens the patient's WhatsApp chat with a link to the issued prescription. */
+export function WhatsAppPrescriptionButton({ appointmentId }: { appointmentId: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const onSend = async () => {
+    setBusy(true);
+    try {
+      await openPrescriptionOnWhatsApp(appointmentId);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not prepare the WhatsApp message.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      className="btn btn-sm btn-whatsapp"
+      onClick={onSend}
+      disabled={busy}
+      title="Open the patient's WhatsApp chat with a link to this prescription"
+    >
+      <WhatsAppIcon size={14} />
+      {busy ? 'Opening…' : 'WhatsApp'}
+    </button>
+  );
+}
+
 /**
  * The draft as the page it is about to become.
  *
@@ -69,13 +102,15 @@ export function PrintPrescriptionButton({ appointmentId }: { appointmentId: stri
  * its fields, the handwriting pad uploads its strokes.
  */
 /** How a visit ended. All three finish it; only one of them issues. */
-type FinishKind = 'share' | 'print' | 'issue';
+type FinishKind = 'share' | 'print' | 'issue' | 'whatsapp';
 
 const FINISH_MESSAGE: Record<FinishKind, (name: string) => string> = {
   share: (name) => `Prescription shared with ${name}.`,
   print: () => 'Prescription sent to the printer.',
   issue: (name) =>
     `Prescription issued to ${name}. It is now in their myDigitalOPD account.`,
+  whatsapp: (name) =>
+    `Prescription issued to ${name} and WhatsApp opened on their chat — press Send there.`,
 };
 
 /**
@@ -320,6 +355,24 @@ export function PrescriptionPreviewPanel({
 
   const [printing, setPrinting] = useState(false);
 
+  // Issues the draft too (see `openPrescriptionOnWhatsApp`), so the
+  // prescription queries are refreshed like after Issue.
+  const [openingWhatsApp, setOpeningWhatsApp] = useState(false);
+  const sendOnWhatsApp = async () => {
+    if (!blob) return;
+    setOpeningWhatsApp(true);
+    try {
+      await openPrescriptionOnWhatsApp(appointmentId);
+      qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
+      qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
+      finish('whatsapp');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not prepare the WhatsApp message.');
+    } finally {
+      setOpeningWhatsApp(false);
+    }
+  };
+
   // Not the blob on screen: the print copy is rendered again without the
   // letterhead or footer, because it goes onto the doctor's own pre-printed
   // pad. The preview, and everything that reaches the patient as a file,
@@ -441,6 +494,15 @@ export function PrescriptionPreviewPanel({
           )}
 
           <div className="preview-actions">
+            <button
+              className="prev-action-btn whatsapp"
+              disabled={!blob || openingWhatsApp}
+              onClick={sendOnWhatsApp}
+              title="Open the patient's WhatsApp chat with a link to this prescription"
+            >
+              <WhatsAppIcon size={18} />
+              <span className="prev-action-label">{openingWhatsApp ? 'Opening…' : 'WhatsApp'}</span>
+            </button>
             <button className="prev-action-btn" disabled={!blob} onClick={share}>
               <ShareIcon size={18} />
               <span className="prev-action-label">Share</span>
@@ -457,9 +519,10 @@ export function PrescriptionPreviewPanel({
 
           {!alreadyIssued && (
             <p className="muted preview-note">
-              Sharing, printing or issuing marks this visit complete. Only
-              <strong> Issue to patient</strong> puts it in their myDigitalOPD
-              account. Print leaves the header blank for your own pad.
+              Sharing, printing or issuing marks this visit complete.
+              <strong> Issue to patient</strong> and <strong>WhatsApp</strong> put
+              it in their myDigitalOPD account; WhatsApp also opens their chat with
+              a link to it. Print leaves the header and footer blank for your own pad.
             </p>
           )}
         </>

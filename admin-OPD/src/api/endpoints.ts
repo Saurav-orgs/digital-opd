@@ -371,6 +371,16 @@ export const consultationApi = {
    * doctor's own pre-printed pad. Works for issued prescriptions too — the
    * frozen data renders identically minus the header.
    */
+  /**
+   * A no-login link to the issued PDF and a wa.me URL that opens the
+   * patient's chat with it pre-typed. Issues a draft first.
+   */
+  prescriptionWhatsAppLink: (appointmentId: string) =>
+    api
+      .post<{ link: string; expires_at: string; mobile: string; message: string; whatsapp_url: string }>(
+        `/appointments/${appointmentId}/prescription/whatsapp-link`,
+      )
+      .then((r) => r.data),
   prescriptionPrintCopy: (appointmentId: string) =>
     api
       .get(`/appointments/${appointmentId}/prescription/preview`, {

@@ -247,6 +247,16 @@ export function ShareIcon(props: IconProps) {
   );
 }
 
+/** The WhatsApp glyph: speech bubble with the handset inside. */
+export function WhatsAppIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3.5 20.5l1.3-4.2A8.5 8.5 0 1 1 8 19.3z" />
+      <path d="M9.2 8.6c.2-.5.5-.5.8-.5h.5c.2 0 .4 0 .6.4l.7 1.7c.1.2 0 .4-.1.6l-.5.6c-.1.1-.2.3 0 .5a6.6 6.6 0 0 0 3 2.7c.2.1.4.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.6.8c.3.1.4.2.4.4a2 2 0 0 1-1.4 1.9c-.6.2-1.3.2-2.4-.2a8 8 0 0 1-4.3-3.8c-.6-1-.9-1.9-.7-2.7z" />
+    </Icon>
+  );
+}
+
 export function UploadIcon(props: IconProps) {
   return (
     <Icon {...props}>

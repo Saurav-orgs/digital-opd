@@ -8,6 +8,7 @@ import { EPrescriptionMedicine } from '../database/models/e-prescription-medicin
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
 import { ConsultationsService } from './consultations.service';
 import { ConsultationsController } from './consultations.controller';
+import { PublicPrescriptionController } from '../prescriptions/public-prescription.controller';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { PrescriptionPdfService } from '../prescriptions/prescription-pdf.service';
 import { DoctorsModule } from '../doctors/doctors.module';
@@ -37,7 +38,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MedicinesModule,
     NotificationsModule,
   ],
-  controllers: [ConsultationsController],
+  controllers: [ConsultationsController, PublicPrescriptionController],
   providers: [ConsultationsService, PrescriptionsService, PrescriptionPdfService],
   exports: [PrescriptionsService],
 })

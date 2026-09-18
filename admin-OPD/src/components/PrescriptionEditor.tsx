@@ -5,7 +5,7 @@ import type { EPrescription, PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
 import type { DraftFlushRef } from '../lib/draftFlush';
 import { ConfirmDialog, Field } from './ui';
-import { PrintPrescriptionButton } from './PrescriptionPreview';
+import { PrintPrescriptionButton, WhatsAppPrescriptionButton } from './PrescriptionPreview';
 import { ApiError } from '../api/client';
 import { shareFile } from '../lib/shareFile';
 import { formatDuration, parseDuration } from '../lib/duration';
@@ -532,6 +532,7 @@ export function PrescriptionEditor({
             )}
             <PrintPrescriptionButton appointmentId={appointmentId} />
             <SharePrescriptionButton appointmentId={appointmentId} />
+            <WhatsAppPrescriptionButton appointmentId={appointmentId} />
             {canEdit && (
               <button
                 className="btn btn-sm"

@@ -3943,6 +3943,23 @@ tr.appt-row.upcoming td:first-child {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* WhatsApp's own green, so the button reads as the app it opens. */
+.prev-action-btn.whatsapp,
+.btn-whatsapp {
+  color: #128c7e;
+}
+.btn-whatsapp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: #128c7e;
+}
+.btn-whatsapp:hover:not(:disabled) {
+  background: #e7f8f1;
+}
+.prev-action-btn.whatsapp:hover:not(:disabled) {
+  background: #e7f8f1;
+}
 .prev-action-label {
   font-size: 10.5px;
   font-weight: 600;

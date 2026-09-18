@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
+import { randomBytes } from 'crypto';
+import { Op } from 'sequelize';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { ConsultationSession } from '../database/models/consultation-session.model';
@@ -23,6 +26,12 @@ import {
   TrainingSampleKind,
 } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { readableDate } from '../common/utils/clinic-time';
+
+/** How long the WhatsApp link serves the PDF. Long enough to be read on the day and found again the week after. */
+const SHARE_LINK_DAYS = 7;
+/** A link with less than this left is re-minted rather than sent almost expired. */
+const SHARE_LINK_RENEW_BELOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * The doctor's e-prescription: read the draft, edit it, issue it.
@@ -51,6 +60,7 @@ export class PrescriptionsService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly activity: ActivityLogService,
+    private readonly config: ConfigService,
   ) {}
 
   /** The appointment's prescription, creating an empty draft on first open. */
@@ -320,6 +330,99 @@ export class PrescriptionsService {
   }
 
   /**
+   * The link a doctor sends the patient over WhatsApp, and the message it
+   * goes in.
+   *
+   * WhatsApp will open a chat with any number from a URL — saved contact or
+   * not — but will not carry a file, so the prescription travels as a link
+   * to `GET /rx/:token`, which serves the issued PDF without a login. A
+   * draft is issued first: the link must point at the frozen document the
+   * patient also has in their account, not at whatever the editor holds.
+   *
+   * The token is random, lives on the row, and is reused while it has more
+   * than a day left; withdrawing clears it. Anyone holding the URL can open
+   * the PDF until it expires, which is the same trust as the WhatsApp
+   * message it sits in.
+   */
+  async whatsappLink(appointmentId: string, user: AuthUser) {
+    const appointment = await this.assertAccess(appointmentId, user);
+    let prescription = await this.prescriptionModel.findOne({
+      where: { appointment_id: appointmentId },
+    });
+    if (!prescription || prescription.status !== PrescriptionStatus.ISSUED) {
+      await this.issue(appointmentId, user);
+      prescription = (await this.prescriptionModel.findOne({
+        where: { appointment_id: appointmentId },
+      }))!;
+    }
+
+    const now = Date.now();
+    const fresh =
+      prescription.share_token &&
+      prescription.share_token_expires_at &&
+      prescription.share_token_expires_at.getTime() - now > SHARE_LINK_RENEW_BELOW_MS;
+    if (!fresh) {
+      await prescription.update({
+        share_token: randomBytes(24).toString('base64url'),
+        share_token_expires_at: new Date(now + SHARE_LINK_DAYS * 24 * 60 * 60 * 1000),
+      } as any);
+    }
+
+    const doctor = await this.doctorModel.findByPk(appointment.doctor_id);
+    const link = `${this.config.get<string>('apiPublicBase')}/rx/${prescription.share_token}`;
+    const doctorName = doctor ? withDrPrefix(doctor.name) : 'your doctor';
+    const firstName = (appointment.patient_name || '').trim().split(/\s+/)[0] || 'there';
+    const message =
+      `Hi ${firstName}, here is your prescription from ${doctorName} ` +
+      `for your visit on ${readableDate(appointment.appointment_date)}. ` +
+      `Tap the link to download it:\n${link}\n\n` +
+      `The link works for ${SHARE_LINK_DAYS} days.`;
+
+    // wa.me wants the number with country code and no plus; the numbers we
+    // store are 10-digit Indian mobiles.
+    const digits = (appointment.patient_mobile || '').replace(/\D/g, '');
+    const intl = digits.length === 10 ? `91${digits}` : digits;
+
+    return {
+      link,
+      expires_at: prescription.share_token_expires_at,
+      mobile: appointment.patient_mobile,
+      message,
+      whatsapp_url: `https://wa.me/${intl}?text=${encodeURIComponent(message)}`,
+    };
+  }
+
+  /**
+   * The PDF behind a WhatsApp link. No caller identity: the token is the
+   * whole credential, so it is matched exactly and checked for expiry, and
+   * an unissued or withdrawn prescription (no `pdf_key`) is a miss like any
+   * other — nothing distinguishes "expired" from "never existed" to whoever
+   * is guessing.
+   */
+  async pdfByShareToken(token: string): Promise<{ buffer: Buffer; filename: string }> {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) {
+      throw new AppException(ErrorCode.NOT_FOUND);
+    }
+    const prescription = await this.prescriptionModel.findOne({
+      where: {
+        share_token: token,
+        share_token_expires_at: { [Op.gt]: new Date() },
+        status: PrescriptionStatus.ISSUED,
+      },
+    });
+    if (!prescription?.pdf_key) {
+      throw new AppException(ErrorCode.NOT_FOUND, {
+        message: 'This prescription link has expired or is not valid.',
+      });
+    }
+    const appointment = await this.appointmentModel.findByPk(prescription.appointment_id);
+    return {
+      buffer: await this.storage.download(prescription.pdf_key),
+      filename: appointment ? this.pdfFilename(appointment) : 'prescription.pdf',
+    };
+  }
+
+  /**
    * Withdraw an issued prescription, putting it back to a draft.
    *
    * This is what "delete" means for something the patient has already been
@@ -351,6 +454,9 @@ export class PrescriptionsService {
       status: PrescriptionStatus.DRAFT,
       issued_at: null,
       pdf_key: null,
+      // The WhatsApp link, if one was sent, stops working with the document.
+      share_token: null,
+      share_token_expires_at: null,
     } as any);
 
     await this.discardIssuedCopy(prescription, pdfKey);
@@ -708,4 +814,10 @@ export class PrescriptionsService {
       medicines: medicines.map((m) => this.medicineView(m)),
     };
   }
+}
+
+/** "Sweta" → "Dr. Sweta"; a name that already carries the title is left alone. */
+function withDrPrefix(name: string): string {
+  const trimmed = name.trim();
+  return /^dr\.?\s/i.test(trimmed) ? trimmed : `Dr. ${trimmed}`;
 }
