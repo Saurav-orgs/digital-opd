@@ -21,9 +21,10 @@ export class ApiError extends Error {
   }
 }
 
-const api = axios.create({
-  baseURL: 'https://api-digital-opd.devenvironment.space/api',
-});
+// Shared with the consultation socket, which connects to this host's origin.
+export const API_BASE = 'https://api-digital-opd.devenvironment.space/api';
+
+const api = axios.create({ baseURL: API_BASE });
 
 api.interceptors.request.use((config) => {
   const token = tokenStore.get();
