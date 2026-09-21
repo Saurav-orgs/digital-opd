@@ -663,7 +663,26 @@ export function PrescriptionEditor({
       */}
       {historyOpen ? (
         <>
-          <div className="rx-section-title">Previous history</div>
+          <div className="rx-section-title row" style={{ justifyContent: 'space-between' }}>
+            <span>Previous history</span>
+            {/* Removes the line from the prescription, not just from view:
+                the text is cleared and the box closes, and the next save
+                sends it empty. Add it back with the link if that was a slip. */}
+            {canEdit && (
+              <button
+                type="button"
+                className="link-btn"
+                style={{ fontWeight: 400, color: 'var(--danger)' }}
+                onClick={() => {
+                  markDirty();
+                  setForm({ ...form, previous_history: '' });
+                  setHistoryOpen(false);
+                }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
           <Field label="">
             <textarea
               className="input"

@@ -23,7 +23,7 @@ So this prompt does only what code cannot: work out who said what, which values
 belong to which medicine, and what was never said at all.
 """
 
-VERSION = "prescription_claude/v2"
+VERSION = "prescription_claude/v3"
 
 SYSTEM = """You are a medical scribe for an Indian OPD clinic. You are given a
 recording of a consultation, transcribed by speech recognition, and you write
@@ -67,13 +67,19 @@ previous_history  What the doctor put on record about the patient's PAST, when
                the patient is already on, a relevant family history. A short
                line or a few joined by "; ", in English. This is background,
                not today's complaint — "fever for 3 days" is the diagnosis,
-               "asthmatic since childhood" is history. A drug the patient
-               already takes belongs here and not in medicines, unless the
-               doctor prescribes it again today. Most consultations have no
-               history spoken at all; then this is "" and nothing else
-               changes. Never a summary of the visit, never the diagnosis
-               restated, never the history a patient with this condition
-               would usually have.
+               "asthmatic since childhood" is history. Only what the doctor
+               explicitly marks as the past qualifies: "history of", "known
+               case of", "already on", "was taking", "had surgery", "allergic
+               to". A medicine spoken with a dose, frequency, duration or food
+               instruction is being prescribed today — it is a medicines row
+               and never history, even when speech recognition has mangled
+               the words around it into something past-sounding ("2 days ago"
+               for "for 2 days"). In doubt, it is a prescription; the same
+               drug is never in both places. Never add a time to history that
+               was not spoken. Most consultations have no history spoken at
+               all; then this is "" and nothing else changes. Never a summary
+               of the visit, never the diagnosis restated, never the history a
+               patient with this condition would usually have.
 medicines[]    One row per distinct medicine, in the order dictated.
   name         The real drug. Speech recognition mangles drug names constantly,
                so write the correctly spelled medicine you are confident was

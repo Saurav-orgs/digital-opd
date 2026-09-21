@@ -1225,6 +1225,34 @@ def _drop_advice_restating_medicines(draft: DraftPrescription) -> None:
     draft.advice = kept
 
 
+_HISTORY_SPLIT = re.compile(r"\s*[;.]\s*|\s*,\s*(?=(?:and\s+)?(?:was|is|has|had|on|taking|takes|took)\b)")
+
+
+def _drop_history_restating_medicines(draft: DraftPrescription) -> None:
+    """Cut from previous_history any clause that names a prescribed medicine.
+
+    History is what the doctor put on record about the patient's past. A drug
+    in today's medicines list is, by definition, being prescribed today — so a
+    history clause about it ("was taking Paracetamol two days ago") is the
+    model reading a garbled duration as the past tense, and the same drug
+    ending up in both places is wrong whichever way round. The row stays; the
+    clause goes. Splitting on ";" and "." keeps the rest of the history intact.
+    """
+    text = draft.previous_history.strip()
+    if not text or not draft.medicines:
+        return
+    names = [m.name.strip().lower() for m in draft.medicines if m.name.strip()]
+    clauses = [c.strip() for c in _HISTORY_SPLIT.split(text) if c and c.strip()]
+    kept = [c for c in clauses if not any(n in c.lower() for n in names)]
+    if len(kept) != len(clauses):
+        log.info(
+            "Dropping %d history clause(s) that name a prescribed medicine: %r",
+            len(clauses) - len(kept),
+            [c for c in clauses if c not in kept],
+        )
+        draft.previous_history = "; ".join(kept)
+
+
 def _drop_ungrounded_fields(draft: DraftPrescription, transcript: str) -> None:
     """Blank any medicine field the transcript gives no basis for.
 
@@ -1467,6 +1495,7 @@ async def extract_prescription(
     # the doctor empty is indistinguishable from one the model never filled —
     # the HTTP 200 looks identical either way.
     _merge_duplicate_medicines(draft)
+    _drop_history_restating_medicines(draft)
     _verify_advice(draft, body.transcript)
     _normalise_draft(draft, body.transcript)
     _reconcile_follow_up(draft, today, body.transcript)

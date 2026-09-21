@@ -11,7 +11,7 @@ Bump VERSION whenever the wording changes.
 
 import re
 
-VERSION = "prescription/v17"
+VERSION = "prescription/v18"
 
 # Trailing strength token, e.g. "Dolo 650" / "Azithral 500 mg" -> the number is
 # stripped so the spelling hint carries the NAME only. The model then takes
@@ -237,8 +237,18 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
      disease". One short line, or a few separated by "; ", in English.
      It is the patient's background, not today's problem: "fever for 3 days"
      is the COMPLAINT and goes in diagnosis; "has had asthma since childhood"
-     is HISTORY. A medicine the patient is ALREADY taking is history, never a
-     row in `medicines` — unless the doctor prescribes it afresh today.
+     is HISTORY.
+     History is ONLY what the doctor explicitly marks as the past — "has a
+     history of", "known case of", "is already on", "was taking", "had
+     surgery", "is allergic to". Nothing else qualifies.
+     A medicine spoken with a dose, a frequency, a duration or a food
+     instruction is being PRESCRIBED today. It is a `medicines` row and it is
+     never history — even if speech recognition mangled the words around it
+     into something that sounds like the past ("2 days ago" for "for 2 days").
+     When in doubt whether a drug is history or a prescription, it is a
+     prescription. The same drug never appears in both places.
+     Never add a time or a duration to history that was not spoken: "was
+     taking X two days ago" is an invention unless those words are there.
      Most consultations contain no history at all. Then previous_history is
      "" and nothing else changes. Never summarise the visit, never repeat the
      diagnosis, never write a history because one would usually exist for
