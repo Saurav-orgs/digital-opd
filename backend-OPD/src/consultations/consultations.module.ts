@@ -8,6 +8,10 @@ import { EPrescriptionMedicine } from '../database/models/e-prescription-medicin
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
 import { ConsultationsService } from './consultations.service';
 import { ConsultationsController } from './consultations.controller';
+import { ConsultationStreamService } from './consultation-stream.service';
+import { ConsultationsGateway } from './consultations.gateway';
+import { AuthModule } from '../auth/auth.module';
+import { UsersModule } from '../users/users.module';
 import { PublicPrescriptionController } from '../prescriptions/public-prescription.controller';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { PrescriptionPdfService } from '../prescriptions/prescription-pdf.service';
@@ -37,9 +41,20 @@ import { NotificationsModule } from '../notifications/notifications.module';
     DoctorsModule,
     MedicinesModule,
     NotificationsModule,
+    // The live-transcription socket checks the doctor's JWT itself — there is
+    // no request for the HTTP guards to run on — so it needs the token
+    // verifier and the user loader those guards use.
+    AuthModule,
+    UsersModule,
   ],
   controllers: [ConsultationsController, PublicPrescriptionController],
-  providers: [ConsultationsService, PrescriptionsService, PrescriptionPdfService],
+  providers: [
+    ConsultationsService,
+    ConsultationStreamService,
+    ConsultationsGateway,
+    PrescriptionsService,
+    PrescriptionPdfService,
+  ],
   exports: [PrescriptionsService],
 })
 export class ConsultationsModule {}

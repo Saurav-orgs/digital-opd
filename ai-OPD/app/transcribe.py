@@ -32,6 +32,11 @@ log = logging.getLogger(__name__)
 _pool: queue.Queue = queue.Queue()
 _pool_size = 0
 
+# The last measured real-time factor (wall time / audio seconds), for /health.
+# One number, most recent call: enough to see at a glance whether this box
+# is keeping up with live speech (needs to stay well under 1.0).
+_last_rtf: float | None = None
+
 
 def load_model() -> None:
     """Load the Whisper pool. Called once on startup."""
@@ -59,30 +64,66 @@ def load_model() -> None:
         threads,
     )
     for _ in range(size):
-        _pool.put(
-            WhisperModel(
-                settings.whisper_model,
-                device=settings.whisper_device,
-                compute_type=settings.whisper_compute_type,
-                cpu_threads=threads,
-            )
+        model = WhisperModel(
+            settings.whisper_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            cpu_threads=threads,
         )
+        if settings.whisper_batched:
+            # Same weights, different driver: the batched pipeline cuts the
+            # audio on silence first and decodes the pieces together, so the
+            # decoder runs once over a batch instead of once per segment.
+            from faster_whisper import BatchedInferencePipeline
+
+            model = BatchedInferencePipeline(model=model)
+        _pool.put(model)
         # Counted as each one lands, so a pool that only half-loads still
         # serves on what it got instead of reporting itself ready for more.
         _pool_size += 1
-    log.info("Whisper pool ready (%d model(s)).", _pool_size)
+    log.info(
+        "Whisper pool ready (%d model(s), %s).",
+        _pool_size,
+        f"batched x{settings.whisper_batch_size}" if settings.whisper_batched else "sequential",
+    )
 
 
 def is_loaded() -> bool:
     return _pool_size > 0
 
 
-def _vocabulary_prompt(medicine_catalog: list[str] | None) -> str:
+def record_rtf(rtf: float) -> None:
+    global _last_rtf
+    _last_rtf = rtf
+
+
+def last_rtf() -> float | None:
+    return _last_rtf
+
+
+# Whisper's prompt window is 224 tokens; past that the *start* of the prompt
+# is dropped, which for us would be the vocabulary. Kept well inside it.
+_PROMPT_CHAR_BUDGET = 700
+_PREVIOUS_TEXT_CHARS = 200
+
+
+def _vocabulary_prompt(
+    medicine_catalog: list[str] | None,
+    previous_text: str | None = None,
+) -> str:
     """Bias decoding toward clinic medical vocabulary in Roman script (English & Hinglish).
 
     Whisper conditions on this text as if it preceded the audio, ensuring it
     transcribes in Roman script (e.g. 'thik hai, Dolo 500 kha lena subah shaam')
     and never outputs Devanagari characters or mangles medicine names.
+
+    `previous_text` is the tail of what was transcribed just before this
+    audio, for live transcription where the recording arrives in pieces:
+    the model then hears the piece the way it heard the whole — "500" after
+    a cut still attaches to the "Dolo" before it, and a sentence split mid-way
+    picks up its own style and script. It goes last, right against the
+    audio, and the vocabulary list is trimmed to make room for it rather than
+    the other way round.
     """
     base_terms = [
         "Doctor prescription",
@@ -124,46 +165,64 @@ def _vocabulary_prompt(medicine_catalog: list[str] | None) -> str:
                 seen.add(clean.lower())
                 base_terms.append(clean)
 
-    # Keep prompt within token budget (~200 tokens)
-    return ", ".join(base_terms[:45]) + "."
+    tail = (previous_text or "").strip()[-_PREVIOUS_TEXT_CHARS:]
+    budget = _PROMPT_CHAR_BUDGET - (len(tail) + 1 if tail else 0)
+
+    # Keep prompt within token budget (~200 tokens): as many catalogue terms
+    # as fit, base terms first, in order.
+    terms: list[str] = []
+    used = 0
+    for term in base_terms[:45]:
+        if used + len(term) + 2 > budget:
+            break
+        terms.append(term)
+        used += len(term) + 2
+    prompt = ", ".join(terms) + "."
+    return f"{prompt} {tail}" if tail else prompt
 
 
 def transcribe(
     audio_path: str,
     medicine_catalog: list[str] | None = None,
+    previous_text: str | None = None,
 ) -> tuple[str, str, float]:
     """Transcribe an audio file. Returns (text, language, duration_seconds).
 
     Always transcribes in Roman script (English / Romanized Hinglish).
+    `previous_text` is for a piece of a longer recording — see
+    `_vocabulary_prompt`.
     """
     if not _pool_size:
         raise RuntimeError("Whisper model is not loaded.")
 
     lang = settings.whisper_language.strip() if settings.whisper_language.strip() else "en"
 
+    options: dict[str, Any] = dict(
+        language=lang,
+        initial_prompt=_vocabulary_prompt(medicine_catalog, previous_text),
+        # VAD drops the silence between doctor and patient turns
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+        # Stays at 5 — see the note in config.py. Greedy decoding halved
+        # the time and dropped the dosage sentence with it.
+        beam_size=settings.whisper_beam_size,
+        # Only consulted on temperature fallback, so it stays at 5: when a
+        # segment is hard enough to need the fallback, the extra candidates
+        # are exactly what rescues it.
+        best_of=5,
+        condition_on_previous_text=False,
+        repetition_penalty=1.2,
+        no_speech_threshold=0.6,
+        compression_ratio_threshold=2.2,
+    )
+    if settings.whisper_batched:
+        options["batch_size"] = settings.whisper_batch_size
+
     # Waits for a free model rather than failing when all are busy, so a third
     # doctor on a pool of two is delayed, never turned away.
     model = _pool.get()
     try:
-        segments, info = model.transcribe(
-            audio_path,
-            language=lang,
-            initial_prompt=_vocabulary_prompt(medicine_catalog),
-            # VAD drops the silence between doctor and patient turns
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
-            # Stays at 5 — see the note in config.py. Greedy decoding halved
-            # the time and dropped the dosage sentence with it.
-            beam_size=settings.whisper_beam_size,
-            # Only consulted on temperature fallback, so it stays at 5: when a
-            # segment is hard enough to need the fallback, the extra candidates
-            # are exactly what rescues it.
-            best_of=5,
-            condition_on_previous_text=False,
-            repetition_penalty=1.2,
-            no_speech_threshold=0.6,
-            compression_ratio_threshold=2.2,
-        )
+        segments, info = model.transcribe(audio_path, **options)
 
         # `segments` is a generator — consuming it is what actually runs
         # inference, so it has to happen before the model goes back.

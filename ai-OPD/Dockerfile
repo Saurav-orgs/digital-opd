@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
 
 # ffmpeg: Whisper audio decoding. tesseract + hin: OCR for photographed reports.
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -4,6 +4,9 @@ import { consultationApi } from '../api/endpoints';
 import type { ConsultationSession } from '../api/types';
 import { useToast } from './Toast';
 import { flushDraft, type DraftFlushRef } from '../lib/draftFlush';
+import { isCaptureSupported, startCapture, SAMPLE_RATE, type Capture } from '../lib/audio/capture';
+import { concatPcm, pcmToWav } from '../lib/audio/wav';
+import { useConsultationStream } from '../lib/consultationStream';
 import { ConfirmDialog } from './ui';
 import { MicIcon, StopIcon } from './icons';
 
@@ -21,8 +24,20 @@ const mmss = (total: number) =>
  * Records the OPD conversation and hands it to the server, which transcribes it
  * and drafts a prescription.
  *
- * Transcription takes minutes on local hardware, so the session is polled rather
- * than awaited — the doctor can carry on working while it runs.
+ * Two ways in, same outcome:
+ *
+ *  - **Live.** The mic is cut into pieces at the pauses and each piece goes
+ *    to the server over a socket while the doctor is still talking; the
+ *    transcript shows up under the mic as it is heard, and when they stop
+ *    only the last few seconds are left to transcribe before the draft.
+ *  - **Upload.** The whole recording goes up when they stop, and the session
+ *    is polled while the server works through it. This is what runs when the
+ *    socket cannot be had — server has streaming off, the connection dropped,
+ *    the browser has no AudioWorklet — and it is never announced: the doctor
+ *    just waits a little longer.
+ *
+ * Whichever way, the recording is kept here until the server has it in full,
+ * so nothing said is lost to a bad connection.
  */
 export function ConsultationRecorder({
   appointmentId,
@@ -56,7 +71,14 @@ export function ConsultationRecorder({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  /** The live path: the worklet capture and every piece it has produced. */
+  const captureRef = useRef<Capture | null>(null);
+  const piecesRef = useRef<Int16Array[]>([]);
+  /** Resolves once the server has (or has refused) the live session. */
+  const streamStartRef = useRef<Promise<boolean> | null>(null);
+  const [stopping, setStopping] = useState(false);
 
+  const stream = useConsultationStream(appointmentId);
   const sessionKey = ['consultation', appointmentId];
 
   const sessionQ = useQuery({
@@ -65,6 +87,9 @@ export function ConsultationRecorder({
     // Poll while work is in flight (every 2 seconds).
     refetchInterval: (q) => {
       const s = q.state.data as ConsultationSession | null | undefined;
+      // While live, the socket is the source of truth; the poll is only a
+      // net under it (a refresh, a missed event) and runs slower.
+      if (s?.status === 'recording') return stream.live ? 10000 : 2000;
       return s?.status === 'transcribing' || s?.status === 'drafting' ? 2000 : false;
     },
   });
@@ -82,7 +107,13 @@ export function ConsultationRecorder({
   });
 
   const cancel = useMutation({
-    mutationFn: () => consultationApi.cancelConsultation(appointmentId),
+    mutationFn: async () => {
+      // A live session is torn down through the socket as well, so the
+      // server drops the piece it is on instead of finishing it into a row
+      // that is about to be deleted.
+      await stream.abort();
+      return consultationApi.cancelConsultation(appointmentId);
+    },
     onSuccess: async () => {
       setConfirmCancel(false);
       /*
@@ -148,10 +179,92 @@ export function ConsultationRecorder({
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
       recorderRef.current?.stream.getTracks().forEach((t) => t.stop());
+      void captureRef.current?.stop();
     };
   }, []);
 
+  const beginTimer = () => {
+    setRecording(true);
+    setElapsed(0);
+    timerRef.current = window.setInterval(() => setElapsed((s) => s + 1), 1000);
+  };
+
+  /**
+   * The live path. The mic goes through the segmenter from the first
+   * second; whether the pieces also go to the server is decided by whether
+   * the socket comes up, and it comes up in parallel so the doctor never
+   * waits on it. Every piece is kept here regardless — that is the upload
+   * of last resort.
+   */
+  const startLive = async () => {
+    piecesRef.current = [];
+    // Editor state first, for the same reason the upload path saves it: the
+    // draft the server adds to must be the one on screen.
+    await flushDraft(flushRef);
+
+    // The mic before the session: a session is a row on the server that
+    // says "recording", and until the microphone is actually open there is
+    // nothing being recorded. Opened the other way round, a refused mic
+    // left an empty session spinning on "Transcribing…" with nothing to
+    // transcribe. Pieces cut in the gap before the server answers wait on
+    // this promise and go up with the rest once it has.
+    let serverAnswered: (ok: boolean) => void = () => {};
+    streamStartRef.current = new Promise<boolean>((resolve) => {
+      serverAnswered = resolve;
+    });
+    try {
+      captureRef.current = await startCapture((pcm) => {
+        piecesRef.current.push(pcm);
+        void streamStartRef.current?.then((ok) => {
+          if (ok) stream.sendSegment(pcmToWav(pcm, SAMPLE_RATE));
+        });
+      });
+    } catch (err) {
+      serverAnswered(false);
+      throw err;
+    }
+    beginTimer();
+    void stream.start(appointmentId).then(serverAnswered);
+  };
+
+  const stopLive = async () => {
+    setStopping(true);
+    try {
+      const capture = captureRef.current;
+      captureRef.current = null;
+      // Waits for the last piece to be cut and handed over before asking
+      // the server to finish, so `totalSegments` counts it.
+      await capture?.stop();
+      const accepted = (await streamStartRef.current) && (await stream.stop());
+      if (accepted) {
+        toast.success('Recording sent', 'Writing the prescription draft…');
+        return;
+      }
+      // No live session, or it died on the way: everything said is still
+      // here, so it goes up the old way and the server starts from scratch.
+      const pcm = concatPcm(piecesRef.current);
+      if (pcm.length > 0) {
+        upload.mutate(new Blob([pcmToWav(pcm, SAMPLE_RATE)], { type: 'audio/wav' }));
+      } else {
+        toast.error(new Error('Nothing was heard. Please check the microphone and try again.'));
+      }
+    } finally {
+      piecesRef.current = [];
+      setStopping(false);
+    }
+  };
+
   const start = async () => {
+    if (isCaptureSupported()) {
+      try {
+        await startLive();
+      } catch {
+        toast.error(
+          new Error('Microphone permission was denied. Allow it in the browser and retry.'),
+        );
+      }
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       toast.error(new Error('This browser cannot record audio. Try Chrome or Safari.'));
       return;
@@ -186,9 +299,7 @@ export function ConsultationRecorder({
 
       recorder.start(1000);
       recorderRef.current = recorder;
-      setRecording(true);
-      setElapsed(0);
-      timerRef.current = window.setInterval(() => setElapsed((s) => s + 1), 1000);
+      beginTimer();
     } catch {
       toast.error(
         new Error('Microphone permission was denied. Allow it in the browser and retry.'),
@@ -197,25 +308,33 @@ export function ConsultationRecorder({
   };
 
   const stop = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
     setRecording(false);
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    if (captureRef.current) {
+      void stopLive();
+      return;
+    }
+    recorderRef.current?.stop();
+    recorderRef.current = null;
   };
 
   const session = sessionQ.data;
   /** Server-side work only — the upload is a separate, client-side wait. */
   const processing =
-    session?.status === 'transcribing' || session?.status === 'drafting';
-  const busy = upload.isPending || processing;
+    session?.status === 'transcribing' ||
+    session?.status === 'drafting' ||
+    // Live session still open after Stop: the server has the pieces and is
+    // on the last one. (While the mic is on, `recording` covers this.)
+    (session?.status === 'recording' && !recording);
+  const busy = upload.isPending || stopping || processing;
 
   // What only this component knows: the mic is open, or the audio is
   // uploading. Cleared on unmount so a tab switch does not leave the page
   // thinking a recording is still running.
-  const localBusy = recording || upload.isPending;
+  const localBusy = recording || stopping || upload.isPending;
   useEffect(() => {
     onBusyChange?.(localBusy);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,14 +372,27 @@ export function ConsultationRecorder({
    * one line of text to do it in.
    */
   const status = recording
-    ? 'Listening…'
-    : upload.isPending
-      ? 'Uploading the recording…'
-      : session?.status === 'transcribing'
-        ? 'Transcribing…'
-        : session?.status === 'drafting'
-          ? 'Writing the draft…'
-          : 'Tap to start recording';
+    ? stream.live
+      ? 'Listening… (live)'
+      : 'Listening…'
+    : stopping
+      ? 'Finishing the recording…'
+      : upload.isPending
+        ? 'Uploading the recording…'
+        : session?.status === 'transcribing' || session?.status === 'recording'
+          ? 'Transcribing…'
+          : session?.status === 'drafting'
+            ? 'Writing the draft…'
+            : 'Tap to start recording';
+
+  // Live text shown under the mic: the transcript as the server hears it,
+  // from the first piece until the draft is on screen. Afterwards the same
+  // text folds into "What the system heard" below. The socket feeds it
+  // directly; after a refresh mid-consultation the polled row does instead.
+  const liveText =
+    stream.transcript ||
+    (session?.status === 'recording' || processing ? (session?.transcript ?? '') : '');
+  const showLive = (recording || busy) && (stream.live || liveText.length > 0);
 
   return (
     <div>
@@ -318,6 +450,18 @@ export function ConsultationRecorder({
           </button>
         )}
       </div>
+
+      {showLive && (
+        <div className="live-transcript" aria-live="polite">
+          <div className="live-transcript-label">
+            {recording ? 'Hearing…' : 'Heard so far'}
+          </div>
+          <p className="live-transcript-text">
+            {liveText || <span className="muted">Waiting for the first words…</span>}
+            {recording && <span className="live-cursor" aria-hidden />}
+          </p>
+        </div>
+      )}
 
       {looksStuck && (
         <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
@@ -404,7 +548,7 @@ export function ConsultationRecorder({
         </div>
       )}
 
-      {session?.transcript && (
+      {session?.transcript && !showLive && (
         <details style={{ marginTop: 10 }}>
           <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
             What the system heard

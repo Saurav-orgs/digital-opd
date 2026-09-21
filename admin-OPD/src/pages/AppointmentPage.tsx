@@ -171,11 +171,13 @@ export default function AppointmentPage() {
     enabled: !!id,
     refetchInterval: (q) => {
       const st = (q.state.data as ConsultationSession | null | undefined)?.status;
-      return st === 'transcribing' || st === 'drafting' ? 2000 : false;
+      return st === 'recording' || st === 'transcribing' || st === 'drafting' ? 2000 : false;
     },
   });
   const aiDrafting =
-    sessionQ.data?.status === 'transcribing' || sessionQ.data?.status === 'drafting';
+    sessionQ.data?.status === 'recording' ||
+    sessionQ.data?.status === 'transcribing' ||
+    sessionQ.data?.status === 'drafting';
   const draftInFlight = recorderBusy || aiDrafting;
 
   const consult = useMutation({

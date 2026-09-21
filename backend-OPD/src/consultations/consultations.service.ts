@@ -328,8 +328,12 @@ export class ConsultationsService {
    * Split out of `process` so `retryDraft` can re-run exactly this half and
    * nothing else. Transcription is the expensive part — minutes of CPU, and
    * the audio is gone afterwards — so drafting must be retryable without it.
+   *
+   * Public because the live-transcription path (`ConsultationStreamService`)
+   * ends here too: however the transcript was assembled, drafting, merging
+   * into the editor and the cancel checks are the same and live in one place.
    */
-  private async draftFromTranscript(
+  async draftFromTranscript(
     sessionId: string,
     appointment: Appointment,
     transcript: string,
@@ -382,7 +386,7 @@ export class ConsultationsService {
    * thing both sides agree on: cancelling deletes it, and a cancel handled by
    * another instance never touches this process's controller at all.
    */
-  private async wasCancelled(sessionId: string): Promise<boolean> {
+  async wasCancelled(sessionId: string): Promise<boolean> {
     const still = await this.sessionModel.count({ where: { id: sessionId } });
     if (still > 0) return false;
     this.logger.log(`Consultation session ${sessionId} was cancelled; discarding.`);
@@ -488,7 +492,7 @@ export class ConsultationsService {
     return date.toISOString().slice(0, 10);
   }
 
-  private async fail(sessionId: string, message: string): Promise<void> {
+  async fail(sessionId: string, message: string): Promise<void> {
     await this.sessionModel.update(
       { status: ConsultationSessionStatus.FAILED, error: message } as any,
       { where: { id: sessionId } },
@@ -496,8 +500,46 @@ export class ConsultationsService {
     this.logger.warn(`Consultation session ${sessionId} failed: ${message}`);
   }
 
+  /**
+   * Open a session for a recording that will arrive in pieces over the
+   * socket. The row exists from the first second, in `recording`, so a page
+   * refresh mid-consultation still finds the transcript so far.
+   */
+  async startStreaming(
+    appointmentId: string,
+    user: AuthUser,
+    controller: AbortController,
+  ): Promise<{ session: ConsultationSession; appointment: Appointment }> {
+    const appointment = await this.getAppointment(appointmentId, user);
+    if (!this.aiEnabled) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          'Voice prescriptions are turned off on this server. You can still ' +
+          'write the prescription by hand.',
+      });
+    }
+
+    // Same rule as the upload path: one session per appointment.
+    await this.sessionModel.destroy({ where: { appointment_id: appointmentId } });
+    const session = await this.sessionModel.create({
+      appointment_id: appointmentId,
+      status: ConsultationSessionStatus.RECORDING,
+      transcript: '',
+      duration_seconds: 0,
+    } as any);
+
+    // Registered like any other run so `cancel` aborts the segment in flight.
+    this.inFlight.set(session.id, controller);
+    return { session, appointment };
+  }
+
+  /** Forget a run's abort controller once it has ended, however it ended. */
+  releaseInFlight(sessionId: string): void {
+    this.inFlight.delete(sessionId);
+  }
+
   /** Loads the appointment and enforces the doctor's data scope. */
-  private async getAppointment(id: string, user: AuthUser): Promise<Appointment> {
+  async getAppointment(id: string, user: AuthUser): Promise<Appointment> {
     const appointment = await this.appointmentModel.findByPk(id);
     if (!appointment) {
       throw new AppException(ErrorCode.NOT_FOUND, {

@@ -289,7 +289,16 @@ export const consultationApi = {
   // Transcription runs in the background; poll `session` for progress.
   uploadAudio: (appointmentId: string, audio: Blob) => {
     const fd = new FormData();
-    fd.append('audio', audio, 'consultation.webm');
+    // The name's extension is how the AI service picks a decoder, so it has
+    // to match what the recorder actually produced.
+    const ext = audio.type.includes('wav')
+      ? 'wav'
+      : audio.type.includes('mp4')
+        ? 'mp4'
+        : audio.type.includes('ogg')
+          ? 'ogg'
+          : 'webm';
+    fd.append('audio', audio, `consultation.${ext}`);
     return api
       .post<ConsultationSession>(`/appointments/${appointmentId}/consultation/audio`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },

@@ -102,6 +102,8 @@ export enum ScheduleExceptionType {
 
 /** Lifecycle of a recorded consultation, from upload to a usable draft. */
 export enum ConsultationSessionStatus {
+  /** The doctor is still talking; the transcript grows as pieces come in. */
+  RECORDING = 'recording',
   TRANSCRIBING = 'transcribing',
   DRAFTING = 'drafting',
   DRAFT_READY = 'draft_ready',

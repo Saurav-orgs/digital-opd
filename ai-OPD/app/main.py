@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
@@ -24,7 +25,7 @@ from . import claude_llm, documents, gemini_llm, llm, transcribe
 from rapidfuzz import fuzz
 
 from .spellfix import TRUSTED_THRESHOLD, speller
-from .config import settings
+from .config import _LEGACY_CLAUDE_KEYS, settings
 from .prompts import consolidate as consolidate_prompt
 from .prompts import imaging as imaging_prompt
 from .prompts import prescription as prescription_prompt
@@ -48,6 +49,7 @@ from .schemas import (
     ProgressTrend,
     ReportSummary,
     SummarizeReportResponse,
+    TranscribeChunkResponse,
     TranscribeResponse,
 )
 
@@ -60,6 +62,23 @@ log = logging.getLogger("ai-opd")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # What this process is actually running on, in one line. The .env can say
+    # one thing and the environment another (load_dotenv never overrides), so
+    # the resolved values are the only ones worth trusting.
+    log.info(
+        "LLM: %s | extraction: model=%s effort=%s fast=%s | summaries: effort=%s",
+        settings.active_llm,
+        settings.claude_extract_model or settings.claude_model,
+        settings.claude_extract_effort,
+        settings.claude_fast,
+        settings.claude_effort,
+    )
+    for key in _LEGACY_CLAUDE_KEYS:
+        log.warning(
+            "%s is set but ignored — the setting is now AI_%s. Rename it in .env.",
+            key,
+            key,
+        )
     # Load Whisper up front: a cold load mid-consultation would look like a hang.
     try:
         transcribe.load_model()
@@ -91,6 +110,22 @@ app = FastAPI(title="OPD AI sidecar", version="1.0.0", lifespan=lifespan)
 #     just makes every one of them slower.
 _TRANSCRIBE_SLOT = asyncio.Semaphore(max(1, settings.whisper_pool_size))
 _OCR_SLOTS = asyncio.Semaphore(2)
+
+
+def _log_rtf(route: str, started: float, audio_seconds: float) -> None:
+    """Log how long Whisper took relative to the audio it heard.
+
+    RTF (real-time factor) is wall time divided by audio length: 0.5 means a
+    minute of speech took 30 seconds. It is the one number that says whether
+    live transcription can keep up — segments arrive at RTF 1.0 by
+    definition, so anything above that and the queue only grows. Logged on
+    every call so a box that has fallen behind shows up in the logs before
+    it shows up in the clinic.
+    """
+    elapsed = time.monotonic() - started
+    rtf = elapsed / audio_seconds if audio_seconds > 0 else 0.0
+    transcribe.record_rtf(rtf)
+    log.info("%s: %.1fs audio in %.1fs (RTF %.2f)", route, audio_seconds, elapsed, rtf)
 
 
 def _save_upload(upload: UploadFile) -> str:
@@ -133,6 +168,7 @@ async def health() -> HealthResponse:
         status="ok" if (llm_ok and whisper_ok) else "degraded",
         whisper_loaded=whisper_ok,
         whisper_model=settings.whisper_model,
+        whisper_rtf_last=transcribe.last_rtf(),
         llm_reachable=llm_ok,
         # The model that will actually serve a request, not the Ollama name it
         # would have used: reporting qwen while Claude does the work made this
@@ -152,19 +188,16 @@ async def transcribe_audio(
     if not transcribe.is_loaded():
         raise HTTPException(503, "Speech model is not loaded on this host.")
 
-    try:
-        catalog = json.loads(medicine_catalog)
-        if not isinstance(catalog, list):
-            catalog = []
-    except json.JSONDecodeError:
-        catalog = []
+    catalog = _parse_catalog(medicine_catalog)
 
     path = await asyncio.to_thread(_save_upload, audio)
     try:
         async with _TRANSCRIBE_SLOT:
+            started = time.monotonic()
             text, language, duration = await asyncio.to_thread(
                 transcribe.transcribe, path, catalog
             )
+            _log_rtf("transcribe", started, duration)
     except Exception as err:
         log.exception("Transcription failed")
         raise HTTPException(500, f"Transcription failed: {err}") from err
@@ -175,6 +208,63 @@ async def transcribe_audio(
     return TranscribeResponse(
         text=text,
         language=language,
+        duration_seconds=duration,
+        model_version=settings.model_version,
+    )
+
+
+def _parse_catalog(medicine_catalog: str) -> list[str]:
+    try:
+        catalog = json.loads(medicine_catalog)
+    except json.JSONDecodeError:
+        return []
+    return catalog if isinstance(catalog, list) else []
+
+
+@app.post("/transcribe-chunk", response_model=TranscribeChunkResponse)
+async def transcribe_chunk(
+    audio: UploadFile = File(...),
+    # Position of this piece in the recording; echoed back so the caller can
+    # match the answer to the question when several are in flight.
+    seq: int = Form(...),
+    # The tail of the transcript so far, so the model hears this piece in
+    # context — see transcribe._vocabulary_prompt.
+    previous_text: str = Form(""),
+    medicine_catalog: str = Form("[]"),
+) -> TranscribeChunkResponse:
+    """Transcribe one piece of a recording that is still in progress.
+
+    The backend cuts a live consultation into pieces of a few seconds and
+    sends each one as soon as it is complete, so the transcript grows while
+    the doctor is still talking and only the last piece is left to do when
+    they stop. Stateless on this side: everything the model needs to join
+    the pieces up is in the request.
+
+    Whisper pads every input to a 30-second window, so a short piece costs
+    about the same as a 30-second one — the caller chooses the piece length
+    with that in mind (longer pieces are cheaper, shorter ones show text
+    sooner).
+    """
+    if not transcribe.is_loaded():
+        raise HTTPException(503, "Speech model is not loaded on this host.")
+
+    path = await asyncio.to_thread(_save_upload, audio)
+    try:
+        async with _TRANSCRIBE_SLOT:
+            started = time.monotonic()
+            text, _language, duration = await asyncio.to_thread(
+                transcribe.transcribe, path, _parse_catalog(medicine_catalog), previous_text
+            )
+            _log_rtf(f"transcribe-chunk#{seq}", started, duration)
+    except Exception as err:
+        log.exception("Chunk transcription failed (seq=%d)", seq)
+        raise HTTPException(500, f"Transcription failed: {err}") from err
+    finally:
+        os.unlink(path)
+
+    return TranscribeChunkResponse(
+        seq=seq,
+        text=text,
         duration_seconds=duration,
         model_version=settings.model_version,
     )
@@ -1300,6 +1390,16 @@ def _drop_ungrounded_fields(draft: DraftPrescription, transcript: str) -> None:
     _drop_advice_restating_medicines(draft)
 
 
+# The Claude settings for this route alone — see the AI_CLAUDE_EXTRACT_* notes
+# in config.py. Built once; nothing in it changes per request.
+_EXTRACT_KW = dict(
+    effort=settings.claude_extract_effort,
+    model=settings.claude_extract_model or None,
+    max_tokens=settings.claude_extract_max_tokens,
+    fast=settings.claude_fast,
+)
+
+
 @app.post("/extract-prescription", response_model=ExtractPrescriptionResponse)
 async def extract_prescription(
     body: ExtractPrescriptionRequest,
@@ -1340,7 +1440,7 @@ async def extract_prescription(
             claude_system, claude_user = prompt_for(prescription_claude_prompt)
             try:
                 raw = await claude_llm.generate_json(
-                    claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA
+                    claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA, **_EXTRACT_KW
                 )
                 return raw, "claude"
             except Exception as claude_err:
@@ -1364,7 +1464,14 @@ async def extract_prescription(
         except llm.LlmError as err:
             raise HTTPException(503, str(err)) from err
 
+    started = time.monotonic()
     raw_draft, provider = await generate()
+    log.info(
+        "extract-prescription: %s drafted %d chars in %.1fs",
+        provider,
+        len(body.transcript),
+        time.monotonic() - started,
+    )
     draft = DraftPrescription.model_validate(raw_draft)
 
     # An empty medicine list from a transcript that plainly dictates medicines
@@ -1406,7 +1513,7 @@ async def extract_prescription(
                 claude_system, claude_user = prompt_for(prescription_claude_prompt)
                 return (
                     await claude_llm.generate_json(
-                        claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA
+                        claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA, **_EXTRACT_KW
                     ),
                     "claude",
                 )

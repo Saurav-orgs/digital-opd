@@ -26,6 +26,8 @@ import { PasswordReset } from '../database/models/password-reset.model';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  // JwtModule goes out too, so the consultation socket verifies the same
+  // tokens with the same secret instead of registering a second copy.
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

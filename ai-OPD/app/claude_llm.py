@@ -93,6 +93,35 @@ def _strict(node: Any) -> Any:
     return node
 
 
+# Fast mode is a research preview on the beta endpoint, gated by this flag.
+_FAST_MODE_BETA = "fast-mode-2026-02-01"
+
+
+def _is_opus(model: str) -> bool:
+    return "opus" in model.lower()
+
+
+async def _create(client: Any, *, fast: bool, **params: Any) -> Any:
+    """One Messages call, on the fast path when asked for and available.
+
+    Fast mode runs the same Opus model at up to ~2.5x the output speed, at a
+    premium price, and it has its own rate limit. When that limit answers 429
+    the call is made again without `speed` — same request, standard speed —
+    rather than walking down to Gemini for what is only a capacity blip.
+    The SDK's own retries still apply on top of this for transient failures.
+    """
+    if fast and _is_opus(params["model"]):
+        from anthropic import RateLimitError
+
+        try:
+            return await client.beta.messages.create(
+                speed="fast", betas=[_FAST_MODE_BETA], **params
+            )
+        except RateLimitError:
+            log.warning("Fast mode rate-limited; retrying at standard speed.")
+    return await client.messages.create(**params)
+
+
 async def generate_json(
     system: str,
     user: str,
@@ -100,20 +129,29 @@ async def generate_json(
     *,
     effort: str | None = None,
     max_tokens: int | None = None,
+    model: str | None = None,
+    fast: bool = False,
 ) -> dict[str, Any]:
     """Run a completion whose output is constrained to `schema`.
 
     `effort` controls how much the model thinks before answering. Extraction
-    runs at the configured default (medium — enough to segment a run-on
+    runs at its own configured level (medium — enough to segment a run-on
     sentence, short enough that the doctor is not left waiting); the summary
     endpoints pass "high" because a doctor reads that output closely and the
     call volume is a fraction of extraction's.
+
+    `model` and `fast` exist for the extraction route alone: a different
+    model can be tried there without touching the summaries, and fast mode
+    trades price for output speed on the one call a patient is waiting on.
     """
     client = _get_client()
+    model = model or settings.claude_model
 
     try:
-        response = await client.messages.create(
-            model=settings.claude_model,
+        response = await _create(
+            client,
+            fast=fast,
+            model=model,
             max_tokens=max_tokens or settings.claude_max_tokens,
             system=[
                 {
@@ -147,11 +185,15 @@ async def generate_json(
 
     usage = getattr(response, "usage", None)
     if usage is not None:
-        # cache_read_input_tokens staying at 0 across requests means the prefix
-        # is being invalidated somewhere — worth seeing in the logs.
-        log.debug(
-            "Claude %s: in=%s cache_read=%s out=%s",
-            settings.claude_model,
+        # At info, not debug: this line is how a slow draft gets diagnosed in
+        # production. cache_read_input_tokens staying at 0 across requests
+        # means the prefix is being invalidated somewhere; `speed` says
+        # whether fast mode actually served the call.
+        log.info(
+            "Claude %s effort=%s speed=%s: in=%s cache_read=%s out=%s",
+            model,
+            effort or settings.claude_effort,
+            getattr(usage, "speed", None) or "standard",
             getattr(usage, "input_tokens", "?"),
             getattr(usage, "cache_read_input_tokens", "?"),
             getattr(usage, "output_tokens", "?"),

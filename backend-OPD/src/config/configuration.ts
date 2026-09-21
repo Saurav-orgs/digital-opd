@@ -31,7 +31,7 @@ export interface AppConfig {
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
   superAdmin: { email: string; password: string; name: string };
-  ai: { url: string; timeoutSeconds: number; enabled: boolean };
+  ai: { url: string; timeoutSeconds: number; enabled: boolean; streaming: boolean };
   database: {
     host: string;
     port: number;
@@ -98,6 +98,11 @@ export default (): AppConfig => ({
     timeoutSeconds: parseInt(process.env.AI_TIMEOUT_SECONDS || '900', 10),
     // Lets a deployment run with no AI at all; features degrade, nothing breaks.
     enabled: process.env.AI_ENABLED !== 'false',
+    // Live transcription over a WebSocket while the doctor is still talking.
+    // Off, the recorder uploads the whole recording when they stop, as it
+    // always did — the client falls back to that on its own when the socket
+    // is refused, so this can be flipped without a client release.
+    streaming: process.env.CONSULTATION_STREAMING !== 'false',
   },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',

@@ -62,6 +62,18 @@ class Settings:
     # back the text for only ~10% off 5, so there is no speed here worth
     # taking. Exposed as an env var so it can be measured again, not tuned.
     whisper_beam_size: int = _int("WHISPER_BEAM_SIZE", 5)
+    # Batched decoding: faster-whisper's BatchedInferencePipeline splits the
+    # audio on silence and decodes the pieces in parallel instead of one
+    # segment after another. Same model, same weights — 2-4x faster on the
+    # same box. Off by default until it has been measured against the plain
+    # path on this hardware (scripts/bench_stt.py), because the beam-size
+    # measurement in the note above was taken on the sequential path.
+    whisper_batched: bool = os.environ.get("WHISPER_BATCHED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    whisper_batch_size: int = _int("WHISPER_BATCH_SIZE", 8)
 
     # ── LLM (Ollama) ─────────────────────────────────────────
     # Ollama is the last-resort fallback, not a requirement. A deployment that
@@ -106,6 +118,31 @@ class Settings:
     claude_timeout_seconds: int = _int("AI_CLAUDE_TIMEOUT_SECONDS", 120)
     claude_max_tokens: int = _int("AI_CLAUDE_MAX_TOKENS", 8000)
 
+    # ── Claude: prescription extraction only ─────────────────
+    # The one call a doctor waits on with a patient in the room. It is a
+    # narrow, schema-constrained extraction from a minute or two of speech,
+    # so it does not need what the summaries need, and every second here is
+    # felt. Each knob is separate from the summary settings so that speeding
+    # this route up never touches the reports.
+    #
+    # Effort: "medium" by default — measured against "high" on stored
+    # transcripts with scripts/bench_extract.py before changing it.
+    claude_extract_effort: str = os.environ.get("AI_CLAUDE_EXTRACT_EFFORT", "medium")
+    # Model: blank means the same model as everything else. Set e.g.
+    # "claude-sonnet-5" to A/B a faster model on this route alone.
+    claude_extract_model: str = os.environ.get("AI_CLAUDE_EXTRACT_MODEL", "")
+    # A draft is a few hundred tokens; 8000 only ever bounds a runaway.
+    claude_extract_max_tokens: int = _int("AI_CLAUDE_EXTRACT_MAX_TOKENS", 4000)
+    # Fast mode: the same Opus model served at up to ~2.5x the output speed,
+    # at premium pricing. Opus-only; silently ignored on any other model.
+    # Off by default — turn on when the measured draft time matters more
+    # than the per-call price.
+    claude_fast: bool = os.environ.get("AI_CLAUDE_FAST", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     # ── Gemini (prescription extraction only) ────────────────
     # When true, /extract-prescription uses Gemini (with automatic Ollama fallback).
     # All other endpoints (report summaries, transcription) always use local models.
@@ -142,7 +179,9 @@ class Settings:
         fallback itself is logged, so the two together tell the whole story.
         """
         if self.claude_enabled and self.claude_api_key:
-            return self.claude_model
+            # Stamped onto prescription drafts, so it names the model that
+            # drafts them — which may not be the one the summaries use.
+            return self.claude_extract_model or self.claude_model
         if self.gemini_enabled and self.gemini_api_key:
             return self.gemini_model
         adapter = "+lora" if self.lora_adapter_path else ""
@@ -155,3 +194,14 @@ class Settings:
 
 
 settings = Settings()
+
+# The Claude keys were renamed with an AI_ prefix (see claude_effort above).
+# A .env still carrying the old names is not an error the process can see —
+# it just runs on the defaults while the file says otherwise, which is exactly
+# how the service spent weeks at effort "high" believing it was on "medium".
+# Say so at startup, loudly.
+_LEGACY_CLAUDE_KEYS = [
+    key
+    for key in ("CLAUDE_ENABLED", "CLAUDE_MODEL", "CLAUDE_EFFORT", "CLAUDE_TIMEOUT_SECONDS", "CLAUDE_MAX_TOKENS")
+    if key in os.environ and f"AI_{key}" not in os.environ
+]

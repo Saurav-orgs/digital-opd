@@ -78,14 +78,36 @@ tells you which half is missing — the backend degrades gracefully either way
 |---|---|---|
 | `GET /health` | — | Model readiness and versions |
 | `POST /transcribe` | `audio` file, optional `medicine_catalog` JSON array | `{text, language, duration_seconds}` |
+| `POST /transcribe-chunk` | `audio` (16 kHz WAV piece), `seq`, `previous_text`, `medicine_catalog` | `{seq, text, duration_seconds}` — one piece of a recording still in progress; `previous_text` is the transcript so far, given to the model as context |
 | `POST /summarize-report` | `file` (PDF or image) | `{summary{...}, extraction_method}` |
 | `POST /extract-prescription` | `{transcript, patient, medicine_catalog}` | `{prescription{...}}` |
 
 Both LLM endpoints constrain decoding to a JSON schema (Ollama's `format`
 parameter), so malformed output is not a failure mode the backend has to handle.
 
-**Audio is never written to durable storage.** `/transcribe` writes the upload to
-a temp file, transcribes it, and deletes it in a `finally` block.
+**Audio is never written to durable storage.** `/transcribe` and
+`/transcribe-chunk` write the upload to a temp file, transcribe it, and delete
+it in a `finally` block.
+
+### Latency
+
+Every transcription logs its real-time factor (`RTF` = wall time ÷ audio
+length) and `/health` reports the last one as `whisper_rtf_last`. Live
+transcription — the backend sending pieces while the doctor is still talking —
+only keeps up when RTF stays comfortably under 1.0. Two knobs, both measured
+with `scripts/bench_stt.py` before changing:
+
+- `WHISPER_BATCHED=true` — same weights, decodes silence-split pieces
+  together; 2–4× faster on the same CPU, and in testing it also kept trailing
+  sentences the sequential path dropped.
+- A GPU (`WHISPER_DEVICE=cuda`, `WHISPER_COMPUTE_TYPE=float16`,
+  `WHISPER_MODEL=large-v3-turbo`; build with
+  `--build-arg BASE_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`).
+
+The prescription draft has its own Claude settings (`AI_CLAUDE_EXTRACT_*`,
+`AI_CLAUDE_FAST`) separate from the summaries, tuned with
+`scripts/bench_extract.py`. Every Claude call logs model, effort, speed and
+token counts at INFO.
 
 ---
 

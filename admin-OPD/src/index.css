@@ -896,6 +896,46 @@ img {
   margin-top: 10px;
   color: var(--danger);
 }
+/* The transcript as it is heard, under the mic. Grows line by line while the
+   doctor talks; capped so a long consultation scrolls inside it rather than
+   pushing the editor off the screen. */
+.live-transcript {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--page);
+  border: 1px solid var(--border);
+}
+.live-transcript-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.live-transcript-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.live-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: var(--berry);
+  animation: liveBlink 1s steps(2, start) infinite;
+}
+@keyframes liveBlink {
+  to {
+    visibility: hidden;
+  }
+}
 
 .field label {
   font-size: 13px;

@@ -278,6 +278,8 @@ export interface PatientReport {
 }
 
 export type ConsultationStatusAi =
+  /** Live transcription: the doctor is still talking and the transcript is growing. */
+  | 'recording'
   | 'transcribing'
   | 'drafting'
   | 'draft_ready'

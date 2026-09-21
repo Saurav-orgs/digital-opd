@@ -19,6 +19,15 @@ class TranscribeResponse(BaseModel):
     model_version: str
 
 
+class TranscribeChunkResponse(BaseModel):
+    """One piece of a recording that is still going on."""
+
+    seq: int
+    text: str
+    duration_seconds: float
+    model_version: str
+
+
 # ── Report summary ───────────────────────────────────────────
 
 
@@ -351,6 +360,9 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     whisper_loaded: bool
     whisper_model: str
+    # Wall time / audio seconds on the most recent transcription. Live
+    # transcription needs this comfortably under 1.0; None until the first call.
+    whisper_rtf_last: float | None = None
     llm_reachable: bool
     llm_model: str
     ocr_available: bool

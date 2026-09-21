@@ -89,6 +89,13 @@ export interface AiTranscript {
   model_version: string;
 }
 
+export interface AiTranscriptChunk {
+  seq: number;
+  text: string;
+  duration_seconds: number;
+  model_version: string;
+}
+
 /** Thrown when the sidecar is unreachable or cannot produce a result. */
 export class AiUnavailableError extends Error {}
 
@@ -142,6 +149,33 @@ export class AiClientService {
     form.append('medicine_catalog', JSON.stringify(medicineCatalog));
 
     return this.postForm<AiTranscript>('/transcribe', form, signal);
+  }
+
+  /**
+   * Transcribe one piece of a recording that is still going on.
+   *
+   * `previousText` is the tail of what has been heard so far; the sidecar
+   * gives it to the model as context so a sentence cut in half is joined
+   * back up on the other side of the cut.
+   */
+  async transcribeChunk(
+    wav: Buffer,
+    seq: number,
+    previousText: string,
+    medicineCatalog: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<AiTranscriptChunk> {
+    const form = new FormData();
+    form.append(
+      'audio',
+      new Blob([new Uint8Array(wav)], { type: 'audio/wav' }),
+      `segment-${seq}.wav`,
+    );
+    form.append('seq', String(seq));
+    form.append('previous_text', previousText);
+    form.append('medicine_catalog', JSON.stringify(medicineCatalog));
+
+    return this.postForm<AiTranscriptChunk>('/transcribe-chunk', form, signal);
   }
 
   /** Summarise an uploaded report (PDF or photo). */
