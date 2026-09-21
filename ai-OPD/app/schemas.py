@@ -232,6 +232,11 @@ class DraftMedicine(BaseModel):
 
 class DraftPrescription(BaseModel):
     diagnosis: str = ""
+    # What the doctor said about the patient's past — earlier illnesses, ongoing
+    # conditions, surgeries, allergies, what they already take. Doctors dictate
+    # it for the record when it bears on today's prescription. Empty when they
+    # said nothing of the kind, and the editor shows no field for it then.
+    previous_history: str = ""
     medicines: list[DraftMedicine] = Field(default_factory=list)
     advice: list[str] = Field(default_factory=list)
     # For each advice line, the words in the transcript it came from. Asking for
@@ -248,7 +253,7 @@ class DraftPrescription(BaseModel):
     # only to look at one. Advisory, not persisted.
     warnings: list[str] = Field(default_factory=list)
 
-    @field_validator("diagnosis", mode="before")
+    @field_validator("diagnosis", "previous_history", mode="before")
     @classmethod
     def _coerce_diagnosis(cls, v: Any) -> str:
         if v is None:
@@ -297,6 +302,7 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "diagnosis": {"type": "string"},
+        "previous_history": {"type": "string"},
         "medicines": {
             "type": "array",
             "items": {
@@ -327,6 +333,7 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
     },
     "required": [
         "diagnosis",
+        "previous_history",
         "medicines",
         "advice",
         "advice_sources",

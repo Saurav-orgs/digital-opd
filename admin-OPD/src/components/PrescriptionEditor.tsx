@@ -130,6 +130,7 @@ const withKeys = (ms: PrescriptionMedicine[] | undefined): EditorRow[] =>
 const fingerprint = (p: EPrescription) =>
   JSON.stringify({
     d: p.diagnosis ?? '',
+    h: p.previous_history ?? '',
     a: p.advice ?? '',
     f: p.follow_up_date ?? '',
     m: (p.medicines ?? []).map((m) => [
@@ -188,8 +189,21 @@ export function PrescriptionEditor({
     refetchInterval: (q) => (q.state.data?.status === 'draft' ? 5000 : false),
   });
 
-  const [form, setForm] = useState({ diagnosis: '', advice: '', follow_up_date: '' });
+  const [form, setForm] = useState({
+    diagnosis: '',
+    previous_history: '',
+    advice: '',
+    follow_up_date: '',
+  });
   const [rows, setRows] = useState<EditorRow[]>([blankRow()]);
+  /*
+   * The history box is not part of the standard form. Most visits have no
+   * history to record, and an empty box on every prescription is one more
+   * thing to skip past. It opens when the dictation put something in it, or
+   * when the doctor asks for it — and once open it stays open for the visit,
+   * so clearing the text does not make the box vanish under their cursor.
+   */
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [errors, setErrors] = useState<PrescriptionErrors>(noErrors);
@@ -271,9 +285,11 @@ export function PrescriptionEditor({
     setDirty(false);
     setForm({
       diagnosis: data.diagnosis ?? '',
+      previous_history: data.previous_history ?? '',
       advice: data.advice ?? '',
       follow_up_date: data.follow_up_date ?? '',
     });
+    if (data.previous_history?.trim()) setHistoryOpen(true);
     setRows(withKeys(data.medicines));
   }, [prescriptionQ.data]);
 
@@ -291,6 +307,7 @@ export function PrescriptionEditor({
     const { form: f, rows: rs } = latestRef.current;
     return {
       diagnosis: f.diagnosis || undefined,
+      previous_history: f.previous_history || undefined,
       advice: f.advice || undefined,
       follow_up_date: f.follow_up_date || undefined,
       medicines: sentRowIndexes().map((i) => {
@@ -331,6 +348,7 @@ export function PrescriptionEditor({
    */
   const isEmpty =
     !form.diagnosis.trim() &&
+    !form.previous_history.trim() &&
     !form.advice.trim() &&
     rows.every(
       (r) =>
@@ -349,7 +367,13 @@ export function PrescriptionEditor({
    */
   const clearAll = () => {
     markDirty();
-    setForm({ diagnosis: '', advice: '', follow_up_date: form.follow_up_date });
+    setForm({
+      diagnosis: '',
+      previous_history: '',
+      advice: '',
+      follow_up_date: form.follow_up_date,
+    });
+    setHistoryOpen(false);
     setRows([blankRow()]);
     setErrors(noErrors());
     setConfirmClear(false);
@@ -573,6 +597,11 @@ export function PrescriptionEditor({
             <strong>Diagnosis:</strong> {data.diagnosis}
           </p>
         )}
+        {data?.previous_history && (
+          <p style={{ marginTop: 6 }}>
+            <strong>Previous history:</strong> {data.previous_history}
+          </p>
+        )}
         <ol style={{ margin: '10px 0 0 18px' }}>
           {data?.medicines.map((m) => (
             <li key={m.id} style={{ marginBottom: 4 }}>
@@ -626,6 +655,41 @@ export function PrescriptionEditor({
           }}
         />
       </Field>
+
+      {/*
+        Previous history — only when there is some. The recorder fills it when
+        the doctor dictates the patient's background ("known diabetic",
+        "allergic to penicillin"); otherwise it is one link, not a box.
+      */}
+      {historyOpen ? (
+        <>
+          <div className="rx-section-title">Previous history</div>
+          <Field label="">
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="e.g. Known diabetic for 10 years; allergic to penicillin"
+              disabled={!canEdit}
+              value={form.previous_history}
+              onChange={(e) => {
+                markDirty();
+                setForm({ ...form, previous_history: e.target.value });
+              }}
+            />
+          </Field>
+        </>
+      ) : (
+        canEdit && (
+          <button
+            type="button"
+            className="link-btn"
+            style={{ marginTop: 8 }}
+            onClick={() => setHistoryOpen(true)}
+          >
+            + Add previous history
+          </button>
+        )
+      )}
 
       <div className="rx-section-title">Medicines</div>
       {rows.length === 0 && (

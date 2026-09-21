@@ -434,6 +434,11 @@ export class ConsultationsService {
     await prescription.update({
       consultation_session_id: sessionId,
       diagnosis: mergeText(prescription.diagnosis, draft.diagnosis, '; '),
+      previous_history: mergeText(
+        prescription.previous_history,
+        draft.previous_history ?? '',
+        '; ',
+      ),
       advice: mergeLines(prescription.advice, newAdvice),
       follow_up_date:
         prescription.follow_up_date ?? this.followUpDate(draft.follow_up_days),

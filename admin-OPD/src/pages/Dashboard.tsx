@@ -9,6 +9,7 @@ import { TopbarPortal } from '../components/TopbarPortal';
 import { BookingQrModal } from '../components/BookingQr';
 import { Badge, Empty, Loading } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
+import { displayStatus, isMissed } from '../lib/appointmentStatus';
 import { avatarTone, initials } from '../lib/avatar';
 import {
   CalendarIcon,
@@ -30,6 +31,15 @@ const STATUS_LABEL: Record<StatusFilter, string> = {
   pending: 'Pending',
   done: 'Completed',
 };
+
+/**
+ * On Previous, "pending" is a contradiction — the day is over, so a visit
+ * still waiting is one the patient missed. Same filter, honest label.
+ */
+function statusLabel(key: StatusFilter, range: Range) {
+  if (key === 'pending' && range === 'previous') return 'Missed';
+  return STATUS_LABEL[key];
+}
 
 export default function Dashboard() {
   const { user, isDoctor } = useAuth();
@@ -190,7 +200,7 @@ export default function Dashboard() {
 
             <div className="dash-toolbar-filters">
               <FilterPopover
-                label={STATUS_LABEL[status]}
+                label={statusLabel(status, range)}
                 active={status !== 'all'}
                 icon={<FilterIcon size={16} />}
               >
@@ -205,7 +215,7 @@ export default function Dashboard() {
                         close();
                       }}
                     >
-                      {STATUS_LABEL[key]}
+                      {statusLabel(key, range)}
                     </button>
                   ))
                 }
@@ -770,7 +780,8 @@ function AppointmentCard({
 }) {
   const done = isDone(a.consultation_status);
   const cancelled = isCancelled(a);
-  const over = done || cancelled || a.consultation_status === 'no_show';
+  const missed = isMissed(a);
+  const over = done || cancelled || missed || a.consultation_status === 'no_show';
   // "M · 29 yrs", so the line has room for the number beside it and the card
   // stays two rows tall whatever the name and number are.
   const who = [shortGender(a.patient_gender), a.patient_age && `${a.patient_age} yrs`]
@@ -799,6 +810,7 @@ function AppointmentCard({
             {!cancelled && a.consultation_status === 'no_show' && (
               <span className="appt-badge no-show">No-show</span>
             )}
+            {missed && <span className="appt-badge missed">Missed</span>}
             {a.on_leave && (
               <span
                 className="appt-badge leave"
@@ -872,8 +884,9 @@ function AppointmentRow({
       <td className="muted">{a.patient_mobile}</td>
       <td>
         {/* A patient's own cancellation lives on the appointment, not the
-            consultation; it reads the same as the clinic's. */}
-        <Badge value={isCancelled(a) ? 'rejected' : a.consultation_status} />
+            consultation; it reads the same as the clinic's. A stale pending
+            reads as Missed. */}
+        <Badge value={displayStatus(a)} />
       </td>
       <td className="muted" style={{ whiteSpace: 'nowrap' }}>
         {showDate ? `${a.appointment_date} · ` : ''}

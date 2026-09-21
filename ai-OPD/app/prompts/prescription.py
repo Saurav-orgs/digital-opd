@@ -11,7 +11,7 @@ Bump VERSION whenever the wording changes.
 
 import re
 
-VERSION = "prescription/v16"
+VERSION = "prescription/v17"
 
 # Trailing strength token, e.g. "Dolo 650" / "Azithral 500 mg" -> the number is
 # stripped so the spelling hint carries the NAME only. The model then takes
@@ -53,6 +53,10 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
 
    Work through the utterance in order and label each span as exactly one of:
      COMPLAINT   what is wrong with the patient  -> diagnosis
+     HISTORY     the patient's PAST, spoken for the record — an earlier
+                 illness or surgery, a long-standing condition (diabetic,
+                 hypertensive, asthmatic), an allergy, medicines they are
+                 already on, a relevant family history  -> previous_history
      MEDICINE    a drug name (+ any number spoken beside it)  -> medicines[]
      SCHEDULE    how often  -> dosage
      DURATION    how long  -> duration_days
@@ -128,8 +132,9 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
      inside that medicine's span — and every value spoken for the group it
      belongs to — appears in its row. A missed "teen din" or "khane ke baad" is
      the most common way this task is failed.
-   - Once per advice line and for the diagnosis: find the words in the
-     transcript it came from. Anything you cannot trace, delete.
+   - Once per advice line, for the diagnosis and for previous_history: find
+     the words in the transcript it came from. Anything you cannot trace,
+     delete.
 
 1. CAPTURE EVERY PRESCRIBED MEDICINE:
    - If the doctor speaks multiple medicines (e.g. "Dolo 500, Paracetamol 200mg, Dolo 600mg" or "Pantocid 40, Augmentin 625, Montair LC"), you MUST create a separate entry for EVERY single medicine in the `medicines` list. NEVER omit medicines or combine them into one.
@@ -220,12 +225,24 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
      "tablet". Most oral medicines are tablets — that is precisely why writing
      "tablet" feels safe and is still an invention. A blank form costs the
      doctor one click; a wrong one goes out on the prescription.
-7. DIAGNOSIS, ADVICE & FOLLOW-UP — CAPTURE THEM WHEN SPOKEN:
+7. DIAGNOSIS, HISTORY, ADVICE & FOLLOW-UP — CAPTURE THEM WHEN SPOKEN:
    - diagnosis: the problem the doctor states or confirms, written as a short
      clinical phrase ("Acid reflux", "Fever with body pain for 3 days"). Use the
      doctor's own words. If the doctor never names the problem, diagnosis is ""
      — do not infer one from the medicines prescribed. Prescribing Pantocid is
      not the doctor saying "acidity".
+   - previous_history: what the doctor put on record about the patient's PAST
+     — "known diabetic for 10 years", "had gallbladder surgery in 2022",
+     "allergic to penicillin", "already on Telma 40", "father had heart
+     disease". One short line, or a few separated by "; ", in English.
+     It is the patient's background, not today's problem: "fever for 3 days"
+     is the COMPLAINT and goes in diagnosis; "has had asthma since childhood"
+     is HISTORY. A medicine the patient is ALREADY taking is history, never a
+     row in `medicines` — unless the doctor prescribes it afresh today.
+     Most consultations contain no history at all. Then previous_history is
+     "" and nothing else changes. Never summarise the visit, never repeat the
+     diagnosis, never write a history because one would usually exist for
+     this condition.
    - advice: non-medicine instructions, one short line each — diet, fluids,
      rest, activity, warning signs, tests to get done. Translate to English and
      write them as instructions to the patient.
@@ -339,7 +356,7 @@ Consultation transcript:
 {transcript}
 ---
 
-Segment the dictation first, then write down everything the doctor actually\nsaid — the problem, every medicine, and any advice or follow-up. Leave blank\nanything that was not spoken."""
+Segment the dictation first, then write down everything the doctor actually\nsaid — the problem, any past history they put on record, every medicine, and\nany advice or follow-up. Leave blank anything that was not spoken."""
 
 CATALOG_TEMPLATE = """
 Medicines this clinic commonly prescribes. Use this ONLY to correct the spelling

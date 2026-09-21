@@ -27,6 +27,8 @@ export interface AiDraftMedicine {
 
 export interface AiDraftPrescription {
   diagnosis: string;
+  /** The patient's past as the doctor dictated it; "" when nothing was said. */
+  previous_history?: string;
   medicines: AiDraftMedicine[];
   advice: string[];
   follow_up_days?: number | null;

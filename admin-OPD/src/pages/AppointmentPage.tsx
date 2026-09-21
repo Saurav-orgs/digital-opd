@@ -212,6 +212,7 @@ export default function AppointmentPage() {
    */
   const hasContent = (draft: EPrescription | undefined) =>
     !!draft?.diagnosis?.trim() ||
+    !!draft?.previous_history?.trim() ||
     !!draft?.advice?.trim() ||
     (draft?.medicines?.length ?? 0) > 0 ||
     !!draft?.handwriting_image_url ||

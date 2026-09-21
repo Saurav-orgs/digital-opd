@@ -270,15 +270,28 @@ export function ConsultationRecorder({
         gets the middle of it.
       */}
       <div className="mic-wrap">
-        <button
-          className={`mic-btn ${recording ? 'recording' : ''}`}
-          disabled={disabled || (!recording && busy)}
-          onClick={recording ? stop : start}
-          aria-label={recording ? 'Stop recording' : 'Start recording'}
-          title={recording ? 'Stop recording' : 'Start recording'}
-        >
-          {recording ? <StopIcon size={22} /> : <MicIcon size={24} />}
-        </button>
+        {/*
+          From the moment the doctor taps stop until the draft is on screen
+          the mic goes away entirely. A greyed-out mic next to "Writing the
+          draft…" read as "tap again" — doctors tapped it, nothing happened,
+          and they were not sure whether the recording had been taken. The
+          spinner says the system has it; the only control is Cancel.
+        */}
+        {!recording && busy ? (
+          <div className="mic-busy" role="status" aria-live="polite" aria-label={status}>
+            <span className="spinner" aria-hidden />
+          </div>
+        ) : (
+          <button
+            className={`mic-btn ${recording ? 'recording' : ''}`}
+            disabled={disabled}
+            onClick={recording ? stop : start}
+            aria-label={recording ? 'Stop recording' : 'Start recording'}
+            title={recording ? 'Stop recording' : 'Start recording'}
+          >
+            {recording ? <StopIcon size={22} /> : <MicIcon size={24} />}
+          </button>
+        )}
 
         <div className="mic-status">{status}</div>
         {(recording || processing) && (

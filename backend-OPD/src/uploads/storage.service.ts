@@ -161,15 +161,31 @@ export class StorageService {
     }
   }
 
-  /** Time-limited GET URL for private objects (web portal viewing). */
+  /**
+   * Time-limited GET URL for private objects (web portal viewing).
+   *
+   * `downloadAs` makes S3 answer with `Content-Disposition: attachment`, so
+   * the browser saves the file under that name instead of opening it in a
+   * tab — the difference between a "download" button and a "view" link.
+   */
   async presignedGetUrl(
     key: string | null,
     expiresInSeconds = 300,
+    downloadAs?: string,
   ): Promise<string | null> {
     if (!key) return null;
     return getSignedUrl(
       this.s3,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(downloadAs
+          ? {
+              ResponseContentDisposition:
+                `attachment; filename="${downloadAs.replace(/["\\]/g, '')}"`,
+            }
+          : {}),
+      }),
       { expiresIn: expiresInSeconds },
     );
   }

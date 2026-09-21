@@ -320,6 +320,9 @@ export interface EPrescription {
   status: 'draft' | 'issued';
   mode: 'structured' | 'handwritten';
   diagnosis: string | null;
+  /** The patient's background as the doctor put it on record. Usually null
+   *  — the editor shows the field only when there is something in it. */
+  previous_history: string | null;
   advice: string | null;
   follow_up_date: string | null;
   issued_at: string | null;

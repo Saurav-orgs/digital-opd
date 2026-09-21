@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import type { Appointment } from '../api/types';
 import { Badge } from './ui';
 import { PhoneIcon } from './icons';
+import { displayStatus } from '../lib/appointmentStatus';
 
 /**
  * One past visit, as a card.
@@ -19,7 +20,7 @@ export function HistoryVisit({ visit: h }: { visit: Appointment }) {
         <Link to={`/appointments/${h.id}`} className="history-visit-date">
           {h.appointment_date} · {h.start_time?.slice(0, 5)}
         </Link>
-        <Badge value={h.consultation_status} />
+        <Badge value={displayStatus(h)} />
       </div>
 
       {h.doctor?.name && (

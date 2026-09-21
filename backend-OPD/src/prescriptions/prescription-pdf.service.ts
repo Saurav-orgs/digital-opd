@@ -172,6 +172,7 @@ export class PrescriptionPdfService {
       y = this.handwritingBody(doc, drawing, y, frame);
     } else {
       y = this.diagnosis(doc, prescription, y);
+      y = this.previousHistory(doc, prescription, y);
       y = this.treatmentAdvice(doc, medicines, prescription, y, frame);
     }
 
@@ -382,6 +383,36 @@ export class PrescriptionPdfService {
       .fontSize(11)
       .fillColor(COLOR.text)
       .text(p.diagnosis.trim(), MARGIN, contentY, {
+        width: CONTENT_W,
+        lineGap: 3,
+      });
+
+    return doc.y + 22;
+  }
+
+  // ── Previous history ───────────────────────────────────────
+  /** Same block as the diagnosis, under it. Skipped entirely when empty —
+   *  most prescriptions carry none and a heading with nothing under it
+   *  would only make the sheet longer. */
+  private previousHistory(
+    doc: PDFKit.PDFDocument,
+    p: EPrescription,
+    y: number,
+  ): number {
+    if (!p.previous_history?.trim()) return y;
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(12)
+      .fillColor(COLOR.ink)
+      .text('PREVIOUS HISTORY', MARGIN, y, { characterSpacing: 0.5 });
+
+    const contentY = doc.y + 4;
+    doc
+      .font('Helvetica')
+      .fontSize(11)
+      .fillColor(COLOR.text)
+      .text(p.previous_history.trim(), MARGIN, contentY, {
         width: CONTENT_W,
         lineGap: 3,
       });

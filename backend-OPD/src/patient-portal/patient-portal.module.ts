@@ -5,6 +5,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { PatientAuthModule } from '../patient-auth/patient-auth.module';
 import { ReportsModule } from '../reports/reports.module';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
+import { ConsultationsModule } from '../consultations/consultations.module';
 
 @Module({
   imports: [
@@ -13,6 +14,9 @@ import { PatientProfilesModule } from '../patient-profiles/patient-profiles.modu
     PatientAuthModule,
     ReportsModule,
     PatientProfilesModule,
+    // Provides PrescriptionsService: a "prescription ready" notification
+    // carries a fresh download link for the PDF.
+    ConsultationsModule,
   ],
   controllers: [PatientPortalController],
 })

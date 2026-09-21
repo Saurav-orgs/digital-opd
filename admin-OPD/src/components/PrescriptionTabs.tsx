@@ -101,6 +101,7 @@ export function PrescriptionTabs({
   });
   const hasDraft =
     !!draft?.diagnosis?.trim() ||
+    !!draft?.previous_history?.trim() ||
     !!draft?.advice?.trim() ||
     (draft?.medicines?.length ?? 0) > 0;
 

@@ -84,6 +84,7 @@ export class PrescriptionsService {
       // Editing the structured fields makes this a structured prescription.
       mode: PrescriptionMode.STRUCTURED,
       diagnosis: dto.diagnosis?.trim() || null,
+      previous_history: dto.previous_history?.trim() || null,
       advice: dto.advice?.trim() || null,
       follow_up_date: dto.follow_up_date || null,
     } as any);
@@ -592,6 +593,7 @@ export class PrescriptionsService {
       id: prescription.id,
       mode: prescription.mode,
       diagnosis: prescription.diagnosis,
+      previous_history: prescription.previous_history,
       advice: prescription.advice,
       follow_up_date: prescription.follow_up_date,
       issued_at: prescription.issued_at,
@@ -601,6 +603,50 @@ export class PrescriptionsService {
       ),
       medicines: medicines.map((m) => this.medicineView(m)),
     };
+  }
+
+  /**
+   * Fresh download links for a batch of prescriptions, keyed by prescription
+   * id. Only issued ones with a stored PDF appear — a withdrawn prescription
+   * simply has no entry, so whatever is showing the link shows nothing.
+   *
+   * Used to put a "download" button straight on the "your prescription is
+   * ready" notification, so the patient does not have to find the visit.
+   */
+  async pdfUrlsFor(prescriptionIds: string[]): Promise<Map<string, string>> {
+    const urls = new Map<string, string>();
+    if (prescriptionIds.length === 0) return urls;
+
+    const rows = await this.prescriptionModel.findAll({
+      where: {
+        id: { [Op.in]: prescriptionIds },
+        status: PrescriptionStatus.ISSUED,
+        pdf_key: { [Op.ne]: null },
+      },
+      attributes: ['id', 'pdf_key', 'appointment_id'],
+    });
+    if (rows.length === 0) return urls;
+
+    // The visit only lends the file its name (`prescription-<patient>-<date>.pdf`).
+    const appointments = await this.appointmentModel.findAll({
+      where: { id: { [Op.in]: rows.map((r) => r.appointment_id) } },
+      attributes: ['id', 'patient_name', 'appointment_date'],
+    });
+    const byId = new Map(appointments.map((a) => [a.id, a]));
+
+    await Promise.all(
+      rows.map(async (row) => {
+        const appointment = byId.get(row.appointment_id);
+        // Served as an attachment: this link sits behind a "download" button.
+        const url = await this.storage.presignedGetUrl(
+          row.pdf_key,
+          undefined,
+          appointment ? this.pdfFilename(appointment) : 'prescription.pdf',
+        );
+        if (url) urls.set(row.id, url);
+      }),
+    );
+    return urls;
   }
 
   // ── internals ──────────────────────────────────────────────
@@ -717,6 +763,7 @@ export class PrescriptionsService {
       ai_output: null,
       doctor_output: {
         diagnosis: prescription.diagnosis,
+        previous_history: prescription.previous_history,
         advice: prescription.advice,
         medicines: medicines.map((m) => this.medicineView(m)),
       },
@@ -804,6 +851,7 @@ export class PrescriptionsService {
       status: prescription.status,
       mode: prescription.mode,
       diagnosis: prescription.diagnosis,
+      previous_history: prescription.previous_history,
       advice: prescription.advice,
       follow_up_date: prescription.follow_up_date,
       issued_at: prescription.issued_at,

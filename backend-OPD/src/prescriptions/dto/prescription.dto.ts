@@ -71,6 +71,12 @@ export class UpdatePrescriptionDto {
   @MaxLength(1000)
   diagnosis?: string;
 
+  @ApiPropertyOptional({ example: 'Known diabetic for 10 years; allergic to penicillin' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  previous_history?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

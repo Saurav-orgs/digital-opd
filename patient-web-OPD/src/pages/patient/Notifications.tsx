@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, FileCheck, CalendarClock } from 'lucide-react';
+import { Bell, FileCheck, CalendarClock, Pill, Download } from 'lucide-react';
 import { patientApi } from '../../patientApi';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
@@ -43,7 +43,7 @@ export const Notifications: React.FC = () => {
             Notifications
           </h2>
           <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-            Updates about your reports and upcoming visits.
+            Updates about your prescriptions, reports and upcoming visits.
           </p>
         </div>
         {unreadCount > 0 && (
@@ -68,9 +68,11 @@ export const Notifications: React.FC = () => {
             const Icon =
               n.type === 'report_available'
                 ? FileCheck
-                : n.type === 'appointment_reminder' || n.type === 'appointment_rescheduled'
-                  ? CalendarClock
-                  : Bell;
+                : n.type === 'prescription_ready'
+                  ? Pill
+                  : n.type === 'appointment_reminder' || n.type === 'appointment_rescheduled'
+                    ? CalendarClock
+                    : Bell;
             return (
               <div
                 key={n.id}
@@ -93,6 +95,33 @@ export const Notifications: React.FC = () => {
                   )}
                   {n.body && (
                     <div style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>{n.body}</div>
+                  )}
+                  {n.pdf_url && (
+                    <a
+                      href={n.pdf_url}
+                      // The link is served as an attachment, so this saves the
+                      // file in place rather than navigating away.
+                      download
+                      className="btn-primary"
+                      // Opening the PDF is the whole point of this notification, so
+                      // reading it also counts as reading the bell entry.
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!n.read_at) markRead.mutate(n.id);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        marginTop: '10px',
+                        padding: '8px 14px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <Download size={14} /> Download prescription
+                    </a>
                   )}
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
                     {new Date(n.createdAt).toLocaleString()}

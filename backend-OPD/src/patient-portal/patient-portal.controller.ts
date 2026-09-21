@@ -25,6 +25,8 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReportsService } from '../reports/reports.service';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
+import { PrescriptionsService } from '../prescriptions/prescriptions.service';
+import { NotificationType } from '../common/enums';
 import { CreateOwnReportDto } from '../reports/dto/create-own-report.dto';
 import { UpdateOwnReportDto } from '../reports/dto/update-own-report.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -49,6 +51,7 @@ export class PatientPortalController {
     private readonly notifications: NotificationsService,
     private readonly reports: ReportsService,
     private readonly profiles: PatientProfilesService,
+    private readonly prescriptions: PrescriptionsService,
   ) {}
 
   @Get('appointments')
@@ -175,11 +178,27 @@ export class PatientPortalController {
     @Query('profile_id') profileId?: string,
   ) {
     if (profileId) await this.assertOwnPatient(patient, profileId);
-    return this.notifications.listForPatient(
+    const items = await this.notifications.listForPatient(
       patient.mobile,
       doctorId ?? null,
       profileId ?? null,
     );
+
+    // A "prescription ready" notification gets a fresh download link so the
+    // patient can open the PDF from the bell instead of hunting for the visit.
+    // Minted per request (short-lived presigned URL) and only while the
+    // prescription is still issued — withdraw it and the button disappears.
+    const prescriptionIds = items
+      .filter((n) => n.type === NotificationType.PRESCRIPTION_READY)
+      .map((n) => n.data?.prescriptionId)
+      .filter((id): id is string => typeof id === 'string');
+    const pdfUrls = await this.prescriptions.pdfUrlsFor(prescriptionIds);
+
+    return items.map((n) => {
+      const id = n.data?.prescriptionId;
+      const pdf_url = typeof id === 'string' ? (pdfUrls.get(id) ?? null) : null;
+      return { ...n.toJSON(), pdf_url };
+    });
   }
 
   @Get('notifications/unread-count')

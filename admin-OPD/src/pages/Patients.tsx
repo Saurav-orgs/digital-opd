@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { patientProfilesApi } from '../api/endpoints';
+import { blockedNumbersApi, patientProfilesApi } from '../api/endpoints';
 import type { ClinicPatient } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { Empty, Loading } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
@@ -34,6 +35,19 @@ export default function PatientsPage() {
   });
 
   const rows = useMemo(() => data ?? [], [data]);
+
+  // A blocked patient is flagged on the list so the desk can see it without
+  // opening the profile — or the Blocked screen — first.
+  const { can } = useAuth();
+  const blockedQ = useQuery({
+    queryKey: ['blocked-numbers'],
+    queryFn: blockedNumbersApi.list,
+    enabled: can('appointments', 'read'),
+  });
+  const blockedMobiles = useMemo(
+    () => new Set((blockedQ.data ?? []).map((b) => b.mobile)),
+    [blockedQ.data],
+  );
 
   return (
     <>
@@ -75,7 +89,12 @@ export default function PatientsPage() {
         ) : narrow ? (
           <div className="appt-cards">
             {rows.map((p) => (
-              <PatientCard key={p.id} p={p} onOpen={() => navigate(`/patients/${p.id}`)} />
+              <PatientCard
+                key={p.id}
+                p={p}
+                blocked={blockedMobiles.has(p.mobile)}
+                onOpen={() => navigate(`/patients/${p.id}`)}
+              />
             ))}
           </div>
         ) : (
@@ -106,6 +125,9 @@ export default function PatientsPage() {
                           {initials(p.name)}
                         </span>
                         {p.name}
+                        {blockedMobiles.has(p.mobile) && (
+                          <span className="appt-badge cancelled">Blocked</span>
+                        )}
                       </span>
                     </td>
                     <td className="muted">{p.mobile || '—'}</td>
@@ -132,7 +154,15 @@ export default function PatientsPage() {
  * number — so the two screens read as one app. The badge on the right is the
  * last visit, with the visit count above it in place of the time.
  */
-function PatientCard({ p, onOpen }: { p: ClinicPatient; onOpen: () => void }) {
+function PatientCard({
+  p,
+  blocked,
+  onOpen,
+}: {
+  p: ClinicPatient;
+  blocked: boolean;
+  onOpen: () => void;
+}) {
   const who = [shortGender(p.gender), ageOf(p)].filter(Boolean).join(' · ');
   return (
     <button type="button" className="appt-card" onClick={onOpen}>
@@ -143,6 +173,7 @@ function PatientCard({ p, onOpen }: { p: ClinicPatient; onOpen: () => void }) {
         <div className="appt-body">
           <div className="appt-card-top">
             <span className="appt-card-name">{p.name}</span>
+            {blocked && <span className="appt-badge cancelled">Blocked</span>}
           </div>
           {who && <div className="appt-meta">{who}</div>}
           {p.mobile && (

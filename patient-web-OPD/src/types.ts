@@ -156,6 +156,8 @@ export interface IssuedMedicine {
 export interface IssuedPrescription {
   id: string;
   diagnosis: string | null;
+  /** Background the doctor put on record; absent on most prescriptions. */
+  previous_history?: string | null;
   advice: string | null;
   follow_up_date: string | null;
   issued_at: string | null;
@@ -176,6 +178,8 @@ export interface PatientNotification {
   title: string;
   body: string | null;
   data: Record<string, unknown> | null;
+  /** `prescription_ready` only: a fresh link to the issued PDF, or null once withdrawn. */
+  pdf_url?: string | null;
   read_at: string | null;
   createdAt: string;
 }

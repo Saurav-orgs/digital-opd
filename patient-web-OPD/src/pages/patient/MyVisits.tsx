@@ -319,6 +319,11 @@ const PrescriptionCard: React.FC<{ prescription: IssuedPrescription }> = ({
         <strong>Diagnosis:</strong> {p.diagnosis}
       </p>
     )}
+    {p.previous_history && (
+      <p style={{ margin: '0 0 8px', fontSize: '13.5px' }}>
+        <strong>Previous history:</strong> {p.previous_history}
+      </p>
+    )}
 
     {p.medicines.length > 0 && (
       <ol style={{ margin: '0 0 8px 18px', padding: 0, fontSize: '13.5px' }}>

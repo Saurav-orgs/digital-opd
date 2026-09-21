@@ -140,6 +140,9 @@ const STATUS_LABEL: Record<string, string> = {
   done: 'Completed',
   rejected: 'Cancelled',
   no_show: 'No-show',
+  // Not a stored status: a `pending` visit whose day has gone by, see
+  // `lib/appointmentStatus`.
+  missed: 'Missed',
 };
 
 /**

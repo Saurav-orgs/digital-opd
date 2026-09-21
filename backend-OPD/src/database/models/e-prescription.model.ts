@@ -61,6 +61,11 @@ export class EPrescription extends Model<EPrescription> {
   @Column({ type: DataType.TEXT, allowNull: true })
   diagnosis: string | null;
 
+  /** The patient's background as the doctor put it on record — spoken or
+   *  typed only when it matters for today's prescription, so usually null. */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  previous_history: string | null;
+
   @Column({ type: DataType.TEXT, allowNull: true })
   advice: string | null;
 

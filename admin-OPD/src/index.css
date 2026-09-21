@@ -842,6 +842,23 @@ img {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Stands where the mic was, same footprint, so the status line and clock
+   under it do not jump when the button gives way to the spinner. */
+.mic-busy {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--neutral-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mic-busy .spinner {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+  border-top-color: var(--berry);
+}
 .mic-btn.recording {
   background: var(--danger);
   animation: micPulse 1.4s infinite;
@@ -1132,7 +1149,8 @@ tr.appt-row.upcoming td:first-child {
 }
 /* A no-show is the patient's doing, not the clinic's — it reads as a warning
    rather than the error colour a cancellation carries. */
-.badge-no_show {
+.badge-no_show,
+.badge-missed {
   color: var(--marigold-dark);
   background: var(--marigold-tint);
 }
@@ -2240,7 +2258,8 @@ tr.appt-row.upcoming td:first-child {
   background: var(--berry-tint);
   color: var(--berry-dark);
 }
-.appt-badge.no-show {
+.appt-badge.no-show,
+.appt-badge.missed {
   background: var(--marigold-tint);
   color: var(--marigold-dark);
 }
