@@ -10,6 +10,8 @@ import {
   AccountIcon,
   BlockIcon,
   CalendarIcon,
+  WalletIcon,
+  ReceiptIcon,
   ChevronIcon,
   DocumentIcon,
   FlaskIcon,
@@ -28,6 +30,8 @@ const NAV_ICON: Record<NavIconName, (props: { size?: string | number }) => JSX.E
   roles: ShieldIcon,
   hospital: HospitalIcon,
   settings: GearIcon,
+  wallet: WalletIcon,
+  receipt: ReceiptIcon,
   flask: FlaskIcon,
   document: DocumentIcon,
 };

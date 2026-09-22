@@ -51,6 +51,13 @@ export class User extends Model<User> {
   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: true })
   is_active: boolean;
 
+  /**
+   * Opened through the paid sign-up: sign-in needs an active subscription.
+   * False for every account that predates plans, which are not gated.
+   */
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+  subscription_required: boolean;
+
   @BelongsTo(() => Role)
   role: Role;
 

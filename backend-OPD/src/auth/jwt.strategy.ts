@@ -6,6 +6,7 @@ import { UsersService } from '../users/users.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
 
 export interface JwtPayload {
   sub: string;
@@ -18,6 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     private readonly usersService: UsersService,
+    private readonly subscriptionAccess: SubscriptionAccessService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -32,6 +34,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new AppException(ErrorCode.ACCOUNT_DISABLED);
     }
+    // A plan that lapses mid-session ends the session; tokens live a day.
+    await this.subscriptionAccess.assertAccess({
+      id: user.id,
+      type: user.type,
+      doctor_id: user.doctorId,
+      subscription_required: user.subscriptionRequired,
+    });
     return user;
   }
 }

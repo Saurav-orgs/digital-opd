@@ -23,6 +23,12 @@ interface AuthContextValue {
   isDoctor: boolean;
   /** True when the logged-in account is the platform super-admin. */
   isSuperAdmin: boolean;
+  /**
+   * A paid account that has not built its clinic yet — it signed in, but
+   * `doctorId` is still null. Every screen is gated on this until the
+   * profile form has run.
+   */
+  needsSetup: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -76,10 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Doctor: has a doctorId and type=doctor (or legacy super_admin with doctorId).
   const isDoctor = !!user?.doctorId && (user.type === 'doctor' || user.type === 'super_admin');
   const isSuperAdmin = user?.type === 'super_admin';
+  // A doctor account bought through the landing page has no tenant until the
+  // first-login profile form creates one.
+  const needsSetup = !!user && user.type === 'doctor' && !user.doctorId;
 
   const value = useMemo(
-    () => ({ user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin }),
-    [user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin],
+    () => ({ user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin, needsSetup }),
+    [user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin, needsSetup],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -359,6 +359,7 @@ export class UsersService {
       roleId: user.role_id,
       roleName: user.role?.name ?? null,
       doctorId: user.doctor_id,
+      subscriptionRequired: !!user.subscription_required,
       permissions,
     };
   }

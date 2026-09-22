@@ -6,3 +6,5 @@ opd-appointment-system-plan.md
 .env.local
 **/.env
 **/.env.local
+.design-ref/
+.DS_Store

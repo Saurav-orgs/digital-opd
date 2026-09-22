@@ -6,6 +6,8 @@ import type { PermModule } from '../api/types';
  */
 export type NavIconName =
   | 'calendar'
+  | 'wallet'
+  | 'receipt'
   | 'people'
   | 'block'
   | 'users'
@@ -35,6 +37,12 @@ export interface NavItem {
 /** Sidebar config — rendered dynamically from the user's read permissions. */
 export const NAV: NavItem[] = [
   { path: '/doctors', label: 'Doctors', module: 'doctors', icon: 'hospital', superAdminOnly: true },
+  // Billing — the platform's own business, so super-admin only, next to the
+  // tenants it bills. `doctors` is the permission behind them; the controller
+  // narrows to the super admin, the same way Settings does.
+  { path: '/plans', label: 'Plans', module: 'doctors', icon: 'wallet', superAdminOnly: true },
+  { path: '/subscriptions', label: 'Subscriptions', module: 'doctors', icon: 'receipt', superAdminOnly: true },
+  { path: '/payment-log', label: 'Payment log', module: 'doctors', icon: 'receipt', superAdminOnly: true },
   { path: '/settings', label: 'Settings', module: 'doctors', icon: 'settings', superAdminOnly: true },
   // Clinic-side screens: the platform super-admin manages doctors, not patients.
   // One screen, one permission: the counters on top of the list are not a

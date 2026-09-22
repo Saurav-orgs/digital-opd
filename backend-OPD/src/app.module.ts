@@ -30,6 +30,7 @@ import { ReportsModule } from './reports/reports.module';
 import { PathlabsModule } from './pathlabs/pathlabs.module';
 import { MedicinesModule } from './medicines/medicines.module';
 import { ConsultationsModule } from './consultations/consultations.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { HealthController } from './health/health.controller';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -91,6 +92,8 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     PathlabsModule,
     MedicinesModule,
     ConsultationsModule,
+    // Paid sign-up: plans, the Cashfree order and its webhook.
+    SubscriptionsModule,
   ],
   controllers: [HealthController],
   providers: [

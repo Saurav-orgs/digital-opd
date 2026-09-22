@@ -23,6 +23,9 @@ import { EmailVerification } from './email-verification.model';
 import { PasswordReset } from './password-reset.model';
 import { MobileVerification } from './mobile-verification.model';
 import { WhatsAppMessage } from './whatsapp-message.model';
+import { Subscription } from './subscription.model';
+import { Plan } from './plan.model';
+import { PaymentEvent } from './payment-event.model';
 
 export const models = [
   Role,
@@ -50,6 +53,9 @@ export const models = [
   PasswordReset,
   MobileVerification,
   WhatsAppMessage,
+  Subscription,
+  Plan,
+  PaymentEvent,
 ];
 
 export {
@@ -74,4 +80,7 @@ export {
   MedicineCatalog,
   AiTrainingSample,
   ActivityLog,
+  Subscription,
+  Plan,
+  PaymentEvent,
 };

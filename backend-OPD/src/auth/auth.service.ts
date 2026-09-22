@@ -25,6 +25,7 @@ import { ActivityAction, ActivityActor } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { DoctorVerificationStatus } from '../common/enums';
 import { User } from '../database/models/user.model';
+import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
 
 /** How long a sign-up code is good for, and how long a verified email stays usable. */
 const CODE_MINUTES = 10;
@@ -48,6 +49,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly activity: ActivityLogService,
     private readonly mail: MailService,
+    private readonly subscriptionAccess: SubscriptionAccessService,
     config: ConfigService,
     @InjectModel(EmailVerification)
     private readonly verificationModel: typeof EmailVerification,
@@ -350,6 +352,10 @@ export class AuthService {
       }
       throw new AppException(ErrorCode.ACCOUNT_DISABLED);
     }
+
+    // A paid-plan account with nothing paid — or a plan that has run out —
+    // stops here, with a message that says which and what to do about it.
+    await this.subscriptionAccess.assertAccess(user);
 
     const principal = UsersService.toAuthUser(user);
 

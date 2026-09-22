@@ -6,6 +6,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
 import * as QRCode from 'qrcode';
 import { Sequelize } from 'sequelize-typescript';
+import type { Transaction } from 'sequelize';
 import { Doctor } from '../database/models/doctor.model';
 import { Permission } from '../database/models/permission.model';
 import { Role } from '../database/models/role.model';
@@ -14,9 +15,9 @@ import { User } from '../database/models/user.model';
 import { OpdSchedule } from '../database/models/opd-schedule.model';
 import { ScheduleException } from '../database/models/schedule-exception.model';
 import { CreateDoctorDto, UpdateDoctorDto } from './dto/doctor.dto';
-import { RegisterDoctorDto } from './dto/register-doctor.dto';
+import { RegisterDoctorDto, SetupProfileDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
-import { toEmbeddableImage } from '../uploads/letterhead-image';
+import { prepareHeaderImage } from '../uploads/letterhead-image';
 import { ActivityLogService } from '../activity/activity-log.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -281,16 +282,17 @@ export class DoctorsService {
   /**
    * Upload the doctor's own prescription header — the top strip of their pad
    * as one image. Any common image format is accepted; what is stored is
-   * always PNG or JPEG, because those are what pdfkit can embed (see
-   * `toEmbeddableImage`).
+   * always PNG or JPEG with its border trimmed, because those are what
+   * pdfkit can embed edge to edge (see `prepareHeaderImage`), along with its
+   * shape so the PDF can size the header box to it.
    */
   async uploadLetterheadHeader(id: string, file: Express.Multer.File) {
     const doctor = await this.getOrFail(id);
     if (!file) throw new AppException(ErrorCode.FILE_REQUIRED);
-    const image = await toEmbeddableImage(file);
+    const { file: image, ratio } = await prepareHeaderImage(file);
     const { key } = await this.storage.uploadImage(image, `doctors/${id}/letterhead-header`);
     if (doctor.letterhead_header_key) await this.storage.delete(doctor.letterhead_header_key);
-    await doctor.update({ letterhead_header_key: key } as any);
+    await doctor.update({ letterhead_header_key: key, letterhead_header_ratio: ratio } as any);
     return this.toView(doctor);
   }
 
@@ -298,7 +300,7 @@ export class DoctorsService {
   async removeLetterheadHeader(id: string) {
     const doctor = await this.getOrFail(id);
     const key = doctor.letterhead_header_key;
-    await doctor.update({ letterhead_header_key: null } as any);
+    await doctor.update({ letterhead_header_key: null, letterhead_header_ratio: null } as any);
     if (key) {
       try {
         await this.storage.delete(key);
@@ -383,78 +385,15 @@ export class DoctorsService {
      */
     const availability = parseAvailability(dto.availability);
     const vacations = parseVacations(dto.vacations);
-
-    // Upload before the transaction: an S3 failure should not leave a
-    // half-written tenant behind, and an orphaned object is the cheaper leak.
-    // Both files are optional — the certificate can follow later.
-    let key: string | null = null;
-    if (license) {
-      this.storage.validateDocument(license);
-      ({ key } = await this.storage.uploadDocument(license, 'doctor-licenses'));
-    }
-    let photoKey: string | null = null;
-    if (photo) {
-      ({ key: photoKey } = await this.storage.uploadImage(photo, 'doctor-photos'));
-    }
-    // The pad header is optional at sign-up — the form says "skip" — and it
-    // is the one upload here with a shape rule, the same one the letterhead
-    // screen applies later. The key is written before the doctor id exists,
-    // so it lives under the registrations prefix rather than the doctor's.
-    let headerKey: string | null = null;
-    if (letterheadHeader) {
-      ({ key: headerKey } = await this.storage.uploadImage(
-        await toEmbeddableImage(letterheadHeader),
-        'doctor-letterheads',
-      ));
-    }
+    const uploads = await this.uploadProfileFiles(license, photo, letterheadHeader);
 
     const registered = await this.sequelize.transaction(async (t) => {
-      const slug = await this.uniqueSlug(dto.name);
-      const doctor = await this.doctorModel.create(
-        {
-          name: dto.name,
-          specialization: dto.specialization ?? null,
-          qualifications: dto.qualifications ?? null,
-          contact_mobile: dto.contact_mobile,
-          license_number: dto.license_number,
-          license_file_key: key,
-          profile_photo_url: photoKey,
-          letterhead_header_key: headerKey,
-          clinic_name: dto.clinic_name ?? null,
-          clinic_address: dto.clinic_address ?? null,
-          public_slug: slug,
-          terms_accepted_at: new Date(),
-          terms_version: dto.terms_version ?? null,
-          // ── Licence review is no longer a gate ──────────────────
-          // Registration used to land inert — no login, no booking link —
-          // until a super admin opened the licence. The client asked for that
-          // wait to go, so the account comes up live and the licence is
-          // reviewed after the fact rather than before.
-          //
-          // To put the gate back: set these two to `false` /
-          // `DoctorVerificationStatus.PENDING`, flip `is_active` on the user
-          // below to false, and restore the "we will verify" copy on the
-          // registration page. The approve/reject endpoints and the super
-          // admin's pending panel were left in place for exactly that.
-          is_enabled: true,
-          verification_status: DoctorVerificationStatus.APPROVED,
-        } as any,
-        { transaction: t },
-      );
-
-      const doctorRole = await this.createTenantRole(
-        'Doctor',
-        'Full clinical access for this tenant.',
-        TENANT_DOCTOR_PERMS,
-        doctor.id,
+      const { doctor, doctorRole } = await this.createTenantRecords(
         t,
-      );
-      await this.createTenantRole(
-        'Pathlab',
-        'Report upload access for this tenant.',
-        TENANT_PATHLAB_PERMS,
-        doctor.id,
-        t,
+        dto,
+        uploads,
+        availability,
+        vacations,
       );
 
       const login = await this.userModel.create(
@@ -465,49 +404,11 @@ export class DoctorsService {
           type: UserType.DOCTOR,
           role_id: doctorRole.id,
           doctor_id: doctor.id,
-          // Live immediately — see the note on the doctor row above.
+          // Live immediately — see the note on the doctor row in createTenantRecords.
           is_active: true,
         } as any,
         { transaction: t },
       );
-
-      /*
-       * Opening hours, written inside the same transaction as the account. The
-       * sign-up form now collects each day's own sessions, so a doctor with a
-       * morning and an evening clinic sets both here; every session becomes one
-       * `opd_schedules` row, and a weekday may own several of them.
-       */
-      if (availability && availability.sessions.length) {
-        await this.scheduleModel.bulkCreate(
-          availability.sessions.map((session) => ({
-            doctor_id: doctor.id,
-            day_of_week: session.day_of_week,
-            start_time: session.start_time,
-            end_time: session.end_time,
-            slot_duration_min: availability.slot_duration_min,
-            is_active: true,
-          })) as any,
-          { transaction: t },
-        );
-      }
-
-      // Leave is stored a date at a time, so a range is expanded here rather
-      // than kept as a span — that is the shape the slot grid already reads.
-      if (vacations.length) {
-        const rows = vacations.flatMap((v) =>
-          expandDates(v.from, v.to).map((date) => ({
-            doctor_id: doctor.id,
-            date,
-            type: ScheduleExceptionType.LEAVE,
-            // Kept per date so the schedule screen can fold the span back
-            // together — same reason on consecutive days reads as one entry.
-            reason: v.reason,
-          })),
-        );
-        if (rows.length) {
-          await this.exceptionModel.bulkCreate(rows as any, { transaction: t });
-        }
-      }
 
       return {
         id: doctor.id,
@@ -520,6 +421,211 @@ export class DoctorsService {
     // booking link follows.
     await this.syncQr(registered.id);
     return registered;
+  }
+
+  /**
+   * First sign-in after a paid sign-up: the account exists (email, password,
+   * an active subscription) but no clinic does. This takes the same profile
+   * the old registration form collected and builds the tenant around the
+   * existing login — doctor row, roles, opening hours — then attaches it.
+   *
+   * Refused for anyone who already has a clinic; there is nothing to set up.
+   */
+  async setupForUser(
+    userId: string,
+    dto: SetupProfileDto,
+    license?: Express.Multer.File,
+    photo?: Express.Multer.File,
+    letterheadHeader?: Express.Multer.File,
+  ): Promise<{ id: string; userId: string }> {
+    const user = await this.userModel.findByPk(userId);
+    if (!user || user.type !== UserType.DOCTOR) {
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'Only a doctor account can set up a practice.',
+      });
+    }
+    if (user.doctor_id) {
+      throw new AppException(ErrorCode.CONFLICT, {
+        message: 'Your practice is already set up.',
+      });
+    }
+
+    const availability = parseAvailability(dto.availability);
+    const vacations = parseVacations(dto.vacations);
+    const uploads = await this.uploadProfileFiles(license, photo, letterheadHeader);
+
+    const doctorId = await this.sequelize.transaction(async (t) => {
+      const { doctor, doctorRole } = await this.createTenantRecords(
+        t,
+        dto,
+        uploads,
+        availability,
+        vacations,
+      );
+      await user.update(
+        { name: dto.name, role_id: doctorRole.id, doctor_id: doctor.id } as any,
+        { transaction: t },
+      );
+      return doctor.id;
+    });
+
+    await this.syncQr(doctorId);
+    this.activity.record({
+      action: ActivityAction.DOCTOR_PROFILE_COMPLETED,
+      actor_type: ActivityActor.USER,
+      actor_id: user.id,
+      actor_label: `${dto.name} (${user.email})`,
+      doctor_id: doctorId,
+      summary: `${dto.name} completed their practice profile.`,
+      entity_type: 'doctor',
+      entity_id: doctorId,
+    });
+    return { id: doctorId, userId: user.id };
+  }
+
+  /**
+   * The optional files a profile arrives with. Uploaded before the
+   * transaction: an S3 failure should not leave a half-written tenant
+   * behind, and an orphaned object is the cheaper leak.
+   */
+  private async uploadProfileFiles(
+    license?: Express.Multer.File,
+    photo?: Express.Multer.File,
+    letterheadHeader?: Express.Multer.File,
+  ): Promise<{
+    licenseKey: string | null;
+    photoKey: string | null;
+    headerKey: string | null;
+    headerRatio: number | null;
+  }> {
+    let licenseKey: string | null = null;
+    if (license) {
+      this.storage.validateDocument(license);
+      ({ key: licenseKey } = await this.storage.uploadDocument(license, 'doctor-licenses'));
+    }
+    let photoKey: string | null = null;
+    if (photo) {
+      ({ key: photoKey } = await this.storage.uploadImage(photo, 'doctor-photos'));
+    }
+    // The pad header is optional at sign-up — the form says "skip" — and it
+    // is the one upload here with a shape rule, the same one the letterhead
+    // screen applies later. The key is written before the doctor id exists,
+    // so it lives under the registrations prefix rather than the doctor's.
+    let headerKey: string | null = null;
+    let headerRatio: number | null = null;
+    if (letterheadHeader) {
+      const prepared = await prepareHeaderImage(letterheadHeader);
+      headerRatio = prepared.ratio;
+      ({ key: headerKey } = await this.storage.uploadImage(prepared.file, 'doctor-letterheads'));
+    }
+    return { licenseKey, photoKey, headerKey, headerRatio };
+  }
+
+  /**
+   * Everything a clinic is, except its login: the doctor row, the tenant's
+   * Doctor and Pathlab roles, opening hours and booked leave. Shared by
+   * the old one-shot registration and the paid flow's first-login setup.
+   */
+  private async createTenantRecords(
+    t: Transaction,
+    dto: SetupProfileDto,
+    uploads: {
+      licenseKey: string | null;
+      photoKey: string | null;
+      headerKey: string | null;
+      headerRatio: number | null;
+    },
+    availability: ParsedAvailability | null,
+    vacations: ReturnType<typeof parseVacations>,
+  ): Promise<{ doctor: Doctor; doctorRole: Role }> {
+    const slug = await this.uniqueSlug(dto.name);
+    const doctor = await this.doctorModel.create(
+      {
+        name: dto.name,
+        specialization: dto.specialization ?? null,
+        qualifications: dto.qualifications ?? null,
+        contact_mobile: dto.contact_mobile,
+        license_number: dto.license_number,
+        license_file_key: uploads.licenseKey,
+        profile_photo_url: uploads.photoKey,
+        letterhead_header_key: uploads.headerKey,
+        letterhead_header_ratio: uploads.headerRatio,
+        clinic_name: dto.clinic_name ?? null,
+        clinic_address: dto.clinic_address ?? null,
+        public_slug: slug,
+        terms_accepted_at: new Date(),
+        terms_version: dto.terms_version ?? null,
+        // ── Licence review is no longer a gate ──────────────────
+        // Registration used to land inert — no login, no booking link —
+        // until a super admin opened the licence. The client asked for that
+        // wait to go, so the account comes up live and the licence is
+        // reviewed after the fact rather than before.
+        //
+        // To put the gate back: set these two to `false` /
+        // `DoctorVerificationStatus.PENDING`, flip `is_active` on the user
+        // to false, and restore the "we will verify" copy on the
+        // registration page. The approve/reject endpoints and the super
+        // admin's pending panel were left in place for exactly that.
+        is_enabled: true,
+        verification_status: DoctorVerificationStatus.APPROVED,
+      } as any,
+      { transaction: t },
+    );
+
+    const doctorRole = await this.createTenantRole(
+      'Doctor',
+      'Full clinical access for this tenant.',
+      TENANT_DOCTOR_PERMS,
+      doctor.id,
+      t,
+    );
+    await this.createTenantRole(
+      'Pathlab',
+      'Report upload access for this tenant.',
+      TENANT_PATHLAB_PERMS,
+      doctor.id,
+      t,
+    );
+
+    /*
+     * Opening hours, written inside the same transaction as the account. The
+     * sign-up form now collects each day's own sessions, so a doctor with a
+     * morning and an evening clinic sets both here; every session becomes one
+     * `opd_schedules` row, and a weekday may own several of them.
+     */
+    if (availability && availability.sessions.length) {
+      await this.scheduleModel.bulkCreate(
+        availability.sessions.map((session) => ({
+          doctor_id: doctor.id,
+          day_of_week: session.day_of_week,
+          start_time: session.start_time,
+          end_time: session.end_time,
+          slot_duration_min: availability.slot_duration_min,
+          is_active: true,
+        })) as any,
+        { transaction: t },
+      );
+    }
+
+    // Leave is stored a date at a time, so a range is expanded here rather
+    // than kept as a span — that is the shape the slot grid already reads.
+    if (vacations.length) {
+      const rows = vacations.flatMap((v) =>
+        expandDates(v.from, v.to).map((date) => ({
+          doctor_id: doctor.id,
+          date,
+          type: ScheduleExceptionType.LEAVE,
+          // Kept per date so the schedule screen can fold the span back
+          // together — same reason on consecutive days reads as one entry.
+          reason: v.reason,
+        })),
+      );
+      if (rows.length) {
+        await this.exceptionModel.bulkCreate(rows as any, { transaction: t });
+      }
+    }
+
+    return { doctor, doctorRole };
   }
 
   /** Registrations waiting on the super admin, with a link to the licence. */
@@ -934,6 +1040,7 @@ export class DoctorsService {
       profile_photo_url: this.storage.publicUrl(d.profile_photo_url),
       clinic_logo_url: this.storage.publicUrl(d.clinic_logo_key),
       letterhead_header_url: this.storage.publicUrl(d.letterhead_header_key),
+      letterhead_header_ratio: d.letterhead_header_ratio,
       qr_code_url: this.storage.publicUrl(d.qr_code_key),
       // Same resolver the QR is rendered from — the link shown and the link
       // encoded must not be able to drift apart.

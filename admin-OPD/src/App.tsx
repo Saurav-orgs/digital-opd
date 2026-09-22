@@ -14,6 +14,9 @@ import AppointmentPage from './pages/AppointmentPage';
 import PatientHistoryPage from './pages/PatientHistoryPage';
 import DoctorsPage from './pages/Doctors';
 import SettingsPage from './pages/Settings';
+import PlansPage from './pages/Plans';
+import SubscriptionsPage from './pages/Subscriptions';
+import PaymentLogPage from './pages/PaymentLog';
 import BlockedNumbersPage from './pages/BlockedNumbers';
 import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
@@ -24,10 +27,23 @@ import ForgotPassword from './pages/ForgotPassword';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, needsSetup } = useAuth();
   if (loading) return <div className="center-screen"><Loading /></div>;
   if (!user) return <Navigate to="/login" replace />;
+  // A paid account with no clinic yet has nothing to show on any screen —
+  // no appointments, no schedule, no letterhead — so it goes to the profile
+  // form first. Every route inside the shell is behind this.
+  if (needsSetup) return <Navigate to="/setup" replace />;
   return <>{children}</>;
+}
+
+/** The first-login profile form. Only reachable while the clinic is missing. */
+function SetupRoute() {
+  const { user, loading, needsSetup } = useAuth();
+  if (loading) return <div className="center-screen"><Loading /></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!needsSetup) return <Navigate to="/" replace />;
+  return <DoctorRegisterPage mode="setup" />;
 }
 
 /** Landing route: first module the user can see. */
@@ -48,6 +64,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<DoctorRegisterPage />} />
+      <Route path="/setup" element={<SetupRoute />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route
         element={
@@ -70,6 +87,9 @@ export default function App() {
         <Route path="/doctors" element={<DoctorsPage />} />
         <Route path="/doctors/:doctorId" element={<DoctorDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/plans" element={<PlansPage />} />
+        <Route path="/subscriptions" element={<SubscriptionsPage />} />
+        <Route path="/payment-log" element={<PaymentLogPage />} />
         <Route path="/blocked-numbers" element={<BlockedNumbersPage />} />
         <Route path="/patients" element={<PatientsPage />} />
         <Route path="/patients/:profileId" element={<PatientDetailPage />} />

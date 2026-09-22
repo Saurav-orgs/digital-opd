@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi, doctorsApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
+import { MyPlanCard } from '../components/MyPlanCard';
 import { Empty, Field, Loading, PasswordInput } from '../components/ui';
 import { ShareQrButton } from '../components/BookingQr';
 
@@ -138,6 +139,8 @@ export default function Profile() {
         </div>
 
         <div className="stack">
+          <MyPlanCard />
+
           <ChangePasswordCard />
 
           <div className="card">

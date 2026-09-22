@@ -165,6 +165,27 @@ export function GearIcon(props: IconProps) {
   );
 }
 
+/** Plans — a card, because a plan is what the doctor pays for. */
+export function WalletIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="5.5" width="19" height="13" rx="2.5" />
+      <path d="M2.5 10h19" />
+      <path d="M16.5 14.5h2" />
+    </Icon>
+  );
+}
+
+/** Subscriptions and the payment log — a receipt. */
+export function ReceiptIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 2.5h14v19l-2.3-1.6-2.4 1.6-2.3-1.6-2.4 1.6L7.3 20 5 21.5z" />
+      <path d="M9 8h6M9 12h6" />
+    </Icon>
+  );
+}
+
 export function FlaskIcon(props: IconProps) {
   return (
     <Icon {...props}>

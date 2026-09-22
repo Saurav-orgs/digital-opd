@@ -11,6 +11,8 @@ export interface AuthUser {
   /** The role's display name, for the header — null for a role-less account. */
   roleName: string | null;
   doctorId: string | null;
+  /** Opened through the paid sign-up — sign-in depends on an active plan. */
+  subscriptionRequired: boolean;
   permissions: string[]; // "module:action" strings
 }
 

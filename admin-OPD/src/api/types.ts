@@ -21,6 +21,8 @@ export interface AuthUser {
   /** The role's name, shown beside the user's own on the header. */
   roleName: string | null;
   doctorId: string | null;
+  /** Opened through the paid sign-up — a null doctorId then means "profile not set up yet". */
+  subscriptionRequired: boolean;
   permissions: string[]; // "module:action"
 }
 
@@ -76,6 +78,11 @@ export interface Doctor {
   clinic_logo_url: string | null;
   /** The doctor's own uploaded pad header, drawn as the PDF header when set. */
   letterhead_header_url?: string | null;
+  /**
+   * Width ÷ height of that image. The PDF sizes the header to it; null for
+   * one uploaded before it was measured, which prints in the old fixed box.
+   */
+  letterhead_header_ratio?: number | null;
 }
 
 /** A doctor as the super admin reviews them: profile plus the licence on file. */
@@ -359,4 +366,122 @@ export interface BlockedNumber {
   blocked_by?: { id: string; name: string } | null;
   /** Everyone registered on the number; empty when nobody is yet. */
   patients?: { id: string; name: string; patient_code: string }[];
+}
+
+// ── Billing: plans, subscriptions and the payment log ─────────
+
+export interface PlanPrice {
+  base: number;
+  gstRate: number;
+  gst: number;
+  total: number;
+}
+
+export interface Plan {
+  id: string;
+  /** Stable code the landing page links to (`/signup?plan=…`). */
+  code: string;
+  name: string;
+  tagline: string | null;
+  /** Rupees per month, before GST. */
+  monthly: number;
+  months: number;
+  isActive: boolean;
+  isRecommended: boolean;
+  sortOrder: number;
+  price: PlanPrice;
+  /** Doctors on this plan right now. Super-admin list only. */
+  activeCount?: number;
+}
+
+export interface PlanInput {
+  code?: string;
+  name?: string;
+  tagline?: string;
+  monthly_amount?: number;
+  months?: number;
+  is_active?: boolean;
+  is_recommended?: boolean;
+  sort_order?: number;
+}
+
+export type SubscriptionStatus =
+  | 'pending'
+  | 'active'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export interface Subscription {
+  id: string;
+  status: SubscriptionStatus;
+  planCode: string;
+  planName: string;
+  months: number;
+  baseAmount: number;
+  gstAmount: number;
+  totalAmount: number;
+  startsAt: string | null;
+  endsAt: string | null;
+  paidAt: string | null;
+  orderId: string;
+  paymentId: string | null;
+  /** True when a super admin gave this out rather than it being paid online. */
+  granted: boolean;
+  grantNote: string | null;
+  account: { userId: string; email: string; name: string };
+  doctor: { id: string; name: string; specialization: string | null } | null;
+}
+
+export interface SubscriptionSummary {
+  active: number;
+  pending: number;
+  expiringSoon: number;
+  collected: number;
+}
+
+export type PaymentEventSource = 'webhook' | 'poll' | 'admin' | 'system';
+
+export interface PaymentEvent {
+  id: string;
+  at: string;
+  source: PaymentEventSource;
+  eventType: string;
+  status: string | null;
+  applied: boolean;
+  /** Null for events that are not webhooks; false means the HMAC did not match. */
+  signatureValid: boolean | null;
+  orderId: string | null;
+  paymentId: string | null;
+  amount: number | null;
+  message: string | null;
+  doctor: { id: string; name: string } | null;
+  user: { id: string; email: string; name: string } | null;
+  plan: string | null;
+  subscriptionId: string | null;
+  /** Cashfree's raw body. Super admin only. */
+  payload?: unknown;
+}
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+
+/** A doctor account in the "grant a plan" picker. */
+export interface BillingAccount {
+  userId: string;
+  email: string;
+  name: string;
+  doctorName: string | null;
+  currentPlan: string | null;
+  endsAt: string | null;
+}
+
+export interface MyBilling {
+  current: Subscription | null;
+  history: Subscription[];
 }

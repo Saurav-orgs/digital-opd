@@ -7,6 +7,7 @@ import { Doctor } from '../database/models/doctor.model';
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { StorageService } from '../uploads/storage.service';
+import { HEADER_MIN_RATIO } from '../uploads/letterhead-image';
 import { DoctorsService } from '../doctors/doctors.service';
 import { PrescriptionMode } from '../common/enums';
 
@@ -46,12 +47,24 @@ function frameFor(print: boolean): Frame {
 /** Where the body resumes on a continuation page. */
 const CONTINUATION_Y = 56;
 /**
- * The box a doctor-uploaded header is drawn into: the full content width by
- * a fixed height, so every pad lines up the same way. The profile page tells
- * the doctor the pixel size that fills it exactly (2000 × 355 px ≈ 5.63 : 1);
- * anything else is fitted inside, never cropped.
+ * The box a doctor-uploaded header is drawn into: the full content width,
+ * with the height that keeps the image's own proportions — a pad top dense
+ * with clinic timings is as tall as it needs to be, a slim one takes less.
+ * `HEADER_MIN_RATIO` caps it (a third of the width, ≈ 6 cm); the upload
+ * refuses anything taller, so `fit` never has to shrink a header.
  */
-export const HEADER_BOX = { top: 40, height: 90 };
+const HEADER_TOP = 40;
+const HEADER_MAX_H = CONTENT_W / HEADER_MIN_RATIO;
+/**
+ * Headers uploaded before their shape was measured have no ratio on the
+ * doctor and print in the box they always did.
+ */
+const LEGACY_HEADER_H = 90;
+function headerHeight(doctor: Doctor): number {
+  const ratio = doctor.letterhead_header_ratio;
+  if (!ratio || ratio <= 0) return LEGACY_HEADER_H;
+  return Math.min(CONTENT_W / ratio, HEADER_MAX_H);
+}
 const COLOR = {
   accent: '#1B6EF3', // vibrant royal blue accent bar
   ink: '#111827',    // deep dark text / headers
@@ -154,12 +167,12 @@ export class PrescriptionPdfService {
     if (doctor.letterhead_header_key && !letterhead) {
       // Print copy of a pad with its own header: keep the image box's height
       // blank, not the text header's, so the body lands where it does on the
-      // issued copy.
-      y = HEADER_BOX.top + HEADER_BOX.height + 12;
+      // issued copy. Sized from the stored ratio — the image is not fetched.
+      y = HEADER_TOP + headerHeight(doctor) + 12;
     } else {
       const headerImage = letterhead ? await this.fetchHeaderImage(doctor) : null;
       y = headerImage
-        ? this.imageHeader(doc, headerImage)
+        ? this.imageHeader(doc, headerImage, headerHeight(doctor))
         : this.doctorHeader(doc, doctor, letterhead);
     }
     y = this.headerRule(doc, y, letterhead);
@@ -211,17 +224,21 @@ export class PrescriptionPdfService {
   }
 
   // ── Uploaded Header ────────────────────────────────────────
-  /** The doctor's own header image, fitted into `HEADER_BOX`, left-aligned. */
-  private imageHeader(doc: PDFKit.PDFDocument, image: Buffer): number {
+  /**
+   * The doctor's own header image across the content width, `height` tall
+   * (see `headerHeight`). `fit` only matters for a legacy header whose box
+   * was not sized to it; a measured one fills the box exactly.
+   */
+  private imageHeader(doc: PDFKit.PDFDocument, image: Buffer, height: number): number {
     try {
-      doc.image(image, MARGIN, HEADER_BOX.top, {
-        fit: [CONTENT_W, HEADER_BOX.height],
+      doc.image(image, MARGIN, HEADER_TOP, {
+        fit: [CONTENT_W, height],
         valign: 'center',
       });
     } catch (err) {
       this.logger.warn(`Could not embed the letterhead header: ${(err as Error).message}`);
     }
-    return HEADER_BOX.top + HEADER_BOX.height + 12;
+    return HEADER_TOP + height + 12;
   }
 
   /**

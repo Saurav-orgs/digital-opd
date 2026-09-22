@@ -26,10 +26,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SettingsService } from '../settings/settings.service';
 import { AuthService } from '../auth/auth.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
-import { RegisterDoctorDto, RejectDoctorDto } from './dto/register-doctor.dto';
+import { RegisterDoctorDto, RejectDoctorDto, SetupProfileDto } from './dto/register-doctor.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -60,9 +61,53 @@ export class DoctorsController {
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
     private readonly auth: AuthService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // ── Doctor self-service (declared before :id) ──────────────
+
+  @Post('me/setup')
+  @ApiOperation({
+    summary:
+      'First sign-in after a paid sign-up: the account sends its practice profile and the tenant is built around it.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'license', maxCount: 1 },
+        { name: 'photo', maxCount: 1 },
+        { name: 'letterhead_header', maxCount: 1 },
+      ],
+      { storage: memoryStorage(), limits: { fileSize: 6 * 1024 * 1024 } },
+    ),
+  )
+  async setupOwn(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SetupProfileDto,
+    @UploadedFiles()
+    files: {
+      license?: Express.Multer.File[];
+      photo?: Express.Multer.File[];
+      letterhead_header?: Express.Multer.File[];
+    },
+  ) {
+    const created = await this.doctorsService.setupForUser(
+      user.id,
+      dto,
+      files?.license?.[0],
+      files?.photo?.[0],
+      files?.letterhead_header?.[0],
+    );
+    // The subscription was bought before the clinic existed; point it at the
+    // tenant now so an invoice or a renewal knows which practice it is for.
+    await this.subscriptions.attachDoctor(user.id, created.id);
+    // A fresh session: the principal gained a doctor id and the tenant's
+    // Doctor role, and the token the client holds predates both.
+    const session = await this.auth.sessionForNewUser(user.id);
+    return { ok: true, ...session };
+  }
+
   @Get('me')
   @ApiOperation({ summary: 'Logged-in doctor’s own profile' })
   getOwn(@CurrentUser() user: AuthUser) {
@@ -229,6 +274,13 @@ export class DoctorsController {
       letterhead_header?: Express.Multer.File[];
     },
   ) {
+    if (!this.config.get<boolean>('selfRegistrationOpen')) {
+      // Sign-up is paid and starts on the landing site; this route stayed so
+      // a deployment without plans can switch it back on with one env var.
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'Please choose a plan on myDigitalOPD to create your practice.',
+      });
+    }
     // The address must have been verified with the emailed code first; a
     // form that skipped that step gets nothing. Checked before anything is
     // written and spent only once the account exists, so a sign-up that

@@ -13,7 +13,7 @@ import {
   workingDays,
   type DayTimings,
 } from '../components/DayAvailabilityEditor';
-import { HEADER_PX, LetterheadHeaderPicker, MIN_RATIO } from '../components/Letterhead';
+import { HEADER_BEST_W, HEADER_MIN_W, LetterheadHeaderPicker } from '../components/Letterhead';
 
 const MAX_LICENSE_BYTES = 6 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
@@ -35,7 +35,9 @@ const SPECIALISATIONS = [
   'Dentistry',
 ];
 
-const STEPS = ['Account', 'Register', 'Availability'] as const;
+const REGISTER_STEPS = ['Account', 'Register', 'Availability'] as const;
+/** In setup mode the account already exists, so stage 1 is not shown. */
+const SETUP_STEPS = ['Your practice', 'Availability'] as const;
 type Stage = 1 | 2 | 3;
 
 interface Vacation {
@@ -62,15 +64,29 @@ interface Vacation {
  * account, so a doctor who finishes this form has a booking link that already
  * works — and it ends on their dashboard, signed in, because the server
  * answers the registration with a session.
+ *
+ * `mode="setup"` is the same form after a *paid* sign-up: the account was
+ * created on the landing site and paid for, so stage 1 — email, password and
+ * the code that proves the address — is already done and is skipped. What is
+ * left is exactly what a clinic needs, and it posts to /doctors/me/setup with
+ * the token the doctor just signed in with. One form rather than two: the
+ * profile fields, the validation and the availability editor are identical,
+ * and a second copy would drift from this one within a release.
  */
-export default function DoctorRegisterPage() {
+export default function DoctorRegisterPage({
+  mode = 'register',
+}: {
+  mode?: 'register' | 'setup';
+}) {
+  const setup = mode === 'setup';
   const navigate = useNavigate();
   const { setSession } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLInputElement>(null);
 
-  const [stage, setStage] = useState<Stage>(1);
+  // Setup starts on the profile: the credential stage belongs to sign-up.
+  const [stage, setStage] = useState<Stage>(setup ? 2 : 1);
 
   const [form, setForm] = useState({
     name: '',
@@ -106,7 +122,7 @@ export default function DoctorRegisterPage() {
   // later just as well — but a doctor who has the file to hand at sign-up
   // should not have to come back for it.
   const [header, setHeader] = useState<File | null>(null);
-  const [headerPreview, setHeaderPreview] = useState<string | null>(null);
+  const [headerPreview, setHeaderPreview] = useState<{ url: string; ratio: number } | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +175,7 @@ export default function DoctorRegisterPage() {
       // Recorded server-side against this exact wording, so a later change to
       // the document cannot rewrite what this doctor actually agreed to.
       fd.append('terms_version', PROVIDER_TERMS_VERSION);
-      return doctorRegistrationApi.register(fd);
+      return setup ? doctorRegistrationApi.setup(fd) : doctorRegistrationApi.register(fd);
     },
     onSuccess: (res) => {
       // The account is live and the server has already signed the doctor in,
@@ -187,7 +203,8 @@ export default function DoctorRegisterPage() {
    */
   const emailOk = /\S+@\S+\.\S+/.test(form.email.trim());
   const emailVerified = verifiedEmail === form.email.trim().toLowerCase();
-  const stage1Valid = emailOk && form.password.length >= 8 && passwordsMatch && emailVerified;
+  const stage1Valid =
+    setup || (emailOk && form.password.length >= 8 && passwordsMatch && emailVerified);
   /** Stage 1 minus the verification — what has to be right before a code is sent. */
   const stage1Typed = emailOk && form.password.length >= 8 && passwordsMatch;
 
@@ -243,8 +260,11 @@ export default function DoctorRegisterPage() {
         <div className="card login-card" style={{ textAlign: 'center' }}>
           <h2 style={{ marginBottom: 8 }}>Your practice is ready ✓</h2>
           <p className="muted" style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Thank you. You can sign in right away with{' '}
-            <strong>{form.email.trim()}</strong> and the password you just chose.
+            {setup
+              ? 'Thank you. Sign in again to open your dashboard.'
+              : 'Thank you. You can sign in right away with '}
+            {!setup && <strong>{form.email.trim()}</strong>}
+            {!setup && ' and the password you just chose.'}
             {openDays.length > 0 && ' Your booking link is live with the hours you set.'}
             {!license && ' You can add your registration certificate from My profile.'}
           </p>
@@ -273,13 +293,18 @@ export default function DoctorRegisterPage() {
     <div className="register-screen">
       <div className="register-inner">
         <header className="register-head">
-          <h1>Doctor Registration</h1>
-          <p className="muted">Set up your profile to start seeing patients.</p>
+          <h1>{setup ? 'Complete your profile' : 'Doctor Registration'}</h1>
+          <p className="muted">
+            {setup
+              ? 'Your plan is active. Tell us about your practice and your booking page goes live.'
+              : 'Set up your profile to start seeing patients.'}
+          </p>
         </header>
 
         <ol className="steps2 register-steps" aria-label="Registration progress">
-          {STEPS.map((label, i) => {
-            const n = (i + 1) as Stage;
+          {(setup ? SETUP_STEPS : REGISTER_STEPS).map((label, i) => {
+            // Setup's first chip is stage 2 — its stage 1 does not exist.
+            const n = (i + (setup ? 2 : 1)) as Stage;
             const locked = (n === 2 && !stage1Valid) || (n === 3 && !stage2Valid);
             return (
               <Fragment key={label}>
@@ -297,7 +322,7 @@ export default function DoctorRegisterPage() {
                     onClick={() => goStage(n)}
                   >
                     <span className="step2-dot" aria-hidden>
-                      {stage > n ? '✓' : n}
+                      {stage > n ? '✓' : i + 1}
                     </span>
                     <span className="step2-label">{label}</span>
                   </button>
@@ -576,34 +601,35 @@ export default function DoctorRegisterPage() {
             <section className="box sky-accent">
               <h2 className="box-title">Prescription letterhead</h2>
               <div className="box-sub">
-                Optional — upload the top strip of your prescription pad and it
-                prints as the header on every prescription. You can skip this and
-                add it later from the Letterhead menu.
+                Optional — upload your prescription pad (a scan, a photo or the
+                printer's PDF) and mark where the header ends; that strip prints
+                at the top of every prescription. You can skip this and add it
+                later from the Letterhead menu.
               </div>
               <LetterheadHeaderPicker
                 inputRef={headerRef}
-                onPick={(f) => {
+                onPick={(f, ratio) => {
                   if (f.size > MAX_PHOTO_BYTES) {
                     setError('That image is larger than 6 MB. Please choose a smaller one.');
                     return;
                   }
                   setHeader(f);
-                  setHeaderPreview(URL.createObjectURL(f));
+                  setHeaderPreview({ url: URL.createObjectURL(f), ratio });
                   setError(null);
                 }}
                 onReject={(problem) => setError(problem)}
               />
               {headerPreview ? (
-                <div className="lh-header-box">
-                  <img src={headerPreview} alt="Your prescription header" />
+                <div className="lh-header-box" style={{ aspectRatio: `${headerPreview.ratio}` }}>
+                  <img src={headerPreview.url} alt="Your prescription header" />
                 </div>
               ) : (
                 <button type="button" className="file-drop" onClick={() => headerRef.current?.click()}>
                   <span className="file-drop-icon" aria-hidden>🖼</span>
-                  <span className="file-drop-main">Tap to upload your pad header</span>
+                  <span className="file-drop-main">Tap to upload your pad</span>
                   <span className="file-drop-sub">
-                    Any image (PNG, JPG, WebP…), a wide strip — best at {HEADER_PX.w} × {HEADER_PX.h} px, at
-                    least {MIN_RATIO}× wider than tall
+                    Any image (PNG, JPG, WebP…) or PDF, at least {HEADER_MIN_W} px wide
+                    ({HEADER_BEST_W} px is ideal)
                   </span>
                 </button>
               )}
@@ -740,7 +766,7 @@ export default function DoctorRegisterPage() {
         {error && <p className="field-err" style={{ marginTop: 12 }}>{error}</p>}
 
         <div className="register-actions">
-          {stage > 1 && (
+          {stage > (setup ? 2 : 1) && (
             <button className="btn" onClick={() => goStage((stage - 1) as Stage)}>
               Back
             </button>
@@ -798,9 +824,11 @@ export default function DoctorRegisterPage() {
           )}
         </div>
 
-        <p className="muted" style={{ fontSize: 13, textAlign: 'center', marginTop: 14 }}>
-          Already registered? <Link to="/login">Sign in</Link>
-        </p>
+        {!setup && (
+          <p className="muted" style={{ fontSize: 13, textAlign: 'center', marginTop: 14 }}>
+            Already registered? <Link to="/login">Sign in</Link>
+          </p>
+        )}
 
         <PoweredByIttitude className="auth-powered-by" />
       </div>

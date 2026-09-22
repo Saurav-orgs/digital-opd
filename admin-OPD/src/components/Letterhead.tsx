@@ -1,71 +1,54 @@
+import { useState } from 'react';
 import type { RefObject } from 'react';
+import { HeaderCropper } from './HeaderCropper';
+import { LEGACY_RATIO, MIN_RATIO } from '../lib/letterhead';
+
+export { MIN_RATIO } from '../lib/letterhead';
 
 /**
- * The pixel size that fills the PDF's header box exactly. The box is the
- * page's content width (507pt) by 90pt — a 5.63 : 1 strip — and 2000px wide
- * prints crisply at that size.
+ * The width a header should be uploaded at. Height is the doctor's own — the
+ * PDF box is sized to the image (see `lib/letterhead.ts`) — so only the width
+ * matters for print quality: 2000 px across the page's 507 pt is ~280 dpi.
  */
-export const HEADER_PX = { w: 2000, h: 355 };
+export const HEADER_MIN_W = 1000;
+export const HEADER_BEST_W = 2000;
+
+/** What the file input accepts: any image, or the printer's PDF of the pad. */
+export const HEADER_ACCEPT = 'image/*,application/pdf';
 
 /**
- * The least wide-for-its-height a header may be. The PDF box is 5.63 : 1;
- * anything at least this wide fills the box's width (a shorter strip simply
- * gets a little air above and below), while a squarer image would be shrunk
- * to the box's height and print as a small block on the left.
+ * The pixel size of an image file, or null when the browser cannot decode it
+ * (TIFF, HEIC outside Safari, or a PDF — those go to the cropper, which
+ * draws them itself).
  */
-export const MIN_RATIO = 4;
-
-/**
- * Why a file will not do as the header, or null when it will.
- *
- * The box is a limit, not a mould: a doctor's own pad top will not be
- * exactly our pixels, and need not be. Two things are refused — an image too
- * tall for its width (see `MIN_RATIO`) and one too narrow to print sharply.
- * Checked in the browser, with the file in hand, because the server cannot
- * read image dimensions and would otherwise fit a wrong shape into the box
- * with blank space either side.
- */
-export function checkHeaderImage(file: File): Promise<string | null> {
+function measureImage(file: File): Promise<{ w: number; h: number } | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      if (w / h < MIN_RATIO) {
-        resolve(
-          `This image is ${w} × ${h} px — too tall for the header strip. It needs to be at ` +
-            `least ${MIN_RATIO} times wider than it is tall, like ${HEADER_PX.w} × ${HEADER_PX.h} px. ` +
-            `Crop it to just the top strip of your pad and try again.`,
-        );
-      } else if (w < HEADER_PX.w / 2) {
-        resolve(
-          `This image is only ${w} px wide and would print blurry. ` +
-            `Use one at least ${HEADER_PX.w / 2} px wide (${HEADER_PX.w} × ${HEADER_PX.h} px is ideal).`,
-        );
-      } else {
-        resolve(null);
-      }
+      resolve({ w: img.naturalWidth, h: img.naturalHeight });
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      // The shape check needs the browser to decode the file; a format it
-      // cannot show (TIFF, HEIC outside Safari) cannot be measured here.
-      resolve(
-        'Your browser cannot open this image format. Save it as a PNG or JPG and try again.',
-      );
+      resolve(null);
     };
     img.src = url;
   });
 }
 
 /**
- * The hidden file input behind an "Upload header" button, with the shape
- * check already applied: `onPick` only ever sees a file that will fit the
- * box, `onReject` gets the reason for one that will not. Shared by the
- * letterhead screen and the registration form so both refuse the same files
- * with the same words.
+ * The hidden file input behind an "Upload header" button, and the cropper it
+ * opens. Shared by the letterhead screen and the registration form so both
+ * take the same files the same way.
+ *
+ * Two kinds of file arrive: a strip a doctor has already cut out of their
+ * pad, and the whole pad — a scan, a phone photo or the printer's PDF. A
+ * strip (at least `MIN_RATIO` wide for its height) goes straight to `onPick`.
+ * Anything else opens `HeaderCropper`, and `onPick` gets the strip the doctor
+ * marked. Either way `onPick` only ever sees a file that fits the page, with
+ * its shape, so the caller can show it at the proportions it will print at.
+ * `onReject` gets the reason for a file that cannot be used at all.
  */
 export function LetterheadHeaderPicker({
   inputRef,
@@ -73,34 +56,72 @@ export function LetterheadHeaderPicker({
   onReject,
 }: {
   inputRef: RefObject<HTMLInputElement>;
-  onPick: (file: File) => void;
+  onPick: (file: File, ratio: number) => void;
   onReject: (problem: string) => void;
 }) {
+  const [toCrop, setToCrop] = useState<File | null>(null);
+
+  const accept = async (file: File) => {
+    const dims = await measureImage(file);
+    if (dims) {
+      if (dims.w < HEADER_MIN_W) {
+        onReject(
+          `This image is only ${dims.w} px wide and would print blurry. ` +
+            `Use a scan at least ${HEADER_MIN_W} px wide (${HEADER_BEST_W} px is ideal).`,
+        );
+        return;
+      }
+      const ratio = dims.w / dims.h;
+      if (ratio >= MIN_RATIO) {
+        onPick(file, ratio);
+        return;
+      }
+    }
+    setToCrop(file);
+  };
+
   return (
-    <input
-      ref={inputRef}
-      type="file"
-      accept="image/*"
-      hidden
-      onChange={(e) => {
-        const f = e.target.files?.[0];
-        // Reset first so picking the same file again still fires a change.
-        e.target.value = '';
-        if (!f) return;
-        void checkHeaderImage(f).then((problem) => {
-          if (problem) onReject(problem);
-          else onPick(f);
-        });
-      }}
-    />
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={HEADER_ACCEPT}
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          // Reset first so picking the same file again still fires a change.
+          e.target.value = '';
+          if (!f) return;
+          void accept(f);
+        }}
+      />
+      {toCrop && (
+        <HeaderCropper
+          source={toCrop}
+          onCancel={() => setToCrop(null)}
+          onCrop={(strip) => {
+            setToCrop(null);
+            void measureImage(strip).then((dims) => {
+              if (!dims) {
+                onReject('The header could not be cut out. Please try another file.');
+                return;
+              }
+              onPick(strip, dims.w / dims.h);
+            });
+          }}
+        />
+      )}
+    </>
   );
 }
 
 /** A faithful mini of the PDF letterhead layout. */
 export function LetterheadPreview({
-  headerUrl, doctorName, qualifications, specialization, address, phone,
+  headerUrl, headerRatio, doctorName, qualifications, specialization, address, phone,
 }: {
   headerUrl: string | null;
+  /** Width ÷ height of the header image; null for one uploaded before it was measured. */
+  headerRatio?: number | null;
   doctorName: string;
   qualifications: string;
   specialization: string;
@@ -112,7 +133,7 @@ export function LetterheadPreview({
     <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff', padding: '14px 14px 16px' }}>
       {/* The header: the doctor's own uploaded strip, or their details. */}
       {headerUrl ? (
-        <div style={{ aspectRatio: `${HEADER_PX.w} / ${HEADER_PX.h}`, width: '100%' }}>
+        <div style={{ aspectRatio: `${headerRatio || LEGACY_RATIO}`, width: '100%' }}>
           <img src={headerUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block' }} />
         </div>
       ) : (

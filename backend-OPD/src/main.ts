@@ -15,7 +15,9 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
 
   const prefix = config.get<string>('apiPrefix') ?? 'api';
-  app.setGlobalPrefix(prefix);
+  // The Cashfree webhook is registered in their dashboard as /payment/webhook
+  // on the bare origin, so that one route sits outside the prefix.
+  app.setGlobalPrefix(prefix, { exclude: ['payment/webhook'] });
 
   app.enableCors({ origin: true, credentials: true });
 

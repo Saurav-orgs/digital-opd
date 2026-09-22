@@ -89,10 +89,19 @@ export class Doctor extends Model<Doctor> {
 
   /**
    * S3 key of the doctor's own pad header, uploaded as one image and drawn
-   * into the fixed header box of the PDF. Null → the composed text header.
+   * across the top of the PDF. Null → the composed text header.
    */
   @Column({ type: DataType.STRING, allowNull: true })
   letterhead_header_key: string | null;
+
+  /**
+   * Width ÷ height of that image, measured at upload. The PDF sizes the
+   * header box from it (full width, height to match) and the print copy
+   * leaves the same gap blank. Null for uploads that predate the measure;
+   * those print in the old fixed-height box.
+   */
+  @Column({ type: DataType.FLOAT, allowNull: true })
+  letterhead_header_ratio: number | null;
 
   @Column({ type: DataType.TEXT, allowNull: true })
   clinic_address: string | null;

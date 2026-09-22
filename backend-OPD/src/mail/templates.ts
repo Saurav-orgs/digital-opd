@@ -68,3 +68,59 @@ export function teamMemberCredentialsEmail(args: {
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
+
+/**
+ * Sent once the subscription payment has gone through — the doctor is
+ * probably still on the "payment received" page, but the mail is the copy
+ * that survives the tab.
+ */
+export function paymentReceivedEmail(args: {
+  planName: string;
+  total: number;
+  endsAt: Date;
+  loginUrl: string;
+}) {
+  const until = args.endsAt.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  const amount = '₹' + args.total.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+  return {
+    subject: `Payment received — your myDigitalOPD ${args.planName} plan is active`,
+    html: shell(
+      'Welcome to myDigitalOPD',
+      `<p style="font-size:14px;color:#374151;line-height:1.55">We received ${amount} (incl. GST) for the <strong>${escapeHtml(args.planName)}</strong> plan. Your subscription runs until <strong>${until}</strong>.</p>
+       <p style="font-size:14px;color:#374151;line-height:1.55">Sign in with the email and password you chose. On your first sign-in we will ask for your practice details, and your booking page goes live right after.</p>
+       <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>`,
+    ),
+  };
+}
+
+/**
+ * Sent when a super admin gives an account a plan rather than it being paid
+ * for online — a trial, a complimentary stretch, or money taken offline. It
+ * says plainly that nothing was charged, so nobody goes looking for a receipt.
+ */
+export function planGrantedEmail(args: {
+  planName: string;
+  months: number;
+  endsAt: Date;
+  note: string | null;
+  loginUrl: string;
+}) {
+  const until = args.endsAt.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  return {
+    subject: `Your myDigitalOPD ${args.planName} plan is active`,
+    html: shell(
+      'Your plan is active',
+      `<p style="font-size:14px;color:#374151;line-height:1.55">${args.months} month(s) of the <strong>${escapeHtml(args.planName)}</strong> plan have been added to your account. It runs until <strong>${until}</strong>. No payment was taken for this.</p>
+       ${args.note ? `<p style="font-size:14px;color:#374151;line-height:1.55">${escapeHtml(args.note)}</p>` : ''}
+       <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>`,
+    ),
+  };
+}

@@ -22,6 +22,14 @@ import type {
   User,
   ProgressSummary,
   PatientProfile,
+  Plan,
+  PlanInput,
+  Subscription,
+  SubscriptionSummary,
+  PaymentEvent,
+  Paged,
+  MyBilling,
+  BillingAccount,
 } from './types';
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -534,8 +542,13 @@ export const blockedNumbersApi = {
 };
 
 /**
- * Doctor self-registration. Public — no token, because the account it creates
- * cannot be used until the super admin approves it.
+ * Opening a practice. Two ways in:
+ *
+ *   register — the old free self-sign-up. Public, and closed by default on
+ *     the server now that sign-up is paid (SELF_REGISTRATION_OPEN).
+ *   setup — after a paid sign-up: the account exists and has a subscription,
+ *     but no clinic. Authenticated; the answer is a fresh session, because
+ *     the principal gains a doctor id and the tenant's Doctor role.
  */
 export const doctorRegistrationApi = {
   // The answer is a session: the doctor is signed in the moment the account
@@ -547,4 +560,56 @@ export const doctorRegistrationApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data),
+
+  /** First login after paying: build the tenant around the account that exists. */
+  setup: (form: FormData) =>
+    api
+      .post<{ ok: boolean } & Partial<LoginResponse>>('/doctors/me/setup', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data),
+};
+
+/**
+ * Billing. Two audiences in one controller:
+ *
+ *   `mine` / `myEvents` — the signed-in account's own plan and payments.
+ *   everything else     — the super admin's: the price list, who is on what,
+ *                         and the payment activity log.
+ */
+export const billingApi = {
+  mine: () => api.get<MyBilling>('/billing/me').then((r) => r.data),
+
+  myEvents: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<PaymentEvent>>('/billing/me/events', { params }).then((r) => r.data),
+
+  plans: () => api.get<Plan[]>('/billing/plans').then((r) => r.data),
+
+  createPlan: (body: PlanInput) =>
+    api.post<Plan>('/billing/plans', body).then((r) => r.data),
+
+  updatePlan: (id: string, body: PlanInput) =>
+    api.patch<Plan>(`/billing/plans/${id}`, body).then((r) => r.data),
+
+  removePlan: (id: string) =>
+    api.delete<Plan>(`/billing/plans/${id}`).then((r) => r.data),
+
+  subscriptions: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<Subscription>>('/billing/subscriptions', { params }).then((r) => r.data),
+
+  summary: () =>
+    api.get<SubscriptionSummary>('/billing/subscriptions/summary').then((r) => r.data),
+
+  accounts: () => api.get<BillingAccount[]>('/billing/accounts').then((r) => r.data),
+
+  grant: (body: { user_id: string; plan_id: string; months?: number; note?: string }) =>
+    api.post<Subscription>('/billing/subscriptions/grant', body).then((r) => r.data),
+
+  cancel: (id: string, reason?: string) =>
+    api
+      .post<Subscription>(`/billing/subscriptions/${id}/cancel`, { reason })
+      .then((r) => r.data),
+
+  events: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<PaymentEvent>>('/billing/events', { params }).then((r) => r.data),
 };

@@ -6,11 +6,12 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
 import {
-  HEADER_PX,
+  HEADER_BEST_W,
+  HEADER_MIN_W,
   LetterheadHeaderPicker,
   LetterheadPreview,
-  MIN_RATIO,
 } from '../components/Letterhead';
+import { LEGACY_RATIO } from '../lib/letterhead';
 
 /**
  * The doctor's prescription letterhead, on its own screen.
@@ -112,12 +113,16 @@ export default function LetterheadPage() {
               still print when it is not. */}
           <div className="card-title">Header image</div>
           <p className="muted" style={{ fontSize: 12.5, margin: '-6px 0 10px' }}>
-            Upload the top strip of your own prescription pad and it prints as
-            the header. Best at <strong>{HEADER_PX.w} × {HEADER_PX.h} px</strong> (a wide
-            strip — at least {MIN_RATIO} times wider than it is tall), any image format
-            (PNG, JPG, WebP…), under 5 MB. Leave it empty to print your name and details instead.
+            Upload your prescription pad — a scan, a photo or the printer's PDF —
+            and mark where the header ends; that strip prints at the top of every
+            prescription, as tall as it needs to be. Any image format or PDF,
+            at least {HEADER_MIN_W} px wide ({HEADER_BEST_W} px is ideal), under 5 MB.
+            Leave it empty to print your name and details instead.
           </p>
-          <div className="lh-header-box">
+          <div
+            className="lh-header-box"
+            style={{ aspectRatio: `${me.letterhead_header_ratio || LEGACY_RATIO}` }}
+          >
             {me.letterhead_header_url ? (
               <img src={me.letterhead_header_url} alt="Prescription header" />
             ) : (
@@ -130,7 +135,7 @@ export default function LetterheadPage() {
                 inputRef={headerRef}
                 onPick={(f) => uploadHeader.mutate(f)}
                 onReject={(problem) =>
-                  toast.push('error', 'This image will not fit the header', problem)
+                  toast.push('error', 'This file cannot be used as the header', problem)
                 }
               />
               <button
@@ -191,6 +196,7 @@ export default function LetterheadPage() {
             <div className="card-title">Live preview</div>
             <LetterheadPreview
               headerUrl={me.letterhead_header_url ?? null}
+              headerRatio={me.letterhead_header_ratio}
               doctorName={doctorName}
               qualifications={me.qualifications || 'M.B.B.S.'}
               specialization={me.specialization || me.clinic_name || ''}

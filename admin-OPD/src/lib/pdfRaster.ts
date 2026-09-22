@@ -38,23 +38,45 @@ export async function rasterizePdf(blob: Blob, pixelsPerPoint: number): Promise<
   try {
     const pages: string[] = [];
     for (let n = 1; n <= doc.numPages; n++) {
-      const page = await doc.getPage(n);
-      const viewport = page.getViewport({ scale: pixelsPerPoint });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas unavailable');
-      // Print intent: the page is going to a printer, so annotations are
-      // drawn as printed — and pdf.js paces display rendering with
-      // requestAnimationFrame, which a backgrounded tab never fires.
-      await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
-      pages.push(canvas.toDataURL('image/png'));
+      pages.push(await drawPage(doc, n, pixelsPerPoint));
     }
     return pages;
   } finally {
     void doc.destroy();
   }
+}
+
+/**
+ * One page of a PDF as a PNG data URL. The letterhead cropper uses it for
+ * the printer's PDF of a doctor's pad: only the first page is wanted, and
+ * drawing the whole file for that would be a waste on a phone.
+ */
+export async function rasterizePdfPage(
+  blob: Blob,
+  pageNumber: number,
+  pixelsPerPoint: number,
+): Promise<string> {
+  const doc = await openPdf(blob);
+  try {
+    return await drawPage(doc, pageNumber, pixelsPerPoint);
+  } finally {
+    void doc.destroy();
+  }
+}
+
+async function drawPage(doc: PDFDocumentProxy, n: number, pixelsPerPoint: number): Promise<string> {
+  const page = await doc.getPage(n);
+  const viewport = page.getViewport({ scale: pixelsPerPoint });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable');
+  // Print intent: the page is going to a printer, so annotations are
+  // drawn as printed — and pdf.js paces display rendering with
+  // requestAnimationFrame, which a backgrounded tab never fires.
+  await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
+  return canvas.toDataURL('image/png');
 }
 
 /**
