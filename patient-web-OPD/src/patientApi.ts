@@ -94,7 +94,17 @@ export const patientApi = {
   check: (mobile: string) =>
     unwrap<AccountCheck>(client.post('/patient/auth/check', { mobile })),
 
-  /** Open an account: number + password, no patient details yet. */
+  /**
+   * Step 1b/1c for a new number. A WhatsApp code proves the number is theirs
+   * before `signup` / `register` will accept it; both refuse an unverified
+   * number, so the order here is not optional.
+   */
+  sendOtp: (mobile: string) =>
+    unwrap<{ ok: true; resendAfter: number }>(client.post('/patient/auth/send-otp', { mobile })),
+  verifyOtp: (mobile: string, code: string) =>
+    unwrap<{ verified: true }>(client.post('/patient/auth/verify-otp', { mobile, code })),
+
+  /** Open an account: verified number + password, no patient details yet. */
   signup: (mobile: string, password: string, doctorId?: string | null) =>
     unwrap<PatientSession>(client.post('/patient/auth/signup', {
       mobile, password, ...(doctorId ? { doctor_id: doctorId } : {}),

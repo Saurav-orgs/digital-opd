@@ -21,6 +21,8 @@ import { AiTrainingSample } from './ai-training-sample.model';
 import { ActivityLog } from './activity-log.model';
 import { EmailVerification } from './email-verification.model';
 import { PasswordReset } from './password-reset.model';
+import { MobileVerification } from './mobile-verification.model';
+import { WhatsAppMessage } from './whatsapp-message.model';
 
 export const models = [
   Role,
@@ -46,6 +48,8 @@ export const models = [
   ActivityLog,
   EmailVerification,
   PasswordReset,
+  MobileVerification,
+  WhatsAppMessage,
 ];
 
 export {

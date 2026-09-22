@@ -8,7 +8,8 @@ import { AppModule } from './app.module';
 import { validationExceptionFactory } from './common/validation/validation.factory';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: the WhatsApp webhook verifies Meta's HMAC over the exact bytes.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   const config = app.get(ConfigService);
 
   app.useLogger(app.get(Logger));

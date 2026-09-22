@@ -6,6 +6,7 @@ import { PatientLoginDto } from './dto/patient-login.dto';
 import { PatientRegisterDto } from './dto/patient-register.dto';
 import { PatientCheckDto } from './dto/patient-check.dto';
 import { PatientSignupDto } from './dto/patient-signup.dto';
+import { ConfirmMobileCodeDto, SendMobileCodeDto } from './dto/mobile-verification.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { PatientAuthGuard } from './patient-auth.guard';
 import { CurrentPatient, AuthPatient } from './current-patient.decorator';
@@ -28,11 +29,32 @@ export class PatientAuthController {
     return this.service.check(dto);
   }
 
+  @Post('send-otp')
+  // Each call costs a WhatsApp message, so tighter than the rest of auth. The
+  // service adds a per-number resend cooldown on top.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Step 1b (new number) — send a 6-digit code over WhatsApp to the number being registered',
+  })
+  sendOtp(@Body() dto: SendMobileCodeDto) {
+    return this.service.sendMobileCode(dto);
+  }
+
+  @Post('verify-otp')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Step 1c — confirm the WhatsApp code; signup / register then accept the number',
+  })
+  verifyOtp(@Body() dto: ConfirmMobileCodeDto) {
+    return this.service.confirmMobileCode(dto);
+  }
+
   @Post('signup')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({
     summary:
-      'Open an account with a number and a password (no patient details — booking asks next)',
+      'Open an account with a verified number and a password (no patient details — booking asks next)',
   })
   signup(@Body() dto: PatientSignupDto) {
     return this.service.signup(dto);
@@ -41,7 +63,7 @@ export class PatientAuthController {
   @Post('register')
   @ApiOperation({
     summary:
-      'Register: the number becomes the account, the password secures it, the details become one patient on it',
+      'Register: the verified number becomes the account, the password secures it, the details become one patient on it',
   })
   register(@Body() dto: PatientRegisterDto) {
     return this.service.register(dto);

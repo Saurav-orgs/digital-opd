@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Phone, User, MapPin, LogIn, UserPlus, Lock } from 'lucide-react';
+import { Phone, User, MapPin, LogIn, UserPlus, Lock, MessageCircle, ShieldCheck } from 'lucide-react';
 import { PasswordField } from '../../components/PasswordField';
+import { OtpCodeField } from '../../components/OtpCodeField';
+import { useWhatsAppOtp } from '../../auth/useWhatsAppOtp';
+import { patientApi } from '../../patientApi';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException } from '../../types';
@@ -13,7 +16,13 @@ export const Login: React.FC = () => {
   const { doctor } = useDoctorCtx();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  /*
+   * Registering is three screens: the number, the WhatsApp code that proves
+   * it is theirs, then the password and the patient's details. Login is one.
+   */
+  const [regStage, setRegStage] = useState<'mobile' | 'otp' | 'details'>('mobile');
   const [mobile, setMobile] = useState('');
+  const otp = useWhatsAppOtp(mobile.trim());
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   // Registering creates one patient, so it asks for a patient's full details —
@@ -32,11 +41,42 @@ export const Login: React.FC = () => {
 
   const mobileValid = /^[6-9]\d{9}$/.test(mobile.trim());
 
+  const switchMode = (next: 'login' | 'register') => {
+    setMode(next);
+    setRegStage('mobile');
+    otp.reset();
+    setError(null);
+  };
+
+  /** Register, screen 1 → is the number free? Then the code goes out on WhatsApp. */
+  const startRegister = async () => {
+    setSubmitting(true);
+    try {
+      const res = await patientApi.check(mobile.trim());
+      if (res.exists && res.has_password) {
+        setError('This number already has an account. Please login instead.');
+        return;
+      }
+      otp.reset();
+      setRegStage('otp');
+      void otp.send();
+    } catch (err) {
+      setError(err instanceof ApiException ? err.message : 'Could not check this number. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!mobileValid) {
       setError('Enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (mode === 'register' && regStage === 'mobile') return startRegister();
+    if (mode === 'register' && regStage === 'otp') {
+      if (await otp.verify()) setRegStage('details');
       return;
     }
     if (password.length < 8) {
@@ -101,7 +141,11 @@ export const Login: React.FC = () => {
         <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: '14px' }}>
           {mode === 'login'
             ? 'Use the mobile number you booked your OPD appointment with.'
-            : "Choose a password and add the patient's details to register."}
+            : regStage === 'mobile'
+              ? 'Enter your WhatsApp mobile number — we will send a code to verify it.'
+              : regStage === 'otp'
+                ? 'Type the code we sent on WhatsApp.'
+                : "Choose a password and add the patient's details to register."}
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -116,10 +160,24 @@ export const Login: React.FC = () => {
               placeholder="10-digit mobile number"
               maxLength={10}
               value={mobile}
+              readOnly={mode === 'register' && regStage !== 'mobile'}
               onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
             />
+            {mode === 'register' && regStage !== 'mobile' && (
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                Wrong number?{' '}
+                <a href="#" onClick={(e) => { e.preventDefault(); setRegStage('mobile'); otp.reset(); setError(null); }}>
+                  Change it
+                </a>
+              </span>
+            )}
           </div>
 
+          {mode === 'register' && regStage === 'otp' && (
+            <OtpCodeField mobile={mobile.trim()} otp={otp} autoFocus />
+          )}
+
+          {(mode === 'login' || regStage === 'details') && (
           <div className="form-field">
             <label className="form-label icon-label">
               <Lock size={14} color="var(--text-secondary)" />
@@ -135,8 +193,9 @@ export const Login: React.FC = () => {
               }}
             />
           </div>
+          )}
 
-          {mode === 'register' && (
+          {mode === 'register' && regStage === 'details' && (
             <>
               <div className="form-field">
                 <label className="form-label icon-label">
@@ -248,13 +307,23 @@ export const Login: React.FC = () => {
 
           {error && <div className="error-text" style={{ marginBottom: '12px' }}>{error}</div>}
 
-          <button type="submit" className="btn-primary" disabled={submitting} style={{ width: '100%' }}>
-            {submitting ? (
+          <button type="submit" className="btn-primary" disabled={submitting || otp.sending || otp.verifying} style={{ width: '100%' }}>
+            {submitting || otp.sending || otp.verifying ? (
               <div className="spinner" style={{ width: '20px', height: '20px', borderWidth: '2.5px' }} />
             ) : mode === 'login' ? (
               <>
                 <LogIn size={18} />
                 <span>Login</span>
+              </>
+            ) : regStage === 'mobile' ? (
+              <>
+                <MessageCircle size={18} />
+                <span>Send code on WhatsApp</span>
+              </>
+            ) : regStage === 'otp' ? (
+              <>
+                <ShieldCheck size={18} />
+                <span>Verify code</span>
               </>
             ) : (
               <>
@@ -269,14 +338,14 @@ export const Login: React.FC = () => {
           {mode === 'login' ? (
             <>
               New here?{' '}
-              <a href="#" onClick={(e) => { e.preventDefault(); setMode('register'); setError(null); }}>
+              <a href="#" onClick={(e) => { e.preventDefault(); switchMode('register'); }}>
                 Register instead
               </a>
             </>
           ) : (
             <>
               Already have an account?{' '}
-              <a href="#" onClick={(e) => { e.preventDefault(); setMode('login'); setError(null); }}>
+              <a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>
                 Login instead
               </a>
             </>

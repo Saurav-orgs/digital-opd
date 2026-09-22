@@ -27,6 +27,26 @@ export interface AppConfig {
     pass: string;
     from: string;
   };
+  /**
+   * WhatsApp Cloud API (Meta Graph). Sends the one-time code a patient
+   * must type to open an account. `accessToken` empty means "no sender":
+   * the code is written to the log instead, so a developer machine can walk
+   * through patient registration without a Meta business account.
+   */
+  whatsapp: {
+    accessToken: string;
+    phoneNumberId: string;
+    businessAccountId: string;
+    appId: string;
+    appSecret: string;
+    verifyToken: string;
+    apiVersion: string;
+    /** Country code prefixed to the 10-digit number the patient types. */
+    countryCode: string;
+    /** Name and language of the approved AUTHENTICATION template. */
+    otpTemplate: string;
+    otpTemplateLang: string;
+  };
   bookingWindowDays: number;
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
@@ -79,6 +99,18 @@ export default (): AppConfig => ({
     user: process.env.MAIL_USER || '',
     pass: process.env.MAIL_PASS || '',
     from: process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@mydigitalopd.in',
+  },
+  whatsapp: {
+    accessToken: process.env.WA_ACCESS_TOKEN || '',
+    phoneNumberId: process.env.WA_PHONE_NUMBER_ID || '',
+    businessAccountId: process.env.WA_BUSINESS_ACCOUNT_ID || '',
+    appId: process.env.WA_APP_ID || '',
+    appSecret: process.env.WA_APP_SECRET || process.env.WHATSAPP_APP_SECRET || '',
+    verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
+    apiVersion: process.env.WA_API_VERSION || 'v21.0',
+    countryCode: process.env.WA_COUNTRY_CODE || '91',
+    otpTemplate: process.env.WA_OTP_TEMPLATE_NAME || 'otp_verification',
+    otpTemplateLang: process.env.WA_OTP_TEMPLATE_LANG || 'en_US',
   },
   bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),

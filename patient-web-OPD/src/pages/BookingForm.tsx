@@ -21,6 +21,8 @@ import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
+import { OtpCodeField } from '../components/OtpCodeField';
+import { useWhatsAppOtp } from '../auth/useWhatsAppOtp';
 import { PasswordField } from '../components/PasswordField';
 import { BookingSteps } from '../components/BookingSteps';
 
@@ -180,12 +182,13 @@ export const BookingForm: React.FC = () => {
    */
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   /*
-   * Step 1 in three parts: the number, then either the password for a number
-   * that already has an account or a new password for one that does not. A
+   * Step 1 in three or four parts: the number, then either the password for
+   * a number that already has an account, or — for one that does not — the
+   * WhatsApp code that proves the number is theirs, then a new password. A
    * patient who is already signed in never sees any of it — see the effect
    * below.
    */
-  const [authStage, setAuthStage] = useState<'mobile' | 'password' | 'create'>('mobile');
+  const [authStage, setAuthStage] = useState<'mobile' | 'password' | 'otp' | 'create'>('mobile');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -204,6 +207,8 @@ export const BookingForm: React.FC = () => {
   const reportsCardRef = useRef<HTMLDivElement>(null);
 
   const [mobile, setMobile] = useState(patient?.mobile ?? '');
+  // The WhatsApp code a new number must type before it may choose a password.
+  const otp = useWhatsAppOtp(mobile.trim());
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
   const [age, setAge] = useState('');
@@ -353,12 +358,19 @@ export const BookingForm: React.FC = () => {
     setFormError(null);
     try {
       const res = await patientApi.check(mobile.trim());
-      // An account with no password yet — one the front desk opened for a
-      // walk-in — is asked to choose one, not to guess a password it never set.
-      setAuthStage(res.exists && res.has_password ? 'password' : 'create');
       setPassword('');
       setConfirmPassword('');
       setPasswordError(null);
+      if (res.exists && res.has_password) {
+        setAuthStage('password');
+      } else {
+        // An account with no password yet — one the front desk opened for a
+        // walk-in — is asked to prove the number and choose one, not to guess
+        // a password it never set. The code goes out as the stage opens.
+        otp.reset();
+        setAuthStage('otp');
+        void otp.send();
+      }
     } catch (err) {
       setFormError(
         err instanceof ApiException
@@ -391,7 +403,13 @@ export const BookingForm: React.FC = () => {
     }
   };
 
-  /** Step 1b (new number) → choose a password, which opens the account. */
+  /** Step 1b (new number) → the WhatsApp code, which unlocks choosing a password. */
+  const submitOtp = async () => {
+    setFormError(null);
+    if (await otp.verify()) setAuthStage('create');
+  };
+
+  /** Step 1c (new number) → choose a password, which opens the account. */
   const submitNewPassword = async () => {
     if (password.length < 8) {
       setPasswordError('Password must be at least 8 characters.');
@@ -529,6 +547,7 @@ export const BookingForm: React.FC = () => {
     if (step === 1) {
       if (authStage === 'mobile') return checkNumber();
       if (authStage === 'password') return submitPassword();
+      if (authStage === 'otp') return submitOtp();
       return submitNewPassword();
     }
     if (step === 2) return;
@@ -611,7 +630,9 @@ export const BookingForm: React.FC = () => {
         ? 'Mobile number'
         : authStage === 'password'
           ? 'Your password'
-          : 'Create a password'
+          : authStage === 'otp'
+            ? 'Verify your number'
+            : 'Create a password'
       : step === 2
         ? 'Who is this visit for?'
         : step === 3
@@ -658,6 +679,7 @@ export const BookingForm: React.FC = () => {
             // Within step 1, Back means "that was the wrong number".
             if (authStage !== 'mobile') {
               setAuthStage('mobile');
+              otp.reset();
               setPassword('');
               setConfirmPassword('');
               setPasswordError(null);
@@ -741,7 +763,19 @@ export const BookingForm: React.FC = () => {
           )}
 
           {/* Step 1b — a number with no account, or one the front desk opened
-              that has never had a password. Both choose one here. */}
+              that has never had a password. Both prove the number is theirs
+              first: the code goes out on WhatsApp as this stage opens. */}
+          {step === 1 && authStage === 'otp' && (
+            <div className="section-card">
+              <h3 className="card-section-title">
+                <Phone size={18} color="var(--primary)" />
+                <span>Verify your number</span>
+              </h3>
+              <OtpCodeField mobile={mobile.trim()} otp={otp} autoFocus />
+            </div>
+          )}
+
+          {/* Step 1c — the verified number chooses its password. */}
           {step === 1 && authStage === 'create' && (
             <div className="section-card">
               <h3 className="card-section-title">
@@ -1055,9 +1089,9 @@ export const BookingForm: React.FC = () => {
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={submitting || identifying}
+                  disabled={submitting || identifying || otp.verifying}
                 >
-                  {submitting || identifying ? (
+                  {submitting || identifying || otp.verifying ? (
                     <div className="spinner" style={{ width: '22px', height: '22px', borderWidth: '2.5px', borderColor: 'rgba(255,255,255,0.4)', borderTopColor: '#fff' }} />
                   ) : step === 4 ? (
                     <>

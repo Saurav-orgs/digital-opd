@@ -12,6 +12,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
 import { DoctorsModule } from './doctors/doctors.module';
@@ -68,6 +69,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     ActivityModule,
     // Global: verification codes and reset links go out through it.
     MailModule,
+    WhatsAppModule,
     UploadsModule,
     // Global: the local inference sidecar is used by reports and consultations.
     AiModule,
