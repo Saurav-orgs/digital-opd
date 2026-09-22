@@ -314,14 +314,15 @@ const PrescriptionCard: React.FC<{ prescription: IssuedPrescription }> = ({
       )}
     </div>
 
-    {p.diagnosis && (
-      <p style={{ margin: '0 0 8px', fontSize: '13.5px' }}>
-        <strong>Diagnosis:</strong> {p.diagnosis}
-      </p>
-    )}
+    {/* Previous history then diagnosis, the order the PDF prints them in. */}
     {p.previous_history && (
       <p style={{ margin: '0 0 8px', fontSize: '13.5px' }}>
         <strong>Previous history:</strong> {p.previous_history}
+      </p>
+    )}
+    {p.diagnosis && (
+      <p style={{ margin: '0 0 8px', fontSize: '13.5px' }}>
+        <strong>Diagnosis:</strong> {p.diagnosis}
       </p>
     )}
 

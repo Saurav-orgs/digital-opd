@@ -171,8 +171,8 @@ export class PrescriptionPdfService {
       const drawing = await this.fetchHandwriting(prescription);
       y = this.handwritingBody(doc, drawing, y, frame);
     } else {
-      y = this.diagnosis(doc, prescription, y);
       y = this.previousHistory(doc, prescription, y);
+      y = this.diagnosis(doc, prescription, y);
       y = this.treatmentAdvice(doc, medicines, prescription, y, frame);
     }
 
@@ -391,9 +391,11 @@ export class PrescriptionPdfService {
   }
 
   // ── Previous history ───────────────────────────────────────
-  /** Same block as the diagnosis, under it. Skipped entirely when empty —
-   *  most prescriptions carry none and a heading with nothing under it
-   *  would only make the sheet longer. */
+  /** Same block as the diagnosis, above it: the background the doctor is
+   *  reading the diagnosis against comes first on the sheet, as it does on
+   *  the form they wrote it on. Skipped entirely when empty — most
+   *  prescriptions carry none and a heading with nothing under it would only
+   *  make the sheet longer. */
   private previousHistory(
     doc: PDFKit.PDFDocument,
     p: EPrescription,

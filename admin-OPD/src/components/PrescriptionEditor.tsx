@@ -5,6 +5,7 @@ import type { EPrescription, PrescriptionMedicine } from '../api/types';
 import { useToast } from './Toast';
 import type { DraftFlushRef } from '../lib/draftFlush';
 import { ConfirmDialog, Field } from './ui';
+import { TrashIcon } from './icons';
 import { PrintPrescriptionButton, WhatsAppPrescriptionButton } from './PrescriptionPreview';
 import { ApiError } from '../api/client';
 import { shareFile } from '../lib/shareFile';
@@ -592,14 +593,14 @@ export function PrescriptionEditor({
           />
         )}
 
-        {data?.diagnosis && (
+        {data?.previous_history && (
           <p style={{ marginTop: 10 }}>
-            <strong>Diagnosis:</strong> {data.diagnosis}
+            <strong>Previous history:</strong> {data.previous_history}
           </p>
         )}
-        {data?.previous_history && (
-          <p style={{ marginTop: 6 }}>
-            <strong>Previous history:</strong> {data.previous_history}
+        {data?.diagnosis && (
+          <p style={{ marginTop: data?.previous_history ? 6 : 10 }}>
+            <strong>Diagnosis:</strong> {data.diagnosis}
           </p>
         )}
         <ol style={{ margin: '10px 0 0 18px' }}>
@@ -641,25 +642,14 @@ export function PrescriptionEditor({
         the form. Whatever a prescription already holds is still loaded and
         saved back untouched, so removing the input loses no existing data.
       */}
-      <div className="rx-section-title">Diagnosis</div>
-      <Field label="" error={errors.header.diagnosis}>
-        <input
-          className="input"
-          placeholder="e.g. Viral fever with mild myalgia"
-          disabled={!canEdit}
-          value={form.diagnosis}
-          onChange={(e) => {
-            markDirty();
-            setForm({ ...form, diagnosis: e.target.value });
-            setErrors((p) => ({ ...p, header: { ...p.header, diagnosis: undefined }, summary: undefined }));
-          }}
-        />
-      </Field>
-
       {/*
         Previous history — only when there is some. The recorder fills it when
         the doctor dictates the patient's background ("known diabetic",
         "allergic to penicillin"); otherwise it is one link, not a box.
+
+        It opens the prescription, above the diagnosis: the background is what
+        the diagnosis is read against, on this form and on the printed sheet,
+        which orders the two the same way.
       */}
       {historyOpen ? (
         <>
@@ -667,19 +657,22 @@ export function PrescriptionEditor({
             <span>Previous history</span>
             {/* Removes the line from the prescription, not just from view:
                 the text is cleared and the box closes, and the next save
-                sends it empty. Add it back with the link if that was a slip. */}
+                sends it empty. Add it back with the link if that was a slip.
+                A bin rather than the word "Remove", which read as a heading of
+                its own beside the section title. */}
             {canEdit && (
               <button
                 type="button"
-                className="link-btn"
-                style={{ fontWeight: 400, color: 'var(--danger)' }}
+                className="rx-history-remove"
+                title="Remove previous history"
+                aria-label="Remove previous history"
                 onClick={() => {
                   markDirty();
                   setForm({ ...form, previous_history: '' });
                   setHistoryOpen(false);
                 }}
               >
-                Remove
+                <TrashIcon size={14} />
               </button>
             )}
           </div>
@@ -702,13 +695,27 @@ export function PrescriptionEditor({
           <button
             type="button"
             className="link-btn"
-            style={{ marginTop: 8 }}
             onClick={() => setHistoryOpen(true)}
           >
             + Add previous history
           </button>
         )
       )}
+
+      <div className="rx-section-title">Diagnosis</div>
+      <Field label="" error={errors.header.diagnosis}>
+        <input
+          className="input"
+          placeholder="e.g. Viral fever with mild myalgia"
+          disabled={!canEdit}
+          value={form.diagnosis}
+          onChange={(e) => {
+            markDirty();
+            setForm({ ...form, diagnosis: e.target.value });
+            setErrors((p) => ({ ...p, header: { ...p.header, diagnosis: undefined }, summary: undefined }));
+          }}
+        />
+      </Field>
 
       <div className="rx-section-title">Medicines</div>
       {rows.length === 0 && (

@@ -432,6 +432,17 @@ function shortGender(g: string | null | undefined) {
   return v[0].toUpperCase() + v.slice(1).toLowerCase();
 }
 
+/**
+ * "2 reports" for the meta line beside the age and gender — the one thing
+ * about a visit a doctor wants to know before opening it, and the list
+ * endpoint already sends the count (it omits the reports themselves).
+ * Nothing is printed for a visit with none, so the line stays short.
+ */
+function reportsLabel(n: number | undefined) {
+  if (!n) return '';
+  return n === 1 ? '1 report' : `${n} reports`;
+}
+
 /** "09:30:00" → "9:30 AM", the way the design prints it. */
 function fmtTime(t: string | null | undefined) {
   if (!t) return '';
@@ -761,9 +772,11 @@ function RangeTable({
 /**
  * One appointment as a card — the phone and tablet equivalent of a row.
  *
- * Deliberately just the person, the contact and the time. The reports count
- * and "Note added" strip the design once carried were dropped from the list:
- * they made every card a different height and belong on the visit itself.
+ * The person, the contact, the time, and how many reports the visit carries.
+ * The count rides the age-and-gender line rather than a strip of its own —
+ * the strip the design once carried made every card a different height, which
+ * is why it was dropped; a few more words on a line that is already there
+ * costs nothing. The "Note added" strip stays gone: it belongs on the visit.
  * The date is not on the card either — Previous and Upcoming group their
  * cards under a date heading instead, so it would only repeat that.
  */
@@ -782,9 +795,13 @@ function AppointmentCard({
   const cancelled = isCancelled(a);
   const missed = isMissed(a);
   const over = done || cancelled || missed || a.consultation_status === 'no_show';
-  // "M · 29 yrs", so the line has room for the number beside it and the card
-  // stays two rows tall whatever the name and number are.
-  const who = [shortGender(a.patient_gender), a.patient_age && `${a.patient_age} yrs`]
+  // "M · 29 yrs · 2 reports", so the line has room for the number beside it
+  // and the card stays two rows tall whatever the name and number are.
+  const who = [
+    shortGender(a.patient_gender),
+    a.patient_age && `${a.patient_age} yrs`,
+    reportsLabel(a.reports_count),
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -851,7 +868,11 @@ function AppointmentRow({
   isNext: boolean;
   onClick: () => void;
 }) {
-  const who = [a.patient_gender, a.patient_age && `${a.patient_age} yrs`]
+  const who = [
+    a.patient_gender,
+    a.patient_age && `${a.patient_age} yrs`,
+    reportsLabel(a.reports_count),
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -875,8 +896,9 @@ function AppointmentRow({
                 </span>
               )}
             </span>
-            {/* Age and gender fold under the name rather than taking a column
-                of their own, which is what the design's table does. */}
+            {/* Age, gender and the report count fold under the name rather
+                than taking columns of their own, which is what the design's
+                table does. */}
             {who && <span className="row-sub">{who}</span>}
           </span>
         </span>

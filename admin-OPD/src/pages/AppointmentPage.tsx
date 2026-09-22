@@ -550,13 +550,36 @@ export default function AppointmentPage() {
         {/* This visit's reports — the patient's uploads and the clinic's. */}
         {a && step === 1 && !finishedWithoutRx && (
           <div className="card">
+            <div className="section-label">
+              Reports{a.reports.length > 0 ? ` (${a.reports.length})` : ''}
+            </div>
+
+            {a.reports.length === 0 ? (
+              <span className="muted" style={{ fontSize: 13 }}>
+                No reports for this visit yet.
+              </span>
+            ) : (
+              <div className="stack" style={{ gap: 8 }}>
+                {a.reports.map((r) => (
+                  <ReportCard
+                    key={r.id}
+                    report={r}
+                    canDelete={canUpdate}
+                    onRetried={invalidate}
+                    onDeleted={invalidate}
+                  />
+                ))}
+              </div>
+            )}
+
             {/*
-              One combined summary, which is what the design shows: the box at
-              the top is the picture across every report on the visit, and each
+              One combined summary across every report on the visit, under the
+              list rather than over it: the doctor looks at what was actually
+              uploaded first, and reads the model's picture of it after — each
               report's own summary sits behind the sparkle button on its row.
             */}
             {a.reports.length > 0 && (
-              <div className="stack" style={{ gap: 10, marginBottom: 14 }}>
+              <div className="stack" style={{ gap: 10, marginTop: 16 }}>
                 {a.progress_summary_status &&
                 (a.progress_summary_status !== 'ready' ||
                   hasTrajectory(a.progress_summary)) ? (
@@ -588,30 +611,10 @@ export default function AppointmentPage() {
               </div>
             )}
 
-            <div className="section-label">
-              Reports{a.reports.length > 0 ? ` (${a.reports.length})` : ''}
-            </div>
-
-            {a.reports.length === 0 ? (
-              <span className="muted" style={{ fontSize: 13 }}>
-                No reports for this visit yet.
-              </span>
-            ) : (
-              <div className="stack" style={{ gap: 8 }}>
-                {a.reports.map((r) => (
-                  <ReportCard
-                    key={r.id}
-                    report={r}
-                    canDelete={canUpdate}
-                    onRetried={invalidate}
-                    onDeleted={invalidate}
-                  />
-                ))}
-              </div>
-            )}
-
             {/* Filed here rather than on a separate screen: this is the visit
-                the report belongs to, and the doctor is already on it. */}
+                the report belongs to, and the doctor is already on it. It is
+                the last thing on the card — a doctor reads the reports and
+                the summary of them before reaching for another upload. */}
             {canUpdate && (
               <>
                 <div className="section-label">Add more reports</div>
