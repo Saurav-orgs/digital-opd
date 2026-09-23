@@ -1769,9 +1769,10 @@ tr.appt-row.upcoming td:first-child {
 .fab-walkin:active:not(:disabled) {
   transform: scale(0.96);
 }
-/* The uploaded prescription header, shown at the PDF box's own proportions. */
+/* The uploaded prescription header, at the height the PDF gives it: full
+   width, its own proportions. The min-height keeps the empty state a box. */
 .lh-header-box {
-  aspect-ratio: 2000 / 355;
+  min-height: 90px;
   width: 100%;
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -1784,9 +1785,7 @@ tr.appt-row.upcoming td:first-child {
 }
 .lh-header-box img {
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: left center;
+  height: auto;
   display: block;
 }
 /* The booking-QR dialog: the code large enough to scan off a phone screen. */

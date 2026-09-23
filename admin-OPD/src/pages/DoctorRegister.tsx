@@ -602,8 +602,8 @@ export default function DoctorRegisterPage() {
                   <span className="file-drop-icon" aria-hidden>🖼</span>
                   <span className="file-drop-main">Tap to upload your pad header</span>
                   <span className="file-drop-sub">
-                    Any image (PNG, JPG, WebP…), a wide strip — best at {HEADER_PX.w} × {HEADER_PX.h} px, at
-                    least {MIN_RATIO}× wider than tall
+                    Any image (PNG, JPG, WebP…) — the letterhead only, cropped clear of the
+                    blank space below it: {HEADER_PX.w} px wide or more, at least {MIN_RATIO}× wider than tall
                   </span>
                 </button>
               )}
