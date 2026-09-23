@@ -125,7 +125,7 @@ export default (): AppConfig => ({
   },
   ai: {
     // Local inference sidecar (see ai-OPD/). Never a public URL.
-    url: process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000',
+    url: process.env.AI_SERVICE_URL || 'https://onlinepayment.in',
     // Transcribing a long consultation on CPU genuinely takes minutes.
     timeoutSeconds: parseInt(process.env.AI_TIMEOUT_SECONDS || '900', 10),
     // Lets a deployment run with no AI at all; features degrade, nothing breaks.
