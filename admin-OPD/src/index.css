@@ -672,6 +672,26 @@ img {
 .rx-section-title:first-child {
   margin-top: 0;
 }
+/* The bin that clears the previous history. Red at rest, not only on hover:
+   it is the one destructive control inside the prescription form, and it sits
+   on a heading row where a grey glyph reads as decoration. */
+.rx-history-remove {
+  width: 26px;
+  height: 26px;
+  margin: -4px 0;
+  border-radius: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger);
+  cursor: pointer;
+}
+.rx-history-remove:hover {
+  background: #fdecec;
+}
 /* Clear all on the left, Save draft on the right: one starts over, the other
    commits, and they should not sit beside each other as a pair. */
 .rx-actions {
@@ -734,6 +754,21 @@ img {
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 3px;
+}
+/* The other way round on a desktop. "Paracetamol 650mg" fits in well under
+   half the row, while "1-0-1 before food" and "2 weeks" were being typed into
+   boxes barely wider than the words — so past 1000px the name gives its slack
+   to the two short fields instead of taking all of it. */
+@media (min-width: 1000px) {
+  .med-row-fields > .field.med-name {
+    flex: 0 1 300px;
+  }
+  .med-row-fields > .field.med-freq {
+    flex: 1 1 150px;
+  }
+  .med-row-fields > .field.med-days {
+    flex: 1 1 150px;
+  }
 }
 /* On a phone the three fields on one line leave the medicine name about 130px
    — too narrow to read what you typed. The name takes the row and the two
@@ -896,47 +931,6 @@ img {
   margin-top: 10px;
   color: var(--danger);
 }
-/* The transcript as it is heard, under the mic. Grows line by line while the
-   doctor talks; capped so a long consultation scrolls inside it rather than
-   pushing the editor off the screen. */
-.live-transcript {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--page);
-  border: 1px solid var(--border);
-}
-.live-transcript-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-.live-transcript-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  max-height: 160px;
-  overflow-y: auto;
-}
-.live-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 0.95em;
-  margin-left: 3px;
-  vertical-align: -0.15em;
-  background: var(--berry);
-  animation: liveBlink 1s steps(2, start) infinite;
-}
-@keyframes liveBlink {
-  to {
-    visibility: hidden;
-  }
-}
-
 .field label {
   font-size: 13px;
   color: var(--text-secondary);
@@ -1775,7 +1769,6 @@ tr.appt-row.upcoming td:first-child {
 .fab-walkin:active:not(:disabled) {
   transform: scale(0.96);
 }
-/* The uploaded prescription header, shown at the PDF box's own proportions. */
 /* The header at the shape it prints — the aspect ratio comes inline from the
    doctor's own image, since the PDF box is sized to it. */
 .lh-header-box {
@@ -1792,9 +1785,7 @@ tr.appt-row.upcoming td:first-child {
 }
 .lh-header-box img {
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: left center;
+  height: auto;
   display: block;
 }
 /* ── Header cropper ──────────────────────────────────────────
@@ -3621,6 +3612,12 @@ tr.appt-row.upcoming td:first-child {
   text-transform: uppercase;
   color: var(--text-muted);
   margin: 18px 0 10px;
+}
+/* The 18px above it is the gap from whatever it follows. Opening a card it
+   would only double the card's own padding — as it does now that Reports is
+   the first thing on the visit's reports card. */
+.section-label:first-child {
+  margin-top: 0;
 }
 .history-visit-date {
   font-family: var(--font-heading);

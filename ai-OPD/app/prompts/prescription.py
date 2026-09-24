@@ -11,7 +11,7 @@ Bump VERSION whenever the wording changes.
 
 import re
 
-VERSION = "prescription/v18"
+VERSION = "prescription/v19"
 
 # Trailing strength token, e.g. "Dolo 650" / "Azithral 500 mg" -> the number is
 # stripped so the spelling hint carries the NAME only. The model then takes
@@ -232,9 +232,38 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
      — do not infer one from the medicines prescribed. Prescribing Pantocid is
      not the doctor saying "acidity".
    - previous_history: what the doctor put on record about the patient's PAST
-     — "known diabetic for 10 years", "had gallbladder surgery in 2022",
-     "allergic to penicillin", "already on Telma 40", "father had heart
-     disease". One short line, or a few separated by "; ", in English.
+     — a long-standing condition, an earlier illness or surgery, an allergy,
+     medicines the patient is already on, a relevant family history.
+     WRITE IT IN THE DOCTOR'S OWN WORDS, AS SPOKEN. This field is a
+     transcription, not a summary and not a translation. Take the words of the
+     HISTORY spans exactly as the doctor said them, in the language they said
+     them in — Hindi stays Hindi, Hinglish stays Hinglish, English stays
+     English. Do not condense them into clinical shorthand, do not reorder
+     them, do not add a word the doctor did not say, and do not drop a word
+     they did say.
+     The only changes allowed are the ones that repair the speech
+     recognition, because this field is built from a transcript and the
+     transcript mishears:
+       * a word the recogniser got wrong, written as the doctor plainly meant
+         it — a drug name, a condition, a number ("sugar ki bimari" heard as
+         "sugar ki bimani");
+       * spelling, capitalisation and sentence punctuation, so the line reads
+         as one clean sentence;
+       * a filler or a stammer the doctor did not mean to say — "uhh", "matlab
+         matlab", a word repeated twice by accident — may be dropped.
+     Nothing else. If you are unsure whether a word was a mishear, keep what
+     was said.
+     Write it in Latin script whichever language it is in — the printed
+     prescription cannot render Devanagari, so Hindi is romanised the way it
+     is spoken ("inko sugar hai"), never transliterated into देवनागरी.
+     Two or more separate points spoken about the past join with "; " in the
+     order they were spoken.
+     What that looks like: a doctor who dictates the patient's diabetes in
+     Hinglish gets that Hinglish sentence back, capitalised and punctuated,
+     with any misheard word repaired — NOT "Known diabetic for 10 years". A
+     doctor who dictates it in English gets their English sentence back
+     unchanged. The shape of the answer is the shape of what was said; these
+     sentences are not words to copy — only the transcript's words go in.
      It is the patient's background, not today's problem: "fever for 3 days"
      is the COMPLAINT and goes in diagnosis; "has had asthma since childhood"
      is HISTORY.
@@ -357,7 +386,10 @@ RULE 1 — SPLIT THE SENTENCE BEFORE YOU FILL ANYTHING IN:
    talk you into filling a field RULE 0 says must stay blank.
 10. FORMAT & LANGUAGE:
    - Output valid JSON matching the schema.
-   - Everything must be written in English (translate any Hindi instructions)."""
+   - Everything must be written in English (translate any Hindi instructions),
+     with ONE exception: previous_history is kept in the doctor's own words and
+     own language, exactly as rule 7 says. It is a transcription of what they
+     dictated, so translating it would lose the thing that field is for."""
 
 USER_TEMPLATE = """{today_line}{patient_line}{catalog_block}
 Consultation transcript:

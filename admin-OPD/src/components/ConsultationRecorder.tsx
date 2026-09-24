@@ -27,9 +27,10 @@ const mmss = (total: number) =>
  * Two ways in, same outcome:
  *
  *  - **Live.** The mic is cut into pieces at the pauses and each piece goes
- *    to the server over a socket while the doctor is still talking; the
- *    transcript shows up under the mic as it is heard, and when they stop
- *    only the last few seconds are left to transcribe before the draft.
+ *    to the server over a socket while the doctor is still talking, so when
+ *    they stop only the last few seconds are left to transcribe before the
+ *    draft. The doctor is not shown the words as they arrive — see the note
+ *    on that below.
  *  - **Upload.** The whole recording goes up when they stop, and the session
  *    is polled while the server works through it. This is what runs when the
  *    socket cannot be had — server has streaming off, the connection dropped,
@@ -385,14 +386,16 @@ export function ConsultationRecorder({
             ? 'Writing the draft…'
             : 'Tap to start recording';
 
-  // Live text shown under the mic: the transcript as the server hears it,
-  // from the first piece until the draft is on screen. Afterwards the same
-  // text folds into "What the system heard" below. The socket feeds it
-  // directly; after a refresh mid-consultation the polled row does instead.
-  const liveText =
-    stream.transcript ||
-    (session?.status === 'recording' || processing ? (session?.transcript ?? '') : '');
-  const showLive = (recording || busy) && (stream.live || liveText.length > 0);
+  /*
+   * The running transcript is deliberately NOT shown while the doctor is
+   * speaking. Speech recognition is at its worst mid-sentence — names come
+   * out mangled and only settle once the phrase is complete — and doctors
+   * read the half-heard words back as a verdict on the recording, stopping
+   * to repeat themselves for a transcript that would have corrected itself.
+   * What matters at that moment is that the mic is live, which the status
+   * line and the timer already say. The text is still there to check after
+   * the draft, under "What the system heard" below.
+   */
 
   return (
     <div>
@@ -450,18 +453,6 @@ export function ConsultationRecorder({
           </button>
         )}
       </div>
-
-      {showLive && (
-        <div className="live-transcript" aria-live="polite">
-          <div className="live-transcript-label">
-            {recording ? 'Hearing…' : 'Heard so far'}
-          </div>
-          <p className="live-transcript-text">
-            {liveText || <span className="muted">Waiting for the first words…</span>}
-            {recording && <span className="live-cursor" aria-hidden />}
-          </p>
-        </div>
-      )}
 
       {looksStuck && (
         <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
@@ -548,7 +539,7 @@ export function ConsultationRecorder({
         </div>
       )}
 
-      {session?.transcript && !showLive && (
+      {session?.transcript && !recording && !busy && (
         <details style={{ marginTop: 10 }}>
           <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>
             What the system heard

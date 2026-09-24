@@ -245,6 +245,9 @@ class DraftPrescription(BaseModel):
     # conditions, surgeries, allergies, what they already take. Doctors dictate
     # it for the record when it bears on today's prescription. Empty when they
     # said nothing of the kind, and the editor shows no field for it then.
+    # Unlike every other text field here, this one is kept in the doctor's own
+    # words and own language rather than translated into clinical English: the
+    # prompt only lets the model repair what speech recognition got wrong.
     previous_history: str = ""
     medicines: list[DraftMedicine] = Field(default_factory=list)
     advice: list[str] = Field(default_factory=list)

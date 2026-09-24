@@ -6,5 +6,12 @@ opd-appointment-system-plan.md
 .env.local
 **/.env
 **/.env.local
-.design-ref/
+
+# Dependencies and build output — regenerated, never committed
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS and local design scratch
 .DS_Store
+.design-ref/
