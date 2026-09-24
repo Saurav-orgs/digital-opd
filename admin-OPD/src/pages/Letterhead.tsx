@@ -112,10 +112,13 @@ export default function LetterheadPage() {
               still print when it is not. */}
           <div className="card-title">Header image</div>
           <p className="muted" style={{ fontSize: 12.5, margin: '-6px 0 10px' }}>
-            Upload the top strip of your own prescription pad and it prints as
-            the header. Best at <strong>{HEADER_PX.w} × {HEADER_PX.h} px</strong> (a wide
-            strip — at least {MIN_RATIO} times wider than it is tall), any image format
-            (PNG, JPG, WebP…), under 5 MB. Leave it empty to print your name and details instead.
+            Upload the letterhead from the top of your own prescription pad and it
+            prints as the header, across the full width of the page at its own height —
+            a deep hospital letterhead prints deep, a thin strip prints thin. Crop out
+            the blank space below it: the image has to be at least {MIN_RATIO} times wider
+            than it is tall (<strong>{HEADER_PX.w} px</strong> wide or more prints sharpest).
+            Any image format (PNG, JPG, WebP…), under 5 MB. Leave it empty to print your
+            name and details instead.
           </p>
           <div className="lh-header-box">
             {me.letterhead_header_url ? (

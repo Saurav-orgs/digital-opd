@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import PDFDocument from 'pdfkit';
+import sharp from 'sharp';
 import * as QRCode from 'qrcode';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
@@ -46,12 +47,41 @@ function frameFor(print: boolean): Frame {
 /** Where the body resumes on a continuation page. */
 const CONTINUATION_Y = 56;
 /**
- * The box a doctor-uploaded header is drawn into: the full content width by
- * a fixed height, so every pad lines up the same way. The profile page tells
- * the doctor the pixel size that fills it exactly (2000 × 355 px ≈ 5.63 : 1);
- * anything else is fitted inside, never cropped.
+ * The band a doctor-uploaded header is drawn into. It starts at `top`, spans
+ * the full content width, and takes its height from the image's own shape —
+ * a wide thin strip prints shallow, a deep hospital pad top prints deep, and
+ * both run the full width of the sheet rather than being squeezed into one
+ * fixed strip. `maxHeight` (≈7.8 cm) is the most of the page a header may
+ * take before it is fitted inside instead, so there is always room for the
+ * prescription itself; `fallbackHeight` is what is reserved when the image's
+ * size cannot be read. `gap` is the air between the header and the rule.
  */
-export const HEADER_BOX = { top: 40, height: 90 };
+export const HEADER_BOX = {
+  top: 40,
+  minHeight: 60,
+  maxHeight: 220,
+  fallbackHeight: 90,
+  gap: 12,
+};
+
+/** The measured header image: what to draw, and how tall it prints. */
+interface HeaderImage {
+  buffer: Buffer;
+  height: number;
+}
+
+/**
+ * How tall an uploaded header prints: the full content width at the image's
+ * own aspect ratio, clamped to the band. A header at least
+ * `CONTENT_W / HEADER_BOX.maxHeight` (≈2.3) times wider than it is tall
+ * fills the width exactly — which is the shape the letterhead screen asks
+ * for. A squarer one is capped here and fitted inside the cap.
+ */
+function headerHeightFor(size: { width?: number; height?: number } | null): number {
+  if (!size?.width || !size.height) return HEADER_BOX.fallbackHeight;
+  const natural = (CONTENT_W * size.height) / size.width;
+  return Math.min(HEADER_BOX.maxHeight, Math.max(HEADER_BOX.minHeight, natural));
+}
 const COLOR = {
   accent: '#1B6EF3', // vibrant royal blue accent bar
   ink: '#111827',    // deep dark text / headers
@@ -150,17 +180,23 @@ export class PrescriptionPdfService {
     // otherwise composed from their details; the accent bar rules under
     // either and separates the letterhead from the patient's sheet. On a
     // print copy neither is drawn, but the space is kept.
+    // The image is fetched for the print copy too, though nothing is drawn
+    // from it: its shape is what decides how much blank space the pad's own
+    // header needs, so the body lands where it does on the issued copy.
+    const headerImage = doctor.letterhead_header_key
+      ? await this.fetchHeaderImage(doctor)
+      : null;
     let y: number;
-    if (doctor.letterhead_header_key && !letterhead) {
-      // Print copy of a pad with its own header: keep the image box's height
-      // blank, not the text header's, so the body lands where it does on the
-      // issued copy.
-      y = HEADER_BOX.top + HEADER_BOX.height + 12;
-    } else {
-      const headerImage = letterhead ? await this.fetchHeaderImage(doctor) : null;
-      y = headerImage
+    if (headerImage) {
+      y = letterhead
         ? this.imageHeader(doc, headerImage)
-        : this.doctorHeader(doc, doctor, letterhead);
+        : HEADER_BOX.top + headerImage.height + HEADER_BOX.gap;
+    } else if (doctor.letterhead_header_key && !letterhead) {
+      // A pad header that could not be read: reserve the nominal band rather
+      // than the text header's height, which is not what this pad prints.
+      y = HEADER_BOX.top + HEADER_BOX.fallbackHeight + HEADER_BOX.gap;
+    } else {
+      y = this.doctorHeader(doc, doctor, letterhead);
     }
     y = this.headerRule(doc, y, letterhead);
 
@@ -211,31 +247,46 @@ export class PrescriptionPdfService {
   }
 
   // ── Uploaded Header ────────────────────────────────────────
-  /** The doctor's own header image, fitted into `HEADER_BOX`, left-aligned. */
-  private imageHeader(doc: PDFKit.PDFDocument, image: Buffer): number {
+  /**
+   * The doctor's own header image, across the full content width at the
+   * height its shape earned. Centred, so a header too square to fill the
+   * width sits in the middle of the sheet instead of hugging the left edge.
+   */
+  private imageHeader(doc: PDFKit.PDFDocument, image: HeaderImage): number {
     try {
-      doc.image(image, MARGIN, HEADER_BOX.top, {
-        fit: [CONTENT_W, HEADER_BOX.height],
+      doc.image(image.buffer, MARGIN, HEADER_BOX.top, {
+        fit: [CONTENT_W, image.height],
+        align: 'center',
         valign: 'center',
       });
     } catch (err) {
       this.logger.warn(`Could not embed the letterhead header: ${(err as Error).message}`);
     }
-    return HEADER_BOX.top + HEADER_BOX.height + 12;
+    return HEADER_BOX.top + image.height + HEADER_BOX.gap;
   }
 
   /**
    * Best-effort: a missing or unreadable image falls back to the composed
-   * header rather than failing the prescription.
+   * header rather than failing the prescription. The size is read here so
+   * the band can be as deep as this particular pad needs; an image `sharp`
+   * cannot measure still prints, in the nominal band.
    */
-  private async fetchHeaderImage(doctor: Doctor): Promise<Buffer | null> {
+  private async fetchHeaderImage(doctor: Doctor): Promise<HeaderImage | null> {
     if (!doctor.letterhead_header_key) return null;
+    let buffer: Buffer;
     try {
-      return await this.storage.download(doctor.letterhead_header_key);
+      buffer = await this.storage.download(doctor.letterhead_header_key);
     } catch (err) {
       this.logger.warn(`Could not fetch the letterhead header: ${(err as Error).message}`);
       return null;
     }
+    let size: { width?: number; height?: number } | null = null;
+    try {
+      size = await sharp(buffer).metadata();
+    } catch (err) {
+      this.logger.warn(`Could not measure the letterhead header: ${(err as Error).message}`);
+    }
+    return { buffer, height: headerHeightFor(size) };
   }
 
   // ── Doctor Header ──────────────────────────────────────────

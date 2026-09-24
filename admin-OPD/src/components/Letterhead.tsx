@@ -1,29 +1,32 @@
 import type { RefObject } from 'react';
 
 /**
- * The pixel size that fills the PDF's header box exactly. The box is the
- * page's content width (507pt) by 90pt — a 5.63 : 1 strip — and 2000px wide
- * prints crisply at that size.
+ * A comfortable pixel size for a header: 2000px wide prints crisply across
+ * the page's content width (507pt), and 355px tall is the classic thin
+ * strip. It is a suggestion, not a mould — the PDF takes the header's height
+ * from the image itself, so a deeper hospital pad top prints deeper.
  */
 export const HEADER_PX = { w: 2000, h: 355 };
 
 /**
- * The least wide-for-its-height a header may be. The PDF box is 5.63 : 1;
- * anything at least this wide fills the box's width (a shorter strip simply
- * gets a little air above and below), while a squarer image would be shrunk
- * to the box's height and print as a small block on the left.
+ * The least wide-for-its-height a header may be. The PDF draws the header
+ * across the full content width (507pt) and will let it run up to 220pt
+ * deep — 2.3 : 1 — before capping it. Anything at least this wide therefore
+ * prints edge to edge at its own proportions; a squarer image (a whole
+ * scanned page, say) would be shrunk to that depth and print as a small
+ * block, so it is refused with a note to crop it to the pad's top.
  */
-export const MIN_RATIO = 4;
+export const MIN_RATIO = 2.3;
 
 /**
  * Why a file will not do as the header, or null when it will.
  *
- * The box is a limit, not a mould: a doctor's own pad top will not be
- * exactly our pixels, and need not be. Two things are refused — an image too
- * tall for its width (see `MIN_RATIO`) and one too narrow to print sharply.
- * Checked in the browser, with the file in hand, because the server cannot
- * read image dimensions and would otherwise fit a wrong shape into the box
- * with blank space either side.
+ * The header is a band, not a mould: a doctor's own pad top will not be
+ * exactly our pixels, and need not be — it prints at its own height. Two
+ * things are refused — an image too tall for its width (see `MIN_RATIO`),
+ * which is usually a whole page rather than its letterhead, and one too
+ * narrow to print sharply. Checked in the browser, with the file in hand, so
+ * the doctor hears about it at the moment they pick the file.
  */
 export function checkHeaderImage(file: File): Promise<string | null> {
   return new Promise((resolve) => {
@@ -35,9 +38,10 @@ export function checkHeaderImage(file: File): Promise<string | null> {
       const h = img.naturalHeight;
       if (w / h < MIN_RATIO) {
         resolve(
-          `This image is ${w} × ${h} px — too tall for the header strip. It needs to be at ` +
-            `least ${MIN_RATIO} times wider than it is tall, like ${HEADER_PX.w} × ${HEADER_PX.h} px. ` +
-            `Crop it to just the top strip of your pad and try again.`,
+          `This image is ${w} × ${h} px — too tall for the top of the page. It needs to be at ` +
+            `least ${MIN_RATIO} times wider than it is tall (${Math.round(w / MIN_RATIO)} px tall ` +
+            `or less at this width). Crop it to just the letterhead at the top of your pad — ` +
+            `leave out the blank space below it — and try again.`,
         );
       } else if (w < HEADER_PX.w / 2) {
         resolve(
@@ -112,9 +116,8 @@ export function LetterheadPreview({
     <div style={{ border: 'var(--hairline)', borderRadius: 8, overflow: 'hidden', background: '#fff', padding: '14px 14px 16px' }}>
       {/* The header: the doctor's own uploaded strip, or their details. */}
       {headerUrl ? (
-        <div style={{ aspectRatio: `${HEADER_PX.w} / ${HEADER_PX.h}`, width: '100%' }}>
-          <img src={headerUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block' }} />
-        </div>
+        // Full width at the image's own height, exactly as the PDF draws it.
+        <img src={headerUrl} alt="" style={{ width: '100%', height: 'auto', display: 'block' }} />
       ) : (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
