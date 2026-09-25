@@ -26,13 +26,116 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
+from . import cost_log
 from .config import settings
 
 log = logging.getLogger(__name__)
 
 _client: Any = None
+
+
+# ── Usage and cost accounting ────────────────────────────────
+# Published per-MTok rates (input, output, cache-read, cache-write). Cache
+# writes bill at 1.25x input, cache reads at 0.1x. Longest matching prefix
+# wins, so a dated or suffixed id still lands on the right row.
+_RATES: dict[str, tuple[float, float, float, float]] = {
+    "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
+    "claude-opus-5": (5.00, 25.00, 0.50, 6.25),
+    "claude-opus-4": (5.00, 25.00, 0.50, 6.25),
+    "claude-sonnet-5": (2.00, 10.00, 0.20, 2.50),
+    "claude-sonnet-4": (3.00, 15.00, 0.30, 3.75),
+    "claude-haiku-4-5": (1.00, 5.00, 0.10, 1.25),
+    "claude-fable-5": (10.00, 50.00, 0.25, 12.50),
+}
+# Fast mode is the same model at premium rates (Opus 5: $10/$50).
+_FAST_MULTIPLIER = 2.0
+
+
+def _rates(model: str) -> tuple[float, float, float, float]:
+    match = max((k for k in _RATES if model.startswith(k)), key=len, default="")
+    return _RATES.get(match, _RATES["claude-opus-5"])
+
+
+def _log_usage(
+    model: str, effort: str, route: str, fast: bool, response: Any, elapsed: float
+) -> None:
+    """Log tokens, what they cost, and how long the call took.
+
+    Four token counters, not three: `cache_creation_input_tokens` bills at
+    1.25x input and on a cold cache is the largest single item in the request,
+    so a line without it cannot be reconciled against the Console.
+
+    `elapsed` is the API call alone — not the endpoint. Read it against the
+    stage timings the routes log: if the two nearly match, the wait is Claude
+    and only a cheaper model or lower effort moves it; if they diverge, the
+    time is on this side and the log says which stage has it.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+
+    def _n(field: str) -> int:
+        value = getattr(usage, field, 0)
+        return int(value) if isinstance(value, (int, float)) else 0
+
+    fresh = _n("input_tokens")
+    cache_read = _n("cache_read_input_tokens")
+    cache_write = _n("cache_creation_input_tokens")
+    out = _n("output_tokens")
+
+    in_rate, out_rate, read_rate, write_rate = _rates(model)
+    served_fast = (getattr(usage, "speed", None) or "standard") == "fast"
+    scale = _FAST_MULTIPLIER if served_fast else 1.0
+    # Kept per component, not just as a total: when a bill looks wrong the
+    # answer is almost always which bucket the tokens landed in — a cold cache
+    # billing the prefix at 1.25x, or output far longer than the schema needs.
+    cost_in = scale * fresh * in_rate / 1_000_000
+    cost_cache_read = scale * cache_read * read_rate / 1_000_000
+    cost_cache_write = scale * cache_write * write_rate / 1_000_000
+    cost_out = scale * out * out_rate / 1_000_000
+    usd = cost_in + cost_cache_read + cost_cache_write + cost_out
+
+    # `priced` says whether _rates matched this model or fell back to the Opus
+    # row. An unrecognised id still logs a number, and a number that is quietly
+    # the wrong model's rate is worse than no number at all.
+    priced = any(model.startswith(known) for known in _RATES)
+    cost_log.record(
+        route=route,
+        provider="claude",
+        model=model,
+        effort=effort,
+        speed="fast" if served_fast else "standard",
+        input_tokens=fresh,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        output_tokens=out,
+        cost_input_usd=round(cost_in, 6),
+        cost_cache_read_usd=round(cost_cache_read, 6),
+        cost_cache_write_usd=round(cost_cache_write, 6),
+        cost_output_usd=round(cost_out, 6),
+        cost_usd=round(usd, 6),
+        elapsed_seconds=round(elapsed, 2),
+        priced=priced,
+    )
+
+    log.info(
+        "Claude %s route=%s effort=%s speed=%s: in=%d cache_read=%d "
+        "cache_write=%d out=%d cost=$%.5f in %.1fs",
+        model,
+        route,
+        effort,
+        "fast" if served_fast else "standard",
+        fresh,
+        cache_read,
+        cache_write,
+        out,
+        usd,
+        elapsed,
+    )
+
 
 
 class ClaudeError(RuntimeError):
@@ -122,11 +225,34 @@ async def _create(client: Any, *, fast: bool, **params: Any) -> Any:
     return await client.messages.create(**params)
 
 
+# `output_config.effort` is not accepted by every model: Haiku 4.5 and the
+# 4.5-era Sonnets answer with 400 "This model does not support the effort
+# parameter." Sending it regardless turns a model swap into a silent outage —
+# every call raises, the chain falls through to Gemini or the local model, and
+# imaging reports come back "could not be read" — so the knob is dropped for
+# models that cannot take it instead of failing the request.
+_NO_EFFORT_PREFIXES = ("claude-haiku-", "claude-sonnet-4-5", "claude-sonnet-3")
+
+
+def _supports_effort(model: str) -> bool:
+    return not model.startswith(_NO_EFFORT_PREFIXES)
+
+
+def _output_config(model: str, effort: str, schema: dict[str, Any]) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "format": {"type": "json_schema", "schema": _strict(schema)}
+    }
+    if _supports_effort(model):
+        config["effort"] = effort
+    return config
+
+
 async def generate_json(
     system: str,
     user: str,
     schema: dict[str, Any],
     *,
+    route: str = "llm",
     effort: str | None = None,
     max_tokens: int | None = None,
     model: str | None = None,
@@ -147,6 +273,7 @@ async def generate_json(
     client = _get_client()
     model = model or settings.claude_model
 
+    started = time.monotonic()
     try:
         response = await _create(
             client,
@@ -161,10 +288,9 @@ async def generate_json(
                 }
             ],
             messages=[{"role": "user", "content": user}],
-            output_config={
-                "effort": effort or settings.claude_effort,
-                "format": {"type": "json_schema", "schema": _strict(schema)},
-            },
+            output_config=_output_config(
+                model, effort or settings.claude_effort, schema
+            ),
         )
     except Exception as err:
         raise ClaudeError(f"Claude API call failed: {err}") from err
@@ -183,21 +309,17 @@ async def generate_json(
     if not text:
         raise ClaudeError("Claude returned an empty response.")
 
-    usage = getattr(response, "usage", None)
-    if usage is not None:
-        # At info, not debug: this line is how a slow draft gets diagnosed in
-        # production. cache_read_input_tokens staying at 0 across requests
-        # means the prefix is being invalidated somewhere; `speed` says
-        # whether fast mode actually served the call.
-        log.info(
-            "Claude %s effort=%s speed=%s: in=%s cache_read=%s out=%s",
-            model,
-            effort or settings.claude_effort,
-            getattr(usage, "speed", None) or "standard",
-            getattr(usage, "input_tokens", "?"),
-            getattr(usage, "cache_read_input_tokens", "?"),
-            getattr(usage, "output_tokens", "?"),
-        )
+    # At info, not debug: this line is how a slow draft gets diagnosed in
+    # production. cache_read staying at 0 across requests means the prefix is
+    # being invalidated somewhere; `speed` says whether fast mode served it.
+    _log_usage(
+        model,
+        (effort or settings.claude_effort) if _supports_effort(model) else "n/a",
+        route,
+        fast,
+        response,
+        time.monotonic() - started,
+    )
 
     try:
         return json.loads(text)
@@ -213,6 +335,7 @@ async def generate_json_from_image(
     media_type: str,
     schema: dict[str, Any],
     *,
+    route: str = "llm-image",
     effort: str | None = None,
     max_tokens: int | None = None,
 ) -> dict[str, Any]:
@@ -230,6 +353,7 @@ async def generate_json_from_image(
     client = _get_client()
     data = base64.standard_b64encode(image).decode("ascii")
 
+    started = time.monotonic()
     try:
         response = await client.messages.create(
             model=settings.claude_model,
@@ -257,10 +381,9 @@ async def generate_json_from_image(
                     ],
                 }
             ],
-            output_config={
-                "effort": effort or settings.claude_effort,
-                "format": {"type": "json_schema", "schema": _strict(schema)},
-            },
+            output_config=_output_config(
+                settings.claude_model, effort or settings.claude_effort, schema
+            ),
         )
     except Exception as err:
         raise ClaudeError(f"Claude API call failed: {err}") from err
@@ -273,6 +396,20 @@ async def generate_json_from_image(
     text = next((b.text for b in response.content if b.type == "text"), "").strip()
     if not text:
         raise ClaudeError("Claude returned an empty response.")
+
+    # This path logged nothing before, so a photographed report — the most
+    # expensive call in the system, an image at effort=high — was invisible in
+    # both the log and any cost total built from it.
+    _log_usage(
+        settings.claude_model,
+        (effort or settings.claude_effort)
+        if _supports_effort(settings.claude_model)
+        else "n/a",
+        route,
+        False,
+        response,
+        time.monotonic() - started,
+    )
 
     try:
         return json.loads(text)

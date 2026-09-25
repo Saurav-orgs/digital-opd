@@ -454,3 +454,84 @@ def test_distinct_tests_sharing_a_value_are_both_kept():
     """
     ir = parse_lab_report_text(text)
     assert len(ir.all_results) == 2
+
+
+# ── Model output arriving in the wrong SHAPE ──────────────────
+#
+# These are not hypotheticals. Both were caught in production use on
+# 2026-09-25, and each one turned a working summary into a 500: the schema is
+# right, the model simply does not always honour it, and a doctor waiting on a
+# report should not lose it over a bracket.
+
+def test_progress_trends_empty_object_is_empty_list():
+    """`trends: {}` meaning "no trends" must not fail the request.
+
+    The exact payload that broke /summarize-progress.
+    """
+    from app.schemas import ProgressSummary
+
+    summary = ProgressSummary.model_validate(
+        {"status": "improving", "summary": "Haemoglobin has recovered.", "trends": {}}
+    )
+    assert summary.trends == []
+    assert summary.status == "improving"
+
+
+def test_progress_lists_keyed_by_index_are_flattened():
+    """A list returned as an object keyed "0"/"1" keeps its items."""
+    from app.schemas import ProgressSummary
+
+    summary = ProgressSummary.model_validate(
+        {
+            "improvements": {"0": "Haemoglobin up", "1": "SGPT down"},
+            "watch_points": "Recheck in a month",
+            "trends": {
+                "0": {"label": "Haemoglobin", "previous_value": "9.9", "current_value": "11.8"}
+            },
+        }
+    )
+    assert summary.improvements == ["Haemoglobin up", "SGPT down"]
+    # A single bullet sent bare, not in a list.
+    assert summary.watch_points == ["Recheck in a month"]
+    assert len(summary.trends) == 1
+    assert summary.trends[0].label == "Haemoglobin"
+
+
+def test_abnormal_values_as_prose_are_dropped_not_parsed():
+    """A structured row returned as a sentence is discarded.
+
+    The exact payload that broke /summarize-reports. Splitting
+    "CBC: Haemoglobin 9.9 g/dL (low)" back into label/value means guessing
+    which number belongs to which test, and a wrong guess writes a fabricated
+    value into a medical summary under a real test's name. The prose summary
+    still carries the finding; an invented row would not be recoverable.
+    """
+    from app.schemas import ReportSummary
+
+    summary = ReportSummary.model_validate(
+        {
+            "summary": "Haemoglobin is low.",
+            "abnormal_values": [
+                "CBC: Haemoglobin 9.9 g/dL (low)",
+                {"label": "SGPT", "value": "68 U/L", "direction": "high"},
+            ],
+        }
+    )
+    # The prose row is gone; the structured one survives untouched.
+    assert len(summary.abnormal_values) == 1
+    assert summary.abnormal_values[0].label == "SGPT"
+    assert summary.abnormal_values[0].value == "68 U/L"
+    assert "low" in summary.summary.lower()
+
+
+def test_report_key_findings_wrong_shapes():
+    """Findings as `{}`, as a bare string, or as objects all survive."""
+    from app.schemas import ReportSummary
+
+    assert ReportSummary.model_validate({"key_findings": {}}).key_findings == []
+    assert ReportSummary.model_validate(
+        {"key_findings": "Low haemoglobin"}
+    ).key_findings == ["Low haemoglobin"]
+    assert ReportSummary.model_validate(
+        {"key_findings": [{"text": "Low haemoglobin"}, {"finding": "Raised SGPT"}]}
+    ).key_findings == ["Low haemoglobin", "Raised SGPT"]

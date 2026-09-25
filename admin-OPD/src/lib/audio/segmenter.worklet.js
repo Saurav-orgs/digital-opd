@@ -5,13 +5,17 @@
  * by URL with `audioWorklet.addModule`, outside the bundle, so it has to be
  * something the browser can run as-is.
  *
- * Every 128-frame block that arrives is resampled to 16 kHz (what Whisper
- * wants) and appended to the piece being built. The piece is closed and
- * posted to the main thread when the doctor has been talking for at least
- * `minMs` and then goes quiet for `silenceMs`, or unconditionally at `maxMs`
- * so a doctor who never pauses still sees text appear. A piece that held no
- * speech at all is dropped rather than sent — it would cost a model call and
- * come back empty.
+ * Every 128-frame block that arrives is resampled to 16 kHz (what every STT
+ * provider here wants) and appended to the piece being built. The piece is
+ * closed and posted to the main thread when the doctor has been talking for at
+ * least `minMs` and then goes quiet for `silenceMs`, or unconditionally at
+ * `maxMs` so a doctor who never pauses still sees text appear. A piece that
+ * held no speech at all is dropped rather than sent — it would cost a model
+ * call and come back empty.
+ *
+ * The three timings come in as processorOptions; capture.ts owns them and
+ * explains how they were chosen. The defaults below are the pre-Sarvam values,
+ * kept only as a fallback for a caller that passes nothing.
  *
  * Messages out:   { type: 'segment', pcm: ArrayBuffer }   16-bit mono 16 kHz
  *                 { type: 'flushed' }                      after 'stop'

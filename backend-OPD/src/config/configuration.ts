@@ -75,7 +75,13 @@ export interface AppConfig {
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
   superAdmin: { email: string; password: string; name: string };
-  ai: { url: string; timeoutSeconds: number; enabled: boolean; streaming: boolean };
+  ai: {
+    url: string;
+    timeoutSeconds: number;
+    enabled: boolean;
+    streaming: boolean;
+    parallelChunks: number;
+  };
   database: {
     host: string;
     port: number;
@@ -179,6 +185,18 @@ export default (): AppConfig => ({
     // always did — the client falls back to that on its own when the socket
     // is refused, so this can be flipped without a client release.
     streaming: process.env.CONSULTATION_STREAMING !== 'false',
+    // How many pieces of one live recording may be transcribed at the same
+    // time. 1 is the original behaviour and the right one for a self-hosted
+    // Whisper sidecar: the pieces were chained (each prompted with the text
+    // before it) and would only have queued behind one model anyway.
+    //
+    // Neither is true of a hosted STT provider — the calls are independent and
+    // network-bound — so there the queue is pure waiting. Raise it to ~4 when
+    // the sidecar runs STT_PROVIDER=sarvam.
+    parallelChunks: Math.max(
+      1,
+      parseInt(process.env.CONSULTATION_PARALLEL_CHUNKS || '1', 10) || 1,
+    ),
   },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',

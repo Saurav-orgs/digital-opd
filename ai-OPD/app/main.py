@@ -19,13 +19,13 @@ import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
-from . import claude_llm, documents, gemini_llm, llm, transcribe
+from . import claude_llm, cost_log, documents, gemini_llm, llm, transcribe
 from rapidfuzz import fuzz
 
 from .spellfix import TRUSTED_THRESHOLD, speller
-from .config import _LEGACY_CLAUDE_KEYS, settings
+from .config import _LEGACY_CLAUDE_KEYS, _STT_CONFIG_ERROR, settings
 from .prompts import consolidate as consolidate_prompt
 from .prompts import imaging as imaging_prompt
 from .prompts import prescription as prescription_prompt
@@ -79,15 +79,42 @@ async def lifespan(_: FastAPI):
             key,
             key,
         )
-    # Load Whisper up front: a cold load mid-consultation would look like a hang.
+    if _STT_CONFIG_ERROR:
+        log.error("%s", _STT_CONFIG_ERROR)
+    # Ready the speech provider up front. On Whisper that is a cold model load,
+    # which mid-consultation would look like a hang; on Sarvam it is the DNS +
+    # TLS handshake, which would otherwise land on the first thing the doctor
+    # says. Either way the cost is paid here, once, before anyone is waiting.
     try:
         transcribe.load_model()
+        await transcribe.warm_up()
     except Exception as err:
-        log.error("Whisper failed to load — /transcribe will return 503. %s", err)
+        log.error(
+            "Speech provider %r failed to start — /transcribe will return 503. %s",
+            settings.stt_provider,
+            err,
+        )
     yield
+    await transcribe.aclose()
 
 
 app = FastAPI(title="OPD AI sidecar", version="1.0.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _collect_usage(request: Request, call_next):
+    """Start a fresh spend tally for every request.
+
+    Here rather than at the top of each route so a route added later is
+    counted by default instead of by remembering. Each handler ends by putting
+    `cost_log.drain()` in its response; one that does not simply reports no
+    usage, and the JSONL log still has the call either way.
+
+    The ContextVar is per-task, so two consultations in flight cannot see each
+    other's tally.
+    """
+    cost_log.start_request()
+    return await call_next(request)
 
 
 # ── Keeping the event loop free ───────────────────────────────
@@ -100,15 +127,19 @@ app = FastAPI(title="OPD AI sidecar", version="1.0.0", lifespan=lifespan)
 #
 # Threads alone are not enough, so both are also bounded:
 #
-#   * a faster-whisper model object cannot take concurrent calls, so
-#     transcriptions are admitted one per model in the pool (WHISPER_POOL_SIZE,
-#     default 1) — off the loop, so everything else still answers while they
-#     run. transcribe.py checks a model out per request and is the real guard;
-#     this semaphore just parks the waiting requests on the event loop instead
-#     of tying up a worker thread each.
+#   * transcriptions are admitted `settings.stt_concurrency` at a time. What
+#     that bounds depends entirely on the provider, and getting it wrong is
+#     expensive. A faster-whisper model object cannot take concurrent calls, so
+#     on Whisper it is the pool size (WHISPER_POOL_SIZE, default 1) and the
+#     pool itself is the real guard; this semaphore only parks the waiting
+#     requests on the event loop instead of tying up a worker thread each. On
+#     Sarvam nothing local is being protected — it is a network call — so that
+#     same bound of 1 would put every doctor and every chunk in a single-file
+#     queue behind one HTTP request, which is the opposite of the reason for
+#     moving to a hosted model at all. Hence SARVAM_CONCURRENCY, default 8.
 #   * OCR is CPU-bound; a couple in parallel saturates the machine, and more
 #     just makes every one of them slower.
-_TRANSCRIBE_SLOT = asyncio.Semaphore(max(1, settings.whisper_pool_size))
+_TRANSCRIBE_SLOT = asyncio.Semaphore(settings.stt_concurrency)
 _OCR_SLOTS = asyncio.Semaphore(2)
 
 
@@ -126,6 +157,39 @@ def _log_rtf(route: str, started: float, audio_seconds: float) -> None:
     rtf = elapsed / audio_seconds if audio_seconds > 0 else 0.0
     transcribe.record_rtf(rtf)
     log.info("%s: %.1fs audio in %.1fs (RTF %.2f)", route, audio_seconds, elapsed, rtf)
+
+
+async def _run_stt(
+    audio: UploadFile,
+    catalog: list[str],
+    previous_text: str = "",
+) -> tuple[str, str, float, str]:
+    """Transcribe an upload, by whichever route the active provider wants.
+
+    The fourth value is the provider that actually served the call, which is
+    not always the configured one — see settings.model_version_for.
+
+    Sarvam takes the bytes straight from the upload into the request body:
+    the old path wrote every chunk to a temp file and read it back purely
+    because faster-whisper wants a path, and two disk round trips per
+    few-second segment is latency bought for nothing. Whisper keeps the temp
+    file, and keeps running in a worker thread, because it blocks.
+    """
+    if settings.stt_provider == "sarvam":
+        data = await audio.read()
+        return await transcribe.atranscribe(
+            data, catalog, previous_text, audio.filename or "audio.wav"
+        )
+
+    path = await asyncio.to_thread(_save_upload, audio)
+    try:
+        text, language, duration = await asyncio.to_thread(
+            transcribe.transcribe, path, catalog, previous_text
+        )
+        return text, language, duration, "whisper"
+    finally:
+        # The audio is never persisted — the backend keeps only the transcript.
+        os.unlink(path)
 
 
 def _save_upload(upload: UploadFile) -> str:
@@ -163,11 +227,15 @@ async def health() -> HealthResponse:
     # Ollama is probed only when it is the backend actually being relied on,
     # which also keeps a dead OLLAMA_URL from spending the caller's timeout.
     llm_ok = settings.cloud_llm_configured or await llm.is_reachable()
-    whisper_ok = transcribe.is_loaded()
+    stt_ok = transcribe.is_loaded()
     return HealthResponse(
-        status="ok" if (llm_ok and whisper_ok) else "degraded",
-        whisper_loaded=whisper_ok,
-        whisper_model=settings.whisper_model,
+        status="ok" if (llm_ok and stt_ok) else "degraded",
+        stt_provider=settings.stt_provider,
+        # Field names kept from when Whisper was the only option: the backend's
+        # isHealthy() reads `status` and nothing else, so renaming them would
+        # be churn. They carry whichever provider is actually active.
+        whisper_loaded=stt_ok,
+        whisper_model=settings.active_stt_model,
         whisper_rtf_last=transcribe.last_rtf(),
         llm_reachable=llm_ok,
         # The model that will actually serve a request, not the Ollama name it
@@ -184,32 +252,32 @@ async def transcribe_audio(
     audio: UploadFile = File(...),
     # JSON array of medicine names, used to bias decoding toward clinic vocabulary.
     medicine_catalog: str = Form("[]"),
+    # The consultation this audio belongs to, so the cost log can add this
+    # call to the extraction that follows it and answer "what did this one
+    # prescription cost". Optional: a caller that omits it still transcribes.
+    session_id: str = Form(""),
 ) -> TranscribeResponse:
+    cost_log.bind_session(session_id)
     if not transcribe.is_loaded():
-        raise HTTPException(503, "Speech model is not loaded on this host.")
+        raise HTTPException(503, f"Speech provider {settings.stt_provider!r} is not ready on this host.")
 
     catalog = _parse_catalog(medicine_catalog)
 
-    path = await asyncio.to_thread(_save_upload, audio)
     try:
         async with _TRANSCRIBE_SLOT:
             started = time.monotonic()
-            text, language, duration = await asyncio.to_thread(
-                transcribe.transcribe, path, catalog
-            )
+            text, language, duration, served_by = await _run_stt(audio, catalog)
             _log_rtf("transcribe", started, duration)
     except Exception as err:
         log.exception("Transcription failed")
         raise HTTPException(500, f"Transcription failed: {err}") from err
-    finally:
-        # The audio is never persisted — the backend keeps only the transcript.
-        os.unlink(path)
 
     return TranscribeResponse(
         text=text,
         language=language,
         duration_seconds=duration,
-        model_version=settings.model_version,
+        model_version=settings.model_version_for(served_by),
+        usage=cost_log.drain(),
     )
 
 
@@ -228,9 +296,13 @@ async def transcribe_chunk(
     # match the answer to the question when several are in flight.
     seq: int = Form(...),
     # The tail of the transcript so far, so the model hears this piece in
-    # context — see transcribe._vocabulary_prompt.
+    # context. Used by the Whisper provider (see
+    # app/stt/whisper_stt.py::_vocabulary_prompt); accepted and ignored by
+    # Sarvam, whose REST endpoint is stateless per call.
     previous_text: str = Form(""),
     medicine_catalog: str = Form("[]"),
+    # See /transcribe — one consultation is many of these plus one extraction.
+    session_id: str = Form(""),
 ) -> TranscribeChunkResponse:
     """Transcribe one piece of a recording that is still in progress.
 
@@ -246,27 +318,26 @@ async def transcribe_chunk(
     sooner).
     """
     if not transcribe.is_loaded():
-        raise HTTPException(503, "Speech model is not loaded on this host.")
+        raise HTTPException(503, f"Speech provider {settings.stt_provider!r} is not ready on this host.")
 
-    path = await asyncio.to_thread(_save_upload, audio)
+    cost_log.bind_session(session_id)
     try:
         async with _TRANSCRIBE_SLOT:
             started = time.monotonic()
-            text, _language, duration = await asyncio.to_thread(
-                transcribe.transcribe, path, _parse_catalog(medicine_catalog), previous_text
+            text, _language, duration, served_by = await _run_stt(
+                audio, _parse_catalog(medicine_catalog), previous_text
             )
             _log_rtf(f"transcribe-chunk#{seq}", started, duration)
     except Exception as err:
         log.exception("Chunk transcription failed (seq=%d)", seq)
         raise HTTPException(500, f"Transcription failed: {err}") from err
-    finally:
-        os.unlink(path)
 
     return TranscribeChunkResponse(
         seq=seq,
         text=text,
         duration_seconds=duration,
-        model_version=settings.model_version,
+        model_version=settings.model_version_for(served_by),
+        usage=cost_log.drain(),
     )
 
 
@@ -341,6 +412,7 @@ async def _summarise_from_image(path: str, content_type: str) -> ReportSummary |
             image=image,
             media_type=media_type,
             schema=REPORT_SUMMARY_JSON_SCHEMA,
+            route="report-summary-image",
             effort="high",
         )
     except Exception as err:
@@ -360,21 +432,43 @@ def _unreadable_response(reason: str, chars: int, method) -> SummarizeReportResp
         extracted_chars=chars,
         extraction_method=method,
         model_version=settings.model_version,
+        usage=cost_log.drain(),
     )
 
 
 @app.post("/summarize-report", response_model=SummarizeReportResponse)
 async def summarize_report(file: UploadFile = File(...)) -> SummarizeReportResponse:
+    started = time.monotonic()
     path = await asyncio.to_thread(_save_upload, file)
     try:
+        # Timed separately because the two stages fail differently: reading is
+        # slow on a phone photo of a report (Tesseract, and it queues on
+        # _OCR_SLOTS behind other uploads), while summarising is slow because
+        # of the model. One number for both cannot tell a doctor's "the report
+        # is stuck" from a busy box.
+        queued = time.monotonic()
         async with _OCR_SLOTS:
+            waited = time.monotonic() - queued
             text, method = await asyncio.to_thread(
                 documents.extract_text, path, file.content_type or ""
             )
+        read_seconds = time.monotonic() - started
         # The vision read below needs the file too, so it is removed once the
         # whole decision is made rather than straight after OCR.
         path_for_vision = path
-        return await _summarize_extracted(file, path_for_vision, text, method)
+        response = await _summarize_extracted(file, path_for_vision, text, method)
+        total = time.monotonic() - started
+        log.info(
+            "summarize-report: total %.1fs (read %.1fs via %s incl. %.1fs queued, "
+            "summarise %.1fs) %d chars",
+            total,
+            read_seconds,
+            method,
+            waited,
+            total - read_seconds,
+            len(text),
+        )
+        return response
     finally:
         os.unlink(path)
 
@@ -406,6 +500,7 @@ async def _summarize_extracted(
                 extracted_chars=len(text),
                 extraction_method="vision",
                 model_version=settings.model_version,
+                usage=cost_log.drain(),
             )
 
     if reason:
@@ -426,6 +521,7 @@ async def _summarize_extracted(
                 system=report_prompt.SYSTEM,
                 user=user_prompt,
                 schema=REPORT_SUMMARY_JSON_SCHEMA,
+                route="report-summary",
                 # A doctor reads a summary closely, and these run a
                 # fraction as often as extraction, so they can afford
                 # the deeper setting.
@@ -440,10 +536,18 @@ async def _summarize_extracted(
                 system=report_prompt.SYSTEM,
                 user=user_prompt,
                 schema=REPORT_SUMMARY_JSON_SCHEMA,
+                route="report-summary",
             )
         except Exception as gemini_err:
             log.warning("Gemini report summarization failed (%s), falling back to local LLM.", gemini_err)
 
+    if raw is None and not settings.allow_local_narrative:
+        raise HTTPException(
+            503,
+            "No cloud AI backend could summarise this report, and the local model "
+            "is not trusted with clinical narrative (set ALLOW_LOCAL_NARRATIVE=true "
+            "to override). Please retry, or open the report directly.",
+        )
     if raw is None:
         try:
             raw = await llm.generate_json(
@@ -462,6 +566,7 @@ async def _summarize_extracted(
         extracted_chars=len(text),
         extraction_method=method,
         model_version=settings.model_version,
+        usage=cost_log.drain(),
     )
 
 
@@ -489,6 +594,7 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
                 system=consolidate_prompt.SYSTEM,
                 user=consolidate_prompt.build_user(payload),
                 schema=REPORT_SUMMARY_JSON_SCHEMA,
+                route="consolidate",
                 # A doctor reads a summary closely, and these run a
                 # fraction as often as extraction, so they can afford
                 # the deeper setting.
@@ -503,9 +609,36 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
                 system=consolidate_prompt.SYSTEM,
                 user=consolidate_prompt.build_user(payload),
                 schema=REPORT_SUMMARY_JSON_SCHEMA,
+                route="consolidate",
             )
         except Exception as gemini_err:
             log.warning("Gemini consolidate summaries failed (%s), falling back to local LLM.", gemini_err)
+
+    def deterministic() -> dict:
+        """Join the per-report summaries verbatim, inventing nothing.
+
+        Used both when the local model fails and when it is not trusted to
+        write clinical narrative at all. Concatenation cannot contradict the
+        source summaries, which is the property that matters here.
+        """
+        parts = [r.summary.strip() for r in reports if (r.summary or "").strip()]
+        findings: list = []
+        for r in reports:
+            findings.extend(r.key_findings)
+        return {
+            "summary": " ".join(parts),
+            "key_findings": findings[:8],
+            "abnormal_values": [],
+            "report_type": "Consolidated Reports",
+            "title": f"Combined Summary ({len(reports)} reports)",
+        }
+
+    if raw is None and not settings.allow_local_narrative:
+        log.warning(
+            "No cloud backend for consolidation; joining the source summaries "
+            "deterministically rather than letting the local model write prose."
+        )
+        raw = deterministic()
 
     if raw is None:
         try:
@@ -516,17 +649,7 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
             )
         except Exception as err:
             log.warning("Consolidate LLM failed (%s), falling back to deterministic consolidation.", err)
-            combined_summary_parts = [r.summary.strip() for r in reports if (r.summary or "").strip()]
-            combined_findings = []
-            for r in reports:
-                combined_findings.extend(r.key_findings)
-            raw = {
-                "summary": " ".join(combined_summary_parts),
-                "key_findings": combined_findings[:8],
-                "abnormal_values": [],
-                "report_type": "Consolidated Reports",
-                "title": f"Combined Summary ({len(reports)} reports)",
-            }
+            raw = deterministic()
 
     # Preserve all authoritative abnormal values across all source reports
     collected_abnormals = []
@@ -539,11 +662,24 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
                 collected_abnormals.append(a.model_dump())
     if collected_abnormals:
         raw["abnormal_values"] = collected_abnormals
+    else:
+        # Nothing authoritative to carry across, so whatever the model put here
+        # is its own. Put it through the same normaliser the single-report route
+        # uses rather than trusting it: this is the one path where LLM-authored
+        # abnormal values reach the response, and consolidation is a restatement
+        # of summaries that were already checked — a value appearing for the
+        # first time here was invented at this step.
+        from . import contradiction_guard
+
+        raw["abnormal_values"] = contradiction_guard.coerce_abnormal_values(
+            raw.get("abnormal_values")
+        )
 
     return ConsolidateResponse(
         summary=ReportSummary.model_validate(raw),
         source_count=len(reports),
         model_version=settings.model_version,
+        usage=cost_log.drain(),
     )
 
 
@@ -714,6 +850,7 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
                 system=progress_prompt.SYSTEM,
                 user=user,
                 schema=PROGRESS_JSON_SCHEMA,
+                route="progress",
                 # A doctor reads a summary closely, and these run a
                 # fraction as often as extraction, so they can afford
                 # the deeper setting.
@@ -728,6 +865,7 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
                 system=progress_prompt.SYSTEM,
                 user=user,
                 schema=PROGRESS_JSON_SCHEMA,
+                route="progress",
             )
         except Exception as gemini_err:
             log.warning(
@@ -735,6 +873,13 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
                 gemini_err,
             )
 
+    if raw is None and not settings.allow_local_narrative:
+        raise HTTPException(
+            503,
+            "No cloud AI backend could write this progress note, and the local "
+            "model is not trusted with clinical narrative (set "
+            "ALLOW_LOCAL_NARRATIVE=true to override). Please retry.",
+        )
     if raw is None:
         try:
             raw = await llm.generate_json(
@@ -753,6 +898,7 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
         summary=summary,
         visit_count=2,
         model_version=f"{settings.model_version}+{progress_prompt.VERSION}",
+        usage=cost_log.drain(),
     )
 
 
@@ -1393,6 +1539,7 @@ def _drop_ungrounded_fields(draft: DraftPrescription, transcript: str) -> None:
 # The Claude settings for this route alone — see the AI_CLAUDE_EXTRACT_* notes
 # in config.py. Built once; nothing in it changes per request.
 _EXTRACT_KW = dict(
+    route="prescription",
     effort=settings.claude_extract_effort,
     model=settings.claude_extract_model or None,
     max_tokens=settings.claude_extract_max_tokens,
@@ -1404,6 +1551,10 @@ _EXTRACT_KW = dict(
 async def extract_prescription(
     body: ExtractPrescriptionRequest,
 ) -> ExtractPrescriptionResponse:
+    # Binds every model call this route makes — including a fallback to a
+    # second provider — to the consultation, so the prescription's total is
+    # the sum of its rows rather than a guess from timestamps.
+    cost_log.bind_session(body.session_id)
     if not body.transcript.strip():
         raise HTTPException(422, "Transcript is empty — nothing to extract.")
 
@@ -1451,7 +1602,7 @@ async def extract_prescription(
         if settings.gemini_enabled and settings.gemini_api_key:
             try:
                 raw = await gemini_llm.generate_json(
-                    system, user, PRESCRIPTION_JSON_SCHEMA
+                    system, user, PRESCRIPTION_JSON_SCHEMA, route="prescription"
                 )
                 return raw, "gemini"
             except Exception as gemini_err:
@@ -1466,11 +1617,12 @@ async def extract_prescription(
 
     started = time.monotonic()
     raw_draft, provider = await generate()
+    model_seconds = time.monotonic() - started
     log.info(
         "extract-prescription: %s drafted %d chars in %.1fs",
         provider,
         len(body.transcript),
-        time.monotonic() - started,
+        model_seconds,
     )
     draft = DraftPrescription.model_validate(raw_draft)
 
@@ -1624,7 +1776,25 @@ async def extract_prescription(
     actual = settings.claude_model if provider == "claude" else (
         settings.gemini_model if provider == "gemini" else settings.llm_model
     )
+    # Model time against endpoint time. The difference is the retry, the
+    # spellfix and the grounding guards — all regex and rapidfuzz, so it should
+    # stay in the milliseconds. If it ever does not, this line is the evidence,
+    # and a second draft on the retry path shows up here as a doubled total.
+    total_seconds = time.monotonic() - started
+    log.info(
+        "extract-prescription: total %.1fs (model %.1fs, post %.1fs)",
+        total_seconds,
+        model_seconds,
+        total_seconds - model_seconds,
+    )
     return ExtractPrescriptionResponse(
         prescription=draft,
-        model_version=f"whisper:{settings.whisper_model}|rx:{actual}",
+        # Built by hand rather than from settings.model_version because `actual`
+        # is the LLM that really answered, which is not always the one that was
+        # tried first. The STT half has to match the property's format or the
+        # stored row goes back to claiming Whisper transcribed what Sarvam did —
+        # and this value is the one that lands on the session, because it
+        # overwrites the transcription's own stamp downstream.
+        model_version=f"stt:{settings.stt_provider}:{settings.active_stt_model}|rx:{actual}",
+        usage=cost_log.drain(),
     )

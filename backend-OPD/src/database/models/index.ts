@@ -18,6 +18,7 @@ import { EPrescription } from './e-prescription.model';
 import { EPrescriptionMedicine } from './e-prescription-medicine.model';
 import { MedicineCatalog } from './medicine-catalog.model';
 import { AiTrainingSample } from './ai-training-sample.model';
+import { AiUsageEvent } from './ai-usage-event.model';
 import { ActivityLog } from './activity-log.model';
 import { EmailVerification } from './email-verification.model';
 import { PasswordReset } from './password-reset.model';
@@ -81,6 +82,7 @@ export {
   EPrescriptionMedicine,
   MedicineCatalog,
   AiTrainingSample,
+  AiUsageEvent,
   ActivityLog,
   Subscription,
   Plan,

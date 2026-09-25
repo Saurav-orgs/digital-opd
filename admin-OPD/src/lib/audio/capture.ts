@@ -3,6 +3,29 @@ import workletUrl from './segmenter.worklet.js?url';
 export const SAMPLE_RATE = 16000;
 
 /**
+ * How the recording is cut into pieces.
+ *
+ * These were chosen against a local Whisper, which pads every input to a
+ * 30-second window — so a 3-second piece cost almost what a 20-second one did,
+ * and long pieces were the economical choice. A hosted STT provider does not
+ * pad and bills by audio length, so short pieces are now genuinely cheap, and
+ * the backend transcribes several at once (CONSULTATION_PARALLEL_CHUNKS).
+ *
+ * `maxMs` is the one that matters most. It caps how much audio can still be
+ * unheard when the doctor presses Stop — a doctor who talks for thirty seconds
+ * without pausing used to leave up to twenty seconds of it outstanding, and
+ * that wait is the whole reason they notice the feature at all.
+ */
+export const SEGMENT = {
+  /** Never cut a piece shorter than this, however long the pause. */
+  minMs: 2000,
+  /** A pause this long, after minMs, ends the piece. */
+  silenceMs: 600,
+  /** Cut here regardless, so a doctor who never pauses still sees text. */
+  maxMs: 8000,
+};
+
+/**
  * The microphone, cut into pieces at the pauses.
  *
  * Opens the mic, runs it through the segmenter worklet, and calls
@@ -48,7 +71,7 @@ export async function startCapture(onSegment: (pcm: Int16Array) => void): Promis
     numberOfInputs: 1,
     numberOfOutputs: 0,
     channelCount: 1,
-    processorOptions: { targetRate: SAMPLE_RATE },
+    processorOptions: { targetRate: SAMPLE_RATE, ...SEGMENT },
   });
 
   let flushed: (() => void) | null = null;

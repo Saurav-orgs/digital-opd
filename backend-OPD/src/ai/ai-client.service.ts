@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { AiUsage } from './ai-usage.service';
 
 /** Shapes returned by the local sidecar (see ai-OPD/app/schemas.py). */
 export interface AiAbnormalValue {
@@ -63,6 +64,8 @@ export interface AiProgressResult {
   summary: AiProgressSummary;
   visit_count: number;
   model_version: string;
+  /** What this call cost, for AiUsageService. Absent from an older sidecar. */
+  usage?: AiUsage[];
 }
 
 /** One visit's already-computed report summaries, as sent for comparison. */
@@ -80,6 +83,7 @@ export interface AiConsolidatedSummary {
   summary: AiReportSummary;
   source_count: number;
   model_version: string;
+  usage?: AiUsage[];
 }
 
 export interface AiTranscript {
@@ -87,6 +91,7 @@ export interface AiTranscript {
   language: string;
   duration_seconds: number;
   model_version: string;
+  usage?: AiUsage[];
 }
 
 export interface AiTranscriptChunk {
@@ -94,6 +99,7 @@ export interface AiTranscriptChunk {
   text: string;
   duration_seconds: number;
   model_version: string;
+  usage?: AiUsage[];
 }
 
 /** Thrown when the sidecar is unreachable or cannot produce a result. */
@@ -137,6 +143,8 @@ export class AiClientService {
     medicineCatalog: string[] = [],
     /** Aborts the request when the doctor gives up waiting on it. */
     signal?: AbortSignal,
+    /** Groups this call with the rest of the same consultation in the cost log. */
+    sessionId = '',
   ): Promise<AiTranscript> {
     const form = new FormData();
     form.append(
@@ -147,6 +155,7 @@ export class AiClientService {
       audio.originalname || 'consultation.webm',
     );
     form.append('medicine_catalog', JSON.stringify(medicineCatalog));
+    form.append('session_id', sessionId);
 
     return this.postForm<AiTranscript>('/transcribe', form, signal);
   }
@@ -164,6 +173,8 @@ export class AiClientService {
     previousText: string,
     medicineCatalog: string[] = [],
     signal?: AbortSignal,
+    /** Groups this chunk with the rest of the same consultation in the cost log. */
+    sessionId = '',
   ): Promise<AiTranscriptChunk> {
     const form = new FormData();
     form.append(
@@ -174,6 +185,7 @@ export class AiClientService {
     form.append('seq', String(seq));
     form.append('previous_text', previousText);
     form.append('medicine_catalog', JSON.stringify(medicineCatalog));
+    form.append('session_id', sessionId);
 
     return this.postForm<AiTranscriptChunk>('/transcribe-chunk', form, signal);
   }
@@ -181,7 +193,7 @@ export class AiClientService {
   /** Summarise an uploaded report (PDF or photo). */
   async summarizeReport(
     file: Express.Multer.File,
-  ): Promise<{ summary: AiReportSummary; model_version: string }> {
+  ): Promise<{ summary: AiReportSummary; model_version: string; usage?: AiUsage[] }> {
     const form = new FormData();
     form.append(
       'file',
@@ -191,7 +203,7 @@ export class AiClientService {
       file.originalname || 'report',
     );
 
-    return this.postForm<{ summary: AiReportSummary; model_version: string }>(
+    return this.postForm<{ summary: AiReportSummary; model_version: string; usage?: AiUsage[] }>(
       '/summarize-report',
       form,
     );
@@ -256,7 +268,9 @@ export class AiClientService {
       complaint?: string;
     };
     medicine_catalog: string[];
-  }, signal?: AbortSignal): Promise<{ prescription: AiDraftPrescription; model_version: string }> {
+    /** Groups this call with the consultation's transcription in the cost log. */
+    session_id?: string;
+  }, signal?: AbortSignal): Promise<{ prescription: AiDraftPrescription; model_version: string; usage?: AiUsage[] }> {
     const res = await this.fetchWithTimeout(
       `${this.baseUrl}/extract-prescription`,
       {
