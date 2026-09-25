@@ -8,16 +8,23 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { SubscriptionsService } from './subscriptions.service';
 import { PaymentEventsService } from './payment-events.service';
+import { InvoicesService } from './invoices.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plan.dto';
 import { CancelSubscriptionDto, GrantSubscriptionDto } from './dto/grant.dto';
+import { RenewSubscriptionDto } from './dto/renew.dto';
 import { QuerySubscriptionsDto } from './dto/query-subscriptions.dto';
 import { QueryPaymentEventsDto } from './dto/query-payment-events.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
+import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { PermissionAction, PermissionModule, UserType } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { AppException } from '../common/errors/app.exception';
@@ -43,7 +50,21 @@ export class BillingController {
     private readonly plans: PlansService,
     private readonly subscriptions: SubscriptionsService,
     private readonly events: PaymentEventsService,
+    private readonly invoices: InvoicesService,
+    private readonly invoicePdf: InvoicePdfService,
   ) {}
+
+  /** Sends a rendered invoice as a download, under its own number. */
+  private async sendInvoicePdf(id: string, userId: string | null, res: Response) {
+    const invoice = await this.invoices.findOne(id, userId);
+    const buffer = await this.invoicePdf.render(invoice);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${this.invoicePdf.filename(invoice)}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition',
+    });
+    return new StreamableFile(buffer);
+  }
 
   private assertSuperAdmin(user: AuthUser) {
     if (user.type !== UserType.SUPER_ADMIN) {
@@ -59,6 +80,48 @@ export class BillingController {
   @ApiOperation({ summary: 'The signed-in account: its current plan and payment history' })
   async mine(@CurrentUser() user: AuthUser) {
     return this.subscriptions.historyForUser(user.id);
+  }
+
+  @Get('me/invoices')
+  @ApiOperation({ summary: "The signed-in account's own invoices, newest first" })
+  myInvoices(@CurrentUser() user: AuthUser) {
+    return this.invoices.listForUser(user.id);
+  }
+
+  @Get('me/invoices/:id/pdf')
+  @ApiOperation({ summary: 'One of the account\'s own invoices, as a PDF' })
+  @RawResponse()
+  myInvoicePdf(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    // Scoped to the caller: an invoice id is not a capability.
+    return this.sendInvoicePdf(id, user.id, res);
+  }
+
+  @Get('me/renewal')
+  @ApiOperation({
+    summary:
+      'Whether this account may buy its next cycle yet, when it could, and the plans on sale',
+  })
+  renewal(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.renewalFor(user.id);
+  }
+
+  @Post('me/renew')
+  @ApiOperation({
+    summary:
+      'Buy the next cycle from inside the app. The new cycle starts when the current one ends.',
+  })
+  renew(@CurrentUser() user: AuthUser, @Body() dto: RenewSubscriptionDto) {
+    return this.subscriptions.renew(user, dto);
+  }
+
+  @Get('me/orders/:orderId')
+  @ApiOperation({ summary: 'Where one of this account\'s own orders stands' })
+  myOrder(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.subscriptions.myOrderStatus(orderId, user.id);
   }
 
   @Get('me/events')
@@ -156,6 +219,29 @@ export class BillingController {
   ) {
     this.assertSuperAdmin(user);
     return this.subscriptions.cancel(id, dto, user);
+  }
+
+  // ── Invoices (super admin) ─────────────────────────────────
+
+  @Get('invoices')
+  @ApiOperation({ summary: 'Super-admin: every invoice raised on the platform' })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
+  listInvoices(@CurrentUser() user: AuthUser) {
+    this.assertSuperAdmin(user);
+    return this.invoices.listAll();
+  }
+
+  @Get('invoices/:id/pdf')
+  @ApiOperation({ summary: "Super-admin: any doctor's invoice, as a PDF" })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.READ })
+  @RawResponse()
+  anyInvoicePdf(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    this.assertSuperAdmin(user);
+    return this.sendInvoicePdf(id, null, res);
   }
 
   // ── Payment activity log ───────────────────────────────────

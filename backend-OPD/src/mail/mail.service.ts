@@ -5,12 +5,20 @@ import type { Transporter } from 'nodemailer';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 
+/** A file to travel with the message — an invoice PDF, and nothing else so far. */
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
 export interface MailMessage {
   to: string;
   subject: string;
   html: string;
   /** Plain-text fallback; derived from `html` when omitted. */
   text?: string;
+  attachments?: MailAttachment[];
 }
 
 /**
@@ -87,8 +95,10 @@ export class MailService implements OnModuleInit {
 
   async send(msg: MailMessage): Promise<void> {
     const text = msg.text ?? htmlToText(msg.html);
+    const files = msg.attachments ?? [];
     if (!this.transporter) {
-      this.logger.log(`[mail → ${msg.to}] ${msg.subject}\n${text}`);
+      const note = files.length ? `\n[${files.map((f) => f.filename).join(', ')} attached]` : '';
+      this.logger.log(`[mail → ${msg.to}] ${msg.subject}\n${text}${note}`);
       return;
     }
     try {
@@ -98,6 +108,13 @@ export class MailService implements OnModuleInit {
         subject: msg.subject,
         html: msg.html,
         text,
+        attachments: files.length
+          ? files.map((f) => ({
+              filename: f.filename,
+              content: f.content,
+              contentType: f.contentType,
+            }))
+          : undefined,
       });
     } catch (err) {
       this.logger.error(`Could not send "${msg.subject}" to ${msg.to}: ${(err as Error).message}`);

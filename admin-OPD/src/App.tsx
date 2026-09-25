@@ -17,6 +17,7 @@ import SettingsPage from './pages/Settings';
 import PlansPage from './pages/Plans';
 import SubscriptionsPage from './pages/Subscriptions';
 import PaymentLogPage from './pages/PaymentLog';
+import BillingPage from './pages/Billing';
 import BlockedNumbersPage from './pages/BlockedNumbers';
 import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
@@ -24,12 +25,16 @@ import DoctorRegisterPage from './pages/DoctorRegister';
 import LetterheadPage from './pages/Letterhead';
 import DoctorDetailPage from './pages/DoctorDetail';
 import ForgotPassword from './pages/ForgotPassword';
+import ChangePasswordPage from './pages/ChangePassword';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading, needsSetup } = useAuth();
+  const { user, loading, needsSetup, mustChangePassword } = useAuth();
   if (loading) return <div className="center-screen"><Loading /></div>;
   if (!user) return <Navigate to="/login" replace />;
+  // Ahead of the setup form: an account on a mailed password cannot call the
+  // API at all, so there is nothing for any other screen to load.
+  if (mustChangePassword) return <Navigate to="/change-password" replace />;
   // A paid account with no clinic yet has nothing to show on any screen —
   // no appointments, no schedule, no letterhead — so it goes to the profile
   // form first. Every route inside the shell is behind this.
@@ -39,11 +44,21 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 /** The first-login profile form. Only reachable while the clinic is missing. */
 function SetupRoute() {
-  const { user, loading, needsSetup } = useAuth();
+  const { user, loading, needsSetup, mustChangePassword } = useAuth();
   if (loading) return <div className="center-screen"><Loading /></div>;
   if (!user) return <Navigate to="/login" replace />;
+  if (mustChangePassword) return <Navigate to="/change-password" replace />;
   if (!needsSetup) return <Navigate to="/" replace />;
   return <DoctorRegisterPage mode="setup" />;
+}
+
+/** The forced password change. Only reachable while the flag is set. */
+function ChangePasswordRoute() {
+  const { user, loading, mustChangePassword } = useAuth();
+  if (loading) return <div className="center-screen"><Loading /></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!mustChangePassword) return <Navigate to="/" replace />;
+  return <ChangePasswordPage />;
 }
 
 /** Landing route: first module the user can see. */
@@ -65,6 +80,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<DoctorRegisterPage />} />
       <Route path="/setup" element={<SetupRoute />} />
+      <Route path="/change-password" element={<ChangePasswordRoute />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route
         element={
@@ -90,6 +106,7 @@ export default function App() {
         <Route path="/plans" element={<PlansPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/payment-log" element={<PaymentLogPage />} />
+        <Route path="/billing" element={<BillingPage />} />
         <Route path="/blocked-numbers" element={<BlockedNumbersPage />} />
         <Route path="/patients" element={<PatientsPage />} />
         <Route path="/patients/:profileId" element={<PatientDetailPage />} />

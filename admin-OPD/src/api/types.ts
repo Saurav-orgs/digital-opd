@@ -23,6 +23,12 @@ export interface AuthUser {
   doctorId: string | null;
   /** Opened through the paid sign-up — a null doctorId then means "profile not set up yet". */
   subscriptionRequired: boolean;
+  /**
+   * The password was set by somebody else (an admin invite). Every screen is
+   * held behind the change-password form until it is replaced — the API
+   * refuses everything else, so this is not the client's decision to skip.
+   */
+  mustChangePassword: boolean;
   permissions: string[]; // "module:action"
 }
 
@@ -483,5 +489,76 @@ export interface BillingAccount {
 
 export interface MyBilling {
   current: Subscription | null;
+  /** Cycles paid for that have not started yet — a renewal bought early. */
+  upcoming: Subscription[];
   history: Subscription[];
+  /** The public pricing page — where the next cycle is bought. */
+  renewUrl: string;
+}
+
+/**
+ * A tax invoice for one paid subscription. Raised when the payment settled
+ * and never edited afterwards, so what a row says is what its PDF prints.
+ * Granted plans have no invoice — nothing was charged for them.
+ */
+export interface Invoice {
+  id: string;
+  invoiceNo: string;
+  issuedAt: string;
+  planCode: string;
+  planName: string;
+  months: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  currency: string;
+  baseAmount: number;
+  gstRate: number;
+  gstAmount: number;
+  totalAmount: number;
+  orderId: string | null;
+  paymentId: string | null;
+  /** Only on the super admin's platform-wide list. */
+  account?: { userId: string; email: string; name: string };
+}
+
+/** What the app needs to open a Cashfree checkout for a renewal. */
+export interface CheckoutSession {
+  orderId: string;
+  paymentSessionId: string;
+  env: 'sandbox' | 'production';
+  plan: string;
+  amount: { base: number; gstRate: number; gst: number; total: number };
+}
+
+/** Where a renewal order stands, polled after Cashfree sends the doctor back. */
+export interface OrderStatus {
+  orderId: string;
+  status: SubscriptionStatus;
+  plan: string;
+  planName: string;
+  total: number;
+  email: string;
+  endsAt: string | null;
+  loginUrl: string;
+}
+
+/** Whether the next cycle may be bought yet, and what it would cost. */
+export interface Renewal {
+  canRenew: boolean;
+  /** When the button turns on — null once it has. */
+  renewableFrom: string | null;
+  currentEndsAt: string | null;
+  /** When a renewal bought now would begin. */
+  startsAfter: string | null;
+  plans: Plan[];
+}
+
+/** What the super admin gets back after opening an account for a doctor. */
+export interface DoctorInviteResult {
+  userId: string;
+  name: string;
+  email: string;
+  /** Mailed to the doctor; shown once here in case the mail does not arrive. */
+  tempPassword: string;
+  plan: { name: string; endsAt: string } | null;
 }

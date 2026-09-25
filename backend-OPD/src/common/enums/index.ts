@@ -208,6 +208,8 @@ export enum ActivityAction {
   DOCTOR_APPROVED = 'doctor.approved',
   DOCTOR_REJECTED = 'doctor.rejected',
   DOCTOR_CREATED = 'doctor.created',
+  /** A super admin opened an account for a doctor, who has not signed in yet. */
+  DOCTOR_INVITED = 'doctor.invited',
   DOCTOR_DELETED = 'doctor.deleted',
   USER_CREATED = 'user.created',
   USER_DELETED = 'user.deleted',

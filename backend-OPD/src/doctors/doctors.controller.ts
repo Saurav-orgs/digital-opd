@@ -27,6 +27,7 @@ import { ConfigService } from '@nestjs/config';
 import { SettingsService } from '../settings/settings.service';
 import { AuthService } from '../auth/auth.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { InviteDoctorDto } from '../subscriptions/dto/invite.dto';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
@@ -228,6 +229,25 @@ export class DoctorsController {
    * Super-admin only: the caller must be type=super_admin; the permission
    * check (doctors:create) is a secondary guard.
    */
+  /**
+   * Opens an account for a doctor and mails them the way in.
+   *
+   * The lighter of the two ways a super admin adds a doctor: a name, an
+   * address and a plan, with the practice itself left to the doctor's own
+   * first sign-in. `POST /doctors` below is the other — it builds the whole
+   * tenant in one go, for when the admin is filling everything in themselves.
+   */
+  @Post('invite')
+  @ApiOperation({
+    summary:
+      'Super-admin: open an account for a doctor (name, email, plan) and email them a temporary password',
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
+  inviteDoctor(@CurrentUser() user: AuthUser, @Body() dto: InviteDoctorDto) {
+    this.assertSuperAdmin(user);
+    return this.subscriptions.inviteDoctor(dto, user);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Super-admin: create a new doctor tenant' })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })

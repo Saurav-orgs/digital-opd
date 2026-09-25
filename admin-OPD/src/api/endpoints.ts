@@ -30,6 +30,11 @@ import type {
   Paged,
   MyBilling,
   BillingAccount,
+  Invoice,
+  DoctorInviteResult,
+  CheckoutSession,
+  OrderStatus,
+  Renewal,
 } from './types';
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -111,6 +116,13 @@ export const doctorsApi = {
     license_number?: string;
     contact_mobile?: string;
   }) => api.post<CreateDoctorResult>('/doctors', body).then((r) => r.data),
+  /**
+   * Super-admin: open an account for a doctor — name, email and the plan it
+   * runs on. The server makes the password and emails the way in; the doctor
+   * fills in the practice itself on their first sign-in.
+   */
+  invite: (body: { name: string; email: string; plan_id?: string; months?: number; note?: string }) =>
+    api.post<DoctorInviteResult>('/doctors/invite', body).then((r) => r.data),
   /** Super-admin: full profile including a signed link to the certificate. */
   profile: (id: string) =>
     api.get<DoctorProfile>(`/doctors/${id}/profile`).then((r) => r.data),
@@ -187,9 +199,25 @@ function upload(url: string, file: File) {
     .then((r) => r.data);
 }
 
+/** Shared by both invoice download routes: bytes in, a named PDF out. */
+async function invoiceFile(url: string, fallbackName: string): Promise<File> {
+  const res = await api.get<Blob>(url, { responseType: 'blob' });
+  const name = filenameFromDisposition(res.headers['content-disposition'], fallbackName);
+  return new File([res.data], name, { type: 'application/pdf' });
+}
+
 // ── Platform settings (super-admin) ──────────────────────────
 export interface AppSettings {
   patient_web_base: string;
+  /** Who subscription invoices are issued by; stamped onto each one at issue. */
+  invoice_legal_name: string;
+  invoice_address: string;
+  invoice_gstin: string;
+  invoice_pan: string;
+  invoice_state: string;
+  invoice_email: string;
+  invoice_phone: string;
+  invoice_prefix: string;
 }
 
 export const settingsApi = {
@@ -582,6 +610,33 @@ export const billingApi = {
 
   myEvents: (params: Record<string, unknown> = {}) =>
     api.get<Paged<PaymentEvent>>('/billing/me/events', { params }).then((r) => r.data),
+
+  myInvoices: () => api.get<Invoice[]>('/billing/me/invoices').then((r) => r.data),
+
+  /** Whether the next cycle may be bought yet, plus the plans on sale. */
+  renewal: () => api.get<Renewal>('/billing/me/renewal').then((r) => r.data),
+
+  /** Opens a Cashfree order for the signed-in doctor's next cycle. */
+  renew: (body: { plan: string; mobile: string }) =>
+    api.post<CheckoutSession>('/billing/me/renew', body).then((r) => r.data),
+
+  /** Where a renewal order stands. Scoped to the caller. */
+  myOrder: (orderId: string) =>
+    api.get<OrderStatus>(`/billing/me/orders/${orderId}`).then((r) => r.data),
+
+  /**
+   * The PDF itself, as a File named the way the server named it.
+   *
+   * Fetched through the client rather than linked to: the route needs the
+   * bearer token, and an `<a href>` carries no headers.
+   */
+  myInvoicePdf: (id: string, fallbackName: string) =>
+    invoiceFile(`/billing/me/invoices/${id}/pdf`, fallbackName),
+
+  invoices: () => api.get<Invoice[]>('/billing/invoices').then((r) => r.data),
+
+  invoicePdf: (id: string, fallbackName: string) =>
+    invoiceFile(`/billing/invoices/${id}/pdf`, fallbackName),
 
   plans: () => api.get<Plan[]>('/billing/plans').then((r) => r.data),
 

@@ -20,7 +20,14 @@ export default function Login() {
     setError('');
     setBusy(true);
     try {
-      await login(email, password);
+      const signedIn = await login(email, password);
+      // An account on a mailed password goes straight to the change form, and
+      // carries what was just typed so it need not be copied out of the email
+      // a second time. Router state only — nothing is stored.
+      if (signedIn.mustChangePassword) {
+        navigate('/change-password', { replace: true, state: { current: password } });
+        return;
+      }
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to sign in.');

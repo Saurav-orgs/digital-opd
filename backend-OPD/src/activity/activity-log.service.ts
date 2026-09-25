@@ -42,6 +42,7 @@ const WRITE_THROUGH: ReadonlySet<ActivityAction> = new Set([
   ActivityAction.DOCTOR_APPROVED,
   ActivityAction.DOCTOR_REJECTED,
   ActivityAction.DOCTOR_CREATED,
+  ActivityAction.DOCTOR_INVITED,
   ActivityAction.DOCTOR_DELETED,
   ActivityAction.USER_CREATED,
   ActivityAction.USER_DELETED,

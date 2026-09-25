@@ -35,8 +35,21 @@ export class SettingsController {
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.UPDATE })
   async update(@CurrentUser() user: AuthUser, @Body() dto: UpdateSettingsDto) {
     this.assertSuperAdmin(user);
-    if (dto.patient_web_base !== undefined) {
-      await this.settings.set(SETTING_KEYS.patientWebBase, dto.patient_web_base);
+    // Each key is written only when the screen sent it, so a form that shows
+    // one section does not blank the fields belonging to another.
+    const writes: [string, string | undefined][] = [
+      [SETTING_KEYS.patientWebBase, dto.patient_web_base],
+      [SETTING_KEYS.invoiceLegalName, dto.invoice_legal_name],
+      [SETTING_KEYS.invoiceAddress, dto.invoice_address],
+      [SETTING_KEYS.invoiceGstin, dto.invoice_gstin?.toUpperCase()],
+      [SETTING_KEYS.invoicePan, dto.invoice_pan?.toUpperCase()],
+      [SETTING_KEYS.invoiceState, dto.invoice_state],
+      [SETTING_KEYS.invoiceEmail, dto.invoice_email],
+      [SETTING_KEYS.invoicePhone, dto.invoice_phone],
+      [SETTING_KEYS.invoicePrefix, dto.invoice_prefix?.toUpperCase()],
+    ];
+    for (const [key, value] of writes) {
+      if (value !== undefined) await this.settings.set(key, value);
     }
     return this.settings.all();
   }

@@ -99,7 +99,8 @@ export default function SignupDone() {
                   month: 'long',
                   year: 'numeric',
                 })}`}
-              . We emailed a receipt to <strong>{status.email}</strong>.
+              . We emailed your invoice to <strong>{status.email}</strong>; it is also in
+              Billing inside your account.
             </p>
             <ol className="next-steps">
               <li>Sign in with the email and password you just chose.</li>

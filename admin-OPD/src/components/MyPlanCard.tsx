@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { billingApi } from '../api/endpoints';
 import { Spinner } from './ui';
 
@@ -13,8 +14,12 @@ const daysLeft = (iso: string | null) =>
   iso === null ? null : Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
 
 /**
- * "My plan" on the doctor's own profile: what they are on, when it renews,
- * and what they have paid.
+ * "My plan" on the doctor's own profile: what they are on and when it renews.
+ *
+ * Deliberately a summary. The receipts, the invoice downloads and the past
+ * cycles all live on the Billing screen, and duplicating them here would mean
+ * two places to keep true — so this card answers the one question a doctor
+ * opening their profile actually has, and points at the rest.
  *
  * An account that predates plans has nothing to show — it is not gated and
  * has no subscription — so the card renders nothing rather than an empty
@@ -36,8 +41,6 @@ export function MyPlanCard() {
 
   const current = data.current;
   const left = daysLeft(current?.endsAt ?? null);
-  // Everything except the plan they are on now — the receipts.
-  const past = data.history.filter((h) => h.id !== current?.id);
 
   return (
     <div className="card">
@@ -71,25 +74,9 @@ export function MyPlanCard() {
         <p className="muted">No active plan. Your booking page is not taking appointments.</p>
       )}
 
-      {past.length > 0 && (
-        <>
-          <div className="my-plan-sub">Previous payments</div>
-          <ul className="my-plan-history">
-            {past.map((h) => (
-              <li key={h.id}>
-                <span>
-                  {h.planName}
-                  <span className="muted"> · {date(h.paidAt ?? h.startsAt)}</span>
-                </span>
-                <span className="muted">
-                  {h.granted ? 'Granted' : inr(h.totalAmount)}
-                  {h.status !== 'active' && h.status !== 'expired' ? ` · ${h.status}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <p className="my-plan-link">
+        <Link to="/billing">View invoices and past plans</Link>
+      </p>
     </div>
   );
 }

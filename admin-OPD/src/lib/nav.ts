@@ -27,6 +27,11 @@ export interface NavItem {
   /** When true, the super-admin does not see it — it is clinic-side only. */
   doctorOnly?: boolean;
   /**
+   * When true, only the doctor who owns the clinic sees it — not the staff
+   * they added. What the clinic pays for is the doctor's own business.
+   */
+  ownerOnly?: boolean;
+  /**
    * Temporarily hidden from the sidebar. The page, its route and its
    * permissions all stay in place — this only takes it out of the menu, so
    * showing it again is a one-line change.
@@ -66,6 +71,11 @@ export const NAV: NavItem[] = [
   // route and the permission module keep the old name; only the words the
   // doctor sees changed.
   { path: '/users', label: 'My Team', module: 'users', icon: 'users', doctorOnly: true },
+  // The doctor's own plan and invoices. Clinic-side, but not for the team:
+  // `ownerOnly` keeps it to the account the subscription belongs to. The
+  // permission is `users` only because every item needs one the role can
+  // read — the API behind it is scoped to the caller, not to a module.
+  { path: '/billing', label: 'Billing', module: 'users', icon: 'receipt', doctorOnly: true, ownerOnly: true },
   // Out of the menu: permissions are ticked straight on the team member now
   // (My Team keeps a role per person behind the scenes), so a separate Roles
   // screen only asked the doctor to name things twice. Route and page stay.

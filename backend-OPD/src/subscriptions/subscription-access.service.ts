@@ -14,7 +14,7 @@ import { ErrorCode } from '../common/errors/error-codes';
  * Kept apart from the sign-up service so AuthModule can import it without a
  * cycle — the sign-up flow needs AuthService, and AuthService needs this.
  *
- * Who is gated: an account opened through the paid flow
+ * Who is gated: an account opened through the paid flow or by a super admin
  * (`subscription_required`), and any staff login inside such a doctor's
  * tenant — the clinic's subscription is the doctor's. Everyone else (super
  * admin, doctors who predate plans and their staff) passes untouched.
@@ -34,12 +34,31 @@ export class SubscriptionAccessService {
     const active = await this.activeFor(ownerId);
     if (active) return;
 
-    const everPaid = await this.subscriptionModel.count({
-      where: { user_id: ownerId, status: SubscriptionStatus.ACTIVE },
-    });
+    // Three different situations wear the same face — a gated account with no
+    // live plan — and the doctor can only act on one of them, so the message
+    // has to say which. A plan that ran out is theirs to renew; a checkout
+    // they abandoned is theirs to finish; an account somebody opened for them
+    // and never mapped a plan to is ours to fix, and saying so saves them
+    // hunting for a payment screen that was never meant for them.
+    // `paid_at` is set both when money arrives and when a plan is granted, and
+    // never on an order that was only opened — so it is the honest test of
+    // "this account has held a plan before" and keeps an abandoned checkout
+    // out of the renewal message.
+    const [everHad, owner] = await Promise.all([
+      this.subscriptionModel.count({
+        where: { user_id: ownerId, paid_at: { [Op.ne]: null } },
+      }),
+      this.userModel.findByPk(ownerId, { attributes: ['id', 'invited_by'] }),
+    ]);
+
+    if (everHad > 0) {
+      throw new AppException(ErrorCode.SUBSCRIPTION_REQUIRED, {
+        message: 'Your subscription has ended. Please renew your plan to keep using myDigitalOPD.',
+      });
+    }
     throw new AppException(ErrorCode.SUBSCRIPTION_REQUIRED, {
-      message: everPaid
-        ? 'Your subscription has ended. Please renew your plan to keep using myDigitalOPD.'
+      message: owner?.invited_by
+        ? 'No plan has been added to your account yet, so you cannot sign in. Please contact the myDigitalOPD team.'
         : 'Your subscription payment is still pending. Please complete the payment to sign in.',
     });
   }

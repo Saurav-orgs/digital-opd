@@ -26,6 +26,7 @@ import { WhatsAppMessage } from './whatsapp-message.model';
 import { Subscription } from './subscription.model';
 import { Plan } from './plan.model';
 import { PaymentEvent } from './payment-event.model';
+import { Invoice } from './invoice.model';
 
 export const models = [
   Role,
@@ -56,6 +57,7 @@ export const models = [
   Subscription,
   Plan,
   PaymentEvent,
+  Invoice,
 ];
 
 export {
@@ -83,4 +85,5 @@ export {
   Subscription,
   Plan,
   PaymentEvent,
+  Invoice,
 };

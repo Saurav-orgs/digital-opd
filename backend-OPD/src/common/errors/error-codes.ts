@@ -30,6 +30,8 @@ export enum ErrorCode {
   ACCOUNT_DISABLED = 'ACCOUNT_DISABLED',
   /** The account's plan is unpaid or has run out. */
   SUBSCRIPTION_REQUIRED = 'SUBSCRIPTION_REQUIRED',
+  /** A temporary password has to be replaced before anything else. */
+  PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED',
 
   // Patient portal
   PATIENT_NOT_FOUND = 'PATIENT_NOT_FOUND',
@@ -117,6 +119,10 @@ export const ERROR_CATALOG: Record<
   [ErrorCode.SUBSCRIPTION_REQUIRED]: {
     status: HttpStatus.PAYMENT_REQUIRED,
     message: 'Your subscription is not active. Please complete the payment to sign in.',
+  },
+  [ErrorCode.PASSWORD_CHANGE_REQUIRED]: {
+    status: HttpStatus.FORBIDDEN,
+    message: 'Please choose your own password before continuing.',
   },
   [ErrorCode.ACCOUNT_DISABLED]: {
     status: HttpStatus.FORBIDDEN,

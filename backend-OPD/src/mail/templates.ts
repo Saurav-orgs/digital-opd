@@ -79,6 +79,9 @@ export function paymentReceivedEmail(args: {
   total: number;
   endsAt: Date;
   loginUrl: string;
+  email: string;
+  /** Printed only when an invoice was raised and attached. */
+  invoiceNo?: string | null;
 }) {
   const until = args.endsAt.toLocaleDateString('en-IN', {
     day: 'numeric',
@@ -91,8 +94,10 @@ export function paymentReceivedEmail(args: {
     html: shell(
       'Welcome to myDigitalOPD',
       `<p style="font-size:14px;color:#374151;line-height:1.55">We received ${amount} (incl. GST) for the <strong>${escapeHtml(args.planName)}</strong> plan. Your subscription runs until <strong>${until}</strong>.</p>
-       <p style="font-size:14px;color:#374151;line-height:1.55">Sign in with the email and password you chose. On your first sign-in we will ask for your practice details, and your booking page goes live right after.</p>
-       <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>`,
+       <p style="font-size:14px;color:#374151;line-height:1.55">Sign in with <strong>${escapeHtml(args.email)}</strong> and the password you chose at sign-up. On your first sign-in we will ask for your practice details, and your booking page goes live right after.</p>
+       <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>
+       ${args.invoiceNo ? `<p style="font-size:13px;color:#374151;line-height:1.55;margin-top:18px">Your invoice <strong>${escapeHtml(args.invoiceNo)}</strong> is attached to this email. You can download it again any time from <strong>Billing</strong> inside your account.</p>` : ''}
+       <p style="font-size:13px;color:#6b7280;line-height:1.55">Forgotten your password? Use <strong>Forgot password</strong> on the sign-in screen.</p>`,
     ),
   };
 }
@@ -121,6 +126,49 @@ export function planGrantedEmail(args: {
       `<p style="font-size:14px;color:#374151;line-height:1.55">${args.months} month(s) of the <strong>${escapeHtml(args.planName)}</strong> plan have been added to your account. It runs until <strong>${until}</strong>. No payment was taken for this.</p>
        ${args.note ? `<p style="font-size:14px;color:#374151;line-height:1.55">${escapeHtml(args.note)}</p>` : ''}
        <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>`,
+    ),
+  };
+}
+
+/**
+ * A doctor the super admin opened an account for. Unlike the paid sign-up,
+ * nobody chose a password here, so this mail carries the one we made —
+ * which is why it also says, plainly, to replace it.
+ *
+ * Whether a plan was mapped at the same time changes what the doctor can do
+ * next, so the mail says which: with a plan they can sign in now, without one
+ * they would only meet a locked door, and being told that here saves the call.
+ */
+export function doctorInviteEmail(args: {
+  name: string;
+  email: string;
+  password: string;
+  loginUrl: string;
+  plan: { name: string; endsAt: Date } | null;
+}) {
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:6px 10px 6px 0;font-size:13px;color:#6b7280;white-space:nowrap">${label}</td>` +
+    `<td style="padding:6px 0;font-size:14px;color:#111827;font-family:ui-monospace,Menlo,monospace">${value}</td></tr>`;
+  const until = args.plan
+    ? args.plan.endsAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+  return {
+    subject: 'Your myDigitalOPD account is ready',
+    html: shell(
+      'Welcome to myDigitalOPD',
+      `<p style="font-size:14px;color:#374151;line-height:1.55">Hi ${escapeHtml(args.name)}, an account has been created for you on myDigitalOPD. Use these details to sign in:</p>
+       <table style="border-collapse:collapse;margin:8px 0 16px">
+         ${row('Sign in at', `<a href="${escapeHtml(args.loginUrl)}" style="color:#167567">${escapeHtml(args.loginUrl)}</a>`)}
+         ${row('Email', escapeHtml(args.email))}
+         ${row('Temporary password', escapeHtml(args.password))}
+       </table>
+       ${
+         args.plan
+           ? `<p style="font-size:14px;color:#374151;line-height:1.55">Your <strong>${escapeHtml(args.plan.name)}</strong> plan is active until <strong>${until}</strong>. On your first sign-in we will ask for your practice details, and your booking page goes live right after.</p>`
+           : `<p style="font-size:14px;color:#374151;line-height:1.55">A plan has not been added to your account yet, so sign-in will be held until one is. We will email you as soon as it is ready.</p>`
+       }
+       <p style="margin:20px 0 6px"><a href="${escapeHtml(args.loginUrl)}" style="display:inline-block;background:#167567;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Sign in to myDigitalOPD</a></p>
+       <p style="font-size:13px;color:#374151;line-height:1.55">This password was made for you and is meant to be replaced: the first screen after you sign in asks you to choose your own.</p>`,
     ),
   };
 }

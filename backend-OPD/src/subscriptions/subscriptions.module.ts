@@ -8,11 +8,14 @@ import { User } from '../database/models/user.model';
 import { Doctor } from '../database/models/doctor.model';
 import { Plan } from '../database/models/plan.model';
 import { PaymentEvent } from '../database/models/payment-event.model';
+import { Invoice } from '../database/models/invoice.model';
 import { CashfreeService } from './cashfree.service';
 import { SubscriptionsService } from './subscriptions.service';
 import { SubscriptionAccessModule } from './subscription-access.module';
 import { PlansService } from './plans.service';
 import { PaymentEventsService } from './payment-events.service';
+import { InvoicesService } from './invoices.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { SignupController } from './signup.controller';
 import { BillingController } from './billing.controller';
 import { PaymentWebhookController } from './payment-webhook.controller';
@@ -23,10 +26,17 @@ import { PaymentWebhookController } from './payment-webhook.controller';
     AuthModule,
     UsersModule,
     SubscriptionAccessModule,
-    SequelizeModule.forFeature([Subscription, User, Doctor, Plan, PaymentEvent]),
+    SequelizeModule.forFeature([Subscription, User, Doctor, Plan, PaymentEvent, Invoice]),
   ],
   controllers: [SignupController, BillingController, PaymentWebhookController],
-  providers: [CashfreeService, SubscriptionsService, PlansService, PaymentEventsService],
-  exports: [SubscriptionsService, PlansService],
+  providers: [
+    CashfreeService,
+    SubscriptionsService,
+    PlansService,
+    PaymentEventsService,
+    InvoicesService,
+    InvoicePdfService,
+  ],
+  exports: [SubscriptionsService, PlansService, InvoicesService],
 })
 export class SubscriptionsModule {}

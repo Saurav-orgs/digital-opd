@@ -14,7 +14,7 @@ import type { AuthUser, LoginResponse, PermAction, PermModule } from '../api/typ
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
   /** Adopt a session the server already minted — after registering. */
   setSession: (session: LoginResponse) => void;
   logout: () => void;
@@ -29,6 +29,13 @@ interface AuthContextValue {
    * profile form has run.
    */
   needsSetup: boolean;
+  /**
+   * The account is on a password somebody else chose. Nothing else is
+   * reachable — the API refuses it — until a new one is set.
+   */
+  mustChangePassword: boolean;
+  /** Called once the new password is set, to clear the flag in this session. */
+  passwordChanged: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -58,6 +65,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await authApi.login(email, password);
     tokenStore.set(res.accessToken);
     setUser(res.user);
+    // Returned so the sign-in screen can route on it without waiting for the
+    // state it just set to come back around.
+    return res.user;
   }, []);
 
   const setSession = useCallback((res: LoginResponse) => {
@@ -68,6 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenStore.clear();
     setUser(null);
+  }, []);
+
+  // The principal is re-read on the next load anyway; this keeps the app from
+  // bouncing back to the change-password screen in the meantime.
+  const passwordChanged = useCallback(() => {
+    setUser((u) => (u ? { ...u, mustChangePassword: false } : u));
   }, []);
 
   const can = useCallback(
@@ -85,10 +101,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // A doctor account bought through the landing page has no tenant until the
   // first-login profile form creates one.
   const needsSetup = !!user && user.type === 'doctor' && !user.doctorId;
+  const mustChangePassword = !!user?.mustChangePassword;
 
   const value = useMemo(
-    () => ({ user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin, needsSetup }),
-    [user, loading, login, setSession, logout, can, isDoctor, isSuperAdmin, needsSetup],
+    () => ({
+      user,
+      loading,
+      login,
+      setSession,
+      logout,
+      can,
+      isDoctor,
+      isSuperAdmin,
+      needsSetup,
+      mustChangePassword,
+      passwordChanged,
+    }),
+    [
+      user,
+      loading,
+      login,
+      setSession,
+      logout,
+      can,
+      isDoctor,
+      isSuperAdmin,
+      needsSetup,
+      mustChangePassword,
+      passwordChanged,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

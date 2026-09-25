@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { Op } from 'sequelize';
 import { Sequelize } from 'sequelize-typescript';
@@ -12,14 +12,18 @@ import { Doctor } from '../database/models/doctor.model';
 import { AuthService } from '../auth/auth.service';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
-import { paymentReceivedEmail, planGrantedEmail } from '../mail/templates';
+import { doctorInviteEmail, paymentReceivedEmail, planGrantedEmail } from '../mail/templates';
 import { ActivityLogService } from '../activity/activity-log.service';
 import { CashfreeService, CashfreePayment } from './cashfree.service';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { PaymentEventsService } from './payment-events.service';
-import { PlansService, cycleEnd } from './plans.service';
+import { PlansService, PlanView, cycleEnd } from './plans.service';
+import { InvoicesService } from './invoices.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { CreateAccountDto, ResumeSignupDto } from './dto/signup.dto';
 import { CancelSubscriptionDto, GrantSubscriptionDto } from './dto/grant.dto';
+import { InviteDoctorDto } from './dto/invite.dto';
+import { RenewSubscriptionDto } from './dto/renew.dto';
 import { QuerySubscriptionsDto } from './dto/query-subscriptions.dto';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { AppException } from '../common/errors/app.exception';
@@ -31,6 +35,16 @@ import {
   SubscriptionStatus,
   UserType,
 } from '../common/enums';
+
+/**
+ * How long before a plan ends the doctor may buy the next cycle.
+ *
+ * Early enough that a renewal is a decision rather than an emergency, late
+ * enough that it is about the cycle actually running out — a doctor who has
+ * just paid for a year does not want a renewal button following them around
+ * for eleven months.
+ */
+export const RENEW_WINDOW_DAYS = 7;
 
 /** What the landing page needs to open the Cashfree checkout. */
 export interface CheckoutSession {
@@ -50,6 +64,19 @@ export interface OrderStatusView {
   email: string;
   endsAt: Date | null;
   loginUrl: string;
+}
+
+/** What the doctor's Billing screen needs to decide whether to offer renewal. */
+export interface RenewalView {
+  /** True once the plan is inside its last week, or already over. */
+  canRenew: boolean;
+  /** When the button turns on — null when it already has. */
+  renewableFrom: Date | null;
+  currentEndsAt: Date | null;
+  /** When a renewal bought now would begin: the day the current cycle ends. */
+  startsAfter: Date | null;
+  /** The plans on sale, so the panel can price them. */
+  plans: PlanView[];
 }
 
 /** One row of the super admin's "who is on what plan" list. */
@@ -109,6 +136,8 @@ export class SubscriptionsService {
     private readonly access: SubscriptionAccessService,
     private readonly plans: PlansService,
     private readonly events: PaymentEventsService,
+    private readonly invoices: InvoicesService,
+    private readonly invoicePdf: InvoicePdfService,
     config: ConfigService,
   ) {
     this.landingBase = config.get<string>('landingWebBase')!;
@@ -409,7 +438,11 @@ export class SubscriptionsService {
   /** One account's subscription history — the doctor's own billing panel. */
   async historyForUser(userId: string): Promise<{
     current: SubscriptionView | null;
+    /** Cycles already paid for that have not started yet — a renewal bought early. */
+    upcoming: SubscriptionView[];
     history: SubscriptionView[];
+    /** Where a doctor goes to buy the next cycle — the public pricing page. */
+    renewUrl: string;
   }> {
     const rows = await this.subscriptionModel.findAll({
       where: { user_id: userId },
@@ -421,11 +454,201 @@ export class SubscriptionsService {
       order: [['createdAt', 'DESC']],
     });
     const views = rows.map((r) => this.toView(r));
-    const current =
-      views.find(
-        (v) => v.status === SubscriptionStatus.ACTIVE && v.endsAt && v.endsAt > new Date(),
-      ) ?? null;
-    return { current, history: views };
+    const now = new Date();
+    const live = views.filter(
+      (v) => v.status === SubscriptionStatus.ACTIVE && v.endsAt && v.endsAt > now,
+    );
+    // A renewal bought early is active and paid for but has not started yet.
+    // Calling it "my plan" would tell a doctor their cycle runs to a date the
+    // one they are actually on does not reach, so the two are kept apart.
+    const current = live.find((v) => !v.startsAt || v.startsAt <= now) ?? null;
+    const upcoming = live
+      .filter((v) => v.startsAt && v.startsAt > now)
+      .sort((a, b) => a.startsAt!.getTime() - b.startsAt!.getTime());
+
+    return { current, upcoming, history: views, renewUrl: `${this.landingBase}/#pricing` };
+  }
+
+  /**
+   * Whether the signed-in doctor may buy their next cycle yet, and what it
+   * would cost.
+   *
+   * The window exists so a renewal lands *before* the clinic stops taking
+   * bookings. Nothing about the current plan changes when the next one is
+   * bought: the new cycle is stacked on the end of the running one by
+   * {@link activate}, so paying early never costs the doctor days.
+   */
+  async renewalFor(userId: string): Promise<RenewalView> {
+    const current = await this.access.activeFor(userId);
+    const plans = await this.plans.listPublic();
+    if (!current?.ends_at) {
+      // Nothing running — an expired or never-paid account buys at once.
+      return {
+        canRenew: true,
+        renewableFrom: null,
+        currentEndsAt: null,
+        startsAfter: null,
+        plans,
+      };
+    }
+    const opensAt = new Date(current.ends_at.getTime() - RENEW_WINDOW_DAYS * 86_400_000);
+    const open = opensAt <= new Date();
+    return {
+      canRenew: open,
+      renewableFrom: open ? null : opensAt,
+      currentEndsAt: current.ends_at,
+      startsAfter: current.ends_at,
+      plans,
+    };
+  }
+
+  /**
+   * The signed-in doctor buys the next cycle, from inside the app.
+   *
+   * The landing page's `resume` cannot serve this: it refuses an account that
+   * already holds an active plan, which is exactly the account renewing. It
+   * also asks for an email and password, and a doctor already holding a
+   * session should not have to type either.
+   *
+   * The doctor is returned to their own Billing screen rather than the landing
+   * site, so the payment ends where it started.
+   */
+  async renew(user: AuthUser, dto: RenewSubscriptionDto): Promise<CheckoutSession> {
+    const row = await this.userModel.findByPk(user.id);
+    if (!row) throw new AppException(ErrorCode.NOT_FOUND, { message: 'Unknown account.' });
+    if (!row.subscription_required) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'This account does not use online plans. Please contact the myDigitalOPD team.',
+      });
+    }
+
+    const plan = await this.plans.findSellable(dto.plan);
+    const renewal = await this.renewalFor(user.id);
+    if (!renewal.canRenew) {
+      const from = renewal.renewableFrom!.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: `Your plan still has more than ${RENEW_WINDOW_DAYS} days to run. You can renew from ${from}.`,
+      });
+    }
+
+    return this.openOrder(row, plan, dto.mobile, `${this.adminBase}/billing?order_id={order_id}`);
+  }
+
+  /**
+   * Where a renewal order stands, asked by the Billing screen it returns to.
+   *
+   * Scoped to the caller: the landing page's version of this is public because
+   * the buyer has no session yet, and an order id is not a secret worth
+   * trusting once there is one.
+   */
+  async myOrderStatus(orderId: string, userId: string): Promise<OrderStatusView> {
+    const row = await this.subscriptionModel.findOne({
+      where: { cf_order_id: orderId },
+      attributes: ['id', 'user_id'],
+    });
+    if (!row || row.user_id !== userId) {
+      throw new AppException(ErrorCode.NOT_FOUND, { message: 'Unknown order.' });
+    }
+    return this.orderStatus(orderId);
+  }
+
+  /**
+   * The super admin opens an account for a doctor who did not pay for it
+   * themselves.
+   *
+   * It deliberately produces exactly what a paid sign-up produces — a gated
+   * `users` row with no clinic behind it — so that from the doctor's first
+   * sign-in onwards there is one path, not two: the same setup screen, the
+   * same tenant creation, the same expiry. The only differences are that the
+   * password was made here rather than chosen, and that the plan came from a
+   * grant rather than from Cashfree.
+   *
+   * A plan is optional. Without one the account exists but cannot sign in,
+   * which is a state worth allowing — an account is often opened before the
+   * plan is settled — so the mail and the Doctors screen both say so rather
+   * than leaving the doctor to discover it at the login screen.
+   */
+  async inviteDoctor(
+    dto: InviteDoctorDto,
+    actor: AuthUser,
+  ): Promise<{
+    userId: string;
+    name: string;
+    email: string;
+    tempPassword: string;
+    plan: { name: string; endsAt: Date } | null;
+  }> {
+    const email = dto.email.toLowerCase().trim();
+    // `paranoid: false` so a soft-deleted account's address is still taken —
+    // the unique index does not forget, and a clean error beats a 500.
+    if (await this.userModel.findOne({ where: { email }, paranoid: false })) {
+      throw new AppException(ErrorCode.CONFLICT, {
+        message: 'An account with this email already exists.',
+      });
+    }
+
+    const tempPassword = temporaryPassword();
+    const user = await this.userModel.create({
+      name: dto.name.trim(),
+      email,
+      password_hash: await bcrypt.hash(tempPassword, 10),
+      type: UserType.DOCTOR,
+      // No role and no clinic yet: both are created when the doctor completes
+      // their profile, exactly as they are for a doctor who paid online.
+      role_id: null,
+      doctor_id: null,
+      is_active: true,
+      subscription_required: true,
+      invited_by: actor.id,
+      // Mailed in plain text and chosen by somebody else: the first thing the
+      // doctor does with it is replace it. Enforced server-side by
+      // TemporaryPasswordGuard, not by the screen that asks for it.
+      must_change_password: true,
+    } as any);
+
+    let plan: { name: string; endsAt: Date } | null = null;
+    if (dto.plan_id) {
+      const granted = await this.grant(
+        { user_id: user.id, plan_id: dto.plan_id, months: dto.months, note: dto.note },
+        actor,
+        { notify: false },
+      );
+      plan = { name: granted.planName, endsAt: granted.endsAt! };
+    }
+
+    this.activity.recordForUser(actor, {
+      action: ActivityAction.DOCTOR_INVITED,
+      summary:
+        `${actor.name} opened an account for ${dto.name.trim()} (${email})` +
+        (plan ? ` on the ${plan.name} plan.` : ' with no plan mapped yet.'),
+      entity_type: 'user',
+      entity_id: user.id,
+      metadata: { plan: plan?.name ?? null },
+    });
+
+    // The password is in this mail and nowhere else we can read back, so a
+    // send that fails has to be visible rather than logged and forgotten —
+    // the screen shows the credentials too, for exactly this case.
+    await this.mail
+      .send({
+        to: email,
+        ...doctorInviteEmail({
+          name: dto.name.trim(),
+          email,
+          password: tempPassword,
+          loginUrl: `${this.adminBase}/login`,
+          plan,
+        }),
+      })
+      .catch((err) => {
+        this.logger.error(`Invite email to ${email} failed: ${err?.message}`);
+      });
+
+    return { userId: user.id, name: dto.name.trim(), email, tempPassword, plan };
   }
 
   /**
@@ -435,7 +658,11 @@ export class SubscriptionsService {
    * it out is `granted_by`, and the amounts are zero because nothing was
    * charged through us.
    */
-  async grant(dto: GrantSubscriptionDto, actor: AuthUser): Promise<SubscriptionView> {
+  async grant(
+    dto: GrantSubscriptionDto,
+    actor: AuthUser,
+    opts: { notify?: boolean } = {},
+  ): Promise<SubscriptionView> {
     const user = await this.userModel.findByPk(dto.user_id, {
       include: [{ model: Doctor, attributes: ['id', 'name'], required: false }],
     });
@@ -507,18 +734,23 @@ export class SubscriptionsService {
       metadata: { plan: plan.code, months, note: dto.note ?? null },
     });
 
-    this.mail
-      .send({
-        to: user.email,
-        ...planGrantedEmail({
-          planName: plan.name,
-          months,
-          endsAt: row.ends_at!,
-          note: dto.note?.trim() || null,
-          loginUrl: `${this.adminBase}/login`,
-        }),
-      })
-      .catch((err) => this.logger.error(`Grant email to ${user.email} failed: ${err?.message}`));
+    // An invite maps the plan in the same breath as opening the account, and
+    // its own mail already says which plan and until when — a second mail
+    // saying the same thing a second later is noise, so it is suppressed.
+    if (opts.notify !== false) {
+      this.mail
+        .send({
+          to: user.email,
+          ...planGrantedEmail({
+            planName: plan.name,
+            months,
+            endsAt: row.ends_at!,
+            note: dto.note?.trim() || null,
+            loginUrl: `${this.adminBase}/login`,
+          }),
+        })
+        .catch((err) => this.logger.error(`Grant email to ${user.email} failed: ${err?.message}`));
+    }
 
     return this.toView(await this.reload(row.id));
   }
@@ -574,7 +806,13 @@ export class SubscriptionsService {
 
   // ── Internals ──────────────────────────────────────────────
 
-  private async openOrder(user: User, plan: Plan, mobile: string): Promise<CheckoutSession> {
+  private async openOrder(
+    user: User,
+    plan: Plan,
+    mobile: string,
+    /** Where Cashfree sends the payer back. The landing page's own page by default. */
+    returnUrl = `${this.landingBase}/signup/done?order_id={order_id}`,
+  ): Promise<CheckoutSession> {
     const price = this.plans.price(plan);
     // Cashfree's order id: letters, digits, `_` and `-`, up to 50 characters.
     const orderId = `sub_${randomUUID().replace(/-/g, '')}`;
@@ -583,8 +821,10 @@ export class SubscriptionsService {
       orderId,
       amount: price.total,
       customer: { id: user.id, email: user.email, phone: mobile, name: user.name },
-      // Cashfree fills `{order_id}` in; the page then asks /signup/orders/:id.
-      returnUrl: `${this.landingBase}/signup/done?order_id={order_id}`,
+      // Cashfree fills `{order_id}` in; the page it lands on then polls the
+      // order — /signup/orders/:id from the landing site, /billing/me/orders/:id
+      // from inside the app.
+      returnUrl,
       note: `myDigitalOPD ${plan.name} plan`,
     });
     if (!order.payment_session_id) {
@@ -750,7 +990,27 @@ export class SubscriptionsService {
       metadata: { plan: activated.plan_id, order: activated.cf_order_id },
     });
 
+    // The invoice is raised before the mail so the mail can carry it. A
+    // failure here must not undo a payment that has already been taken, so
+    // it is logged and the doctor still gets their confirmation — the
+    // invoice can be raised again from the same row afterwards.
+    const invoice = await this.invoices
+      .issueFor(activated, planName)
+      .catch((err) => {
+        this.logger.error(`Invoice for ${activated.cf_order_id} failed: ${err?.message}`);
+        return null;
+      });
+
     if (user) {
+      const attachments = invoice
+        ? [
+            {
+              filename: this.invoicePdf.filename(invoice),
+              content: await this.invoicePdf.render(invoice),
+              contentType: 'application/pdf',
+            },
+          ]
+        : undefined;
       this.mail
         .send({
           to: user.email,
@@ -759,7 +1019,10 @@ export class SubscriptionsService {
             total: Number(activated.total_amount),
             endsAt: activated.ends_at!,
             loginUrl: `${this.adminBase}/login`,
+            email: user.email,
+            invoiceNo: invoice?.invoice_no ?? null,
           }),
+          attachments,
         })
         .catch((err) => this.logger.error(`Payment email to ${user.email} failed: ${err?.message}`));
     }
@@ -803,4 +1066,17 @@ export class SubscriptionsService {
         : null,
     };
   }
+}
+
+/**
+ * A temporary password a human can read out over the phone and type without
+ * a mistake: no look-alike characters, and a shape that already satisfies the
+ * eight-character minimum the login form asks for.
+ */
+function temporaryPassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = randomBytes(10);
+  let out = '';
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return `${out.slice(0, 4)}-${out.slice(4, 7)}-${out.slice(7)}`;
 }

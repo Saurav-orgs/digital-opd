@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { doctorsApi } from '../api/endpoints';
-import type { CreateDoctorResult, Doctor, PendingDoctor } from '../api/types';
+import { billingApi, doctorsApi } from '../api/endpoints';
+import type { CreateDoctorResult, Doctor, DoctorInviteResult, PendingDoctor } from '../api/types';
 import { Badge, ConfirmDialog, Empty, InfoRow, Loading, PasswordInput } from '../components/ui';
 import { useToast } from '../components/Toast';
 
@@ -14,6 +14,8 @@ export default function DoctorsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editDoctor, setEditDoctor] = useState<Doctor | null>(null);
   const [createdResult, setCreatedResult] = useState<CreateDoctorResult | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [invited, setInvited] = useState<DoctorInviteResult | null>(null);
   const [resetDoctor, setResetDoctor] = useState<Doctor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Doctor | null>(null);
 
@@ -47,9 +49,17 @@ export default function DoctorsPage() {
           <h1>Doctors</h1>
           <p className="muted">Manage doctor tenants and their QR links.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setShowCreate(true); setCreatedResult(null); }}>
-          + New doctor
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          {/* The light way in: an account and a plan, with the practice left
+              for the doctor's own first sign-in. "New doctor" below is the
+              heavy one — the whole tenant, filled in here. */}
+          <button className="btn btn-primary" onClick={() => { setShowInvite(true); setInvited(null); }}>
+            + Invite doctor
+          </button>
+          <button className="btn" onClick={() => { setShowCreate(true); setCreatedResult(null); }}>
+            Create full profile
+          </button>
+        </div>
       </div>
 
       <PendingRegistrations />
@@ -128,6 +138,20 @@ export default function DoctorsPage() {
       {createdResult && (
         <CredentialsModal result={createdResult} onClose={() => setCreatedResult(null)} />
       )}
+
+      {showInvite && (
+        <InviteDoctorModal
+          onClose={() => setShowInvite(false)}
+          onInvited={(result) => {
+            setShowInvite(false);
+            setInvited(result);
+            qc.invalidateQueries({ queryKey: ['doctors'] });
+            qc.invalidateQueries({ queryKey: ['billing'] });
+          }}
+        />
+      )}
+
+      {invited && <InviteResultModal result={invited} onClose={() => setInvited(null)} />}
     </>
   );
 }
@@ -805,6 +829,191 @@ function CredentialsModal({
 
         <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
           The doctor can change their password on first login. The QR link can be regenerated if needed.
+        </p>
+
+        <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Opens an account for a doctor: a name, an email, and the plan it runs on.
+ *
+ * Everything about the practice is left out on purpose — the doctor fills it
+ * in at their first sign-in, on the same screen a doctor who paid online
+ * meets, so there is one path through setup rather than two.
+ *
+ * The plan is optional because an account is sometimes opened before the plan
+ * is agreed. Leaving it out is a real choice with a real consequence, so the
+ * form says what it is rather than letting the doctor find out at the login
+ * screen.
+ */
+function InviteDoctorModal({
+  onClose,
+  onInvited,
+}: {
+  onClose: () => void;
+  onInvited: (result: DoctorInviteResult) => void;
+}) {
+  const [form, setForm] = useState({ name: '', email: '', plan_id: '', months: '', note: '' });
+  const [error, setError] = useState('');
+
+  // The super-admin list, so a plan retired from the public page can still be
+  // mapped by hand — which is exactly what an offline deal often needs.
+  const plansQ = useQuery({ queryKey: ['billing', 'plans'], queryFn: billingApi.plans });
+  const plans = plansQ.data ?? [];
+  const chosen = plans.find((p) => p.id === form.plan_id) ?? null;
+
+  const mut = useMutation({
+    mutationFn: () =>
+      doctorsApi.invite({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        ...(form.plan_id ? { plan_id: form.plan_id } : {}),
+        ...(form.months ? { months: Number(form.months) } : {}),
+        ...(form.note.trim() ? { note: form.note.trim() } : {}),
+      }),
+    onSuccess: onInvited,
+    onError: (e: any) => setError(e?.message ?? 'Could not open the account.'),
+  });
+
+  const field = (key: keyof typeof form) => ({
+    value: form[key],
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value })),
+  });
+
+  const ready = form.name.trim().length > 1 && /\S+@\S+\.\S+/.test(form.email.trim());
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginBottom: 4 }}>Invite doctor</h2>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          We email them a temporary password. They fill in their practice on first sign-in.
+        </p>
+
+        <label className="form-label">Full name *</label>
+        <input className="input" placeholder="Dr. Asha Rao" {...field('name')} />
+
+        <label className="form-label" style={{ marginTop: 12 }}>Login email *</label>
+        <input
+          className="input"
+          type="email"
+          placeholder="dr.asha@hospital.com"
+          {...field('email')}
+        />
+
+        <label className="form-label" style={{ marginTop: 12 }}>Plan</label>
+        <select
+          className="input"
+          value={form.plan_id}
+          onChange={(e) => setForm((f) => ({ ...f, plan_id: e.target.value }))}
+        >
+          <option value="">No plan yet — they cannot sign in</option>
+          {plans.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} · {p.months} month{p.months === 1 ? '' : 's'}
+              {p.isActive ? '' : ' (retired)'}
+            </option>
+          ))}
+        </select>
+
+        {form.plan_id && (
+          <>
+            <label className="form-label" style={{ marginTop: 12 }}>
+              Months {chosen ? `(default ${chosen.months})` : ''}
+            </label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={60}
+              placeholder={chosen ? String(chosen.months) : '3'}
+              {...field('months')}
+            />
+
+            <label className="form-label" style={{ marginTop: 12 }}>Note</label>
+            <input
+              className="input"
+              placeholder="Why this plan was given — kept on the record"
+              {...field('note')}
+            />
+            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              The plan is granted, not charged. Nothing is billed and no invoice is raised.
+            </p>
+          </>
+        )}
+
+        {!form.plan_id && (
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Without a plan the account exists but sign-in is refused, and the doctor is told to
+            contact us. You can map a plan later from Subscriptions.
+          </p>
+        )}
+
+        {error && <p style={{ color: 'var(--danger, red)', marginTop: 8, fontSize: 13 }}>{error}</p>}
+
+        <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose} disabled={mut.isPending}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => mut.mutate()}
+            disabled={!ready || mut.isPending}
+          >
+            {mut.isPending ? 'Sending…' : 'Send invite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What was sent, and to whom.
+ *
+ * The password is shown here as well as mailed, because mail is the one part
+ * of this that can fail quietly — a bounced or delayed message would otherwise
+ * leave the super admin with an account nobody can get into.
+ */
+function InviteResultModal({
+  result,
+  onClose,
+}: {
+  result: DoctorInviteResult;
+  onClose: () => void;
+}) {
+  const until = result.plan
+    ? new Date(result.plan.endsAt).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginBottom: 4 }}>Invite sent ✓</h2>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          {result.name} has been emailed these details. They are shown only once here.
+        </p>
+
+        <InfoRow label="Login email" value={result.email} copyable />
+        <InfoRow label="Temp password" value={result.tempPassword} copyable />
+        <InfoRow
+          label="Plan"
+          value={result.plan ? `${result.plan.name} · until ${until}` : 'None mapped yet'}
+        />
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+          {result.plan
+            ? 'They can sign in now and will be asked for their practice details.'
+            : 'Sign-in stays blocked until a plan is mapped from Subscriptions.'}
         </p>
 
         <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
