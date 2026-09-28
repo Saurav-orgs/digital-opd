@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { Patient } from '../database/models/patient.model';
@@ -10,6 +11,8 @@ import { StorageService } from '../uploads/storage.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { AppointmentStatus, ConsultationStatus } from '../common/enums';
+import { ageFromDob, dobFromAge } from '../common/utils/age';
+import { nowInClinic } from '../common/utils/clinic-time';
 import {
   PatientDetailsDto,
   UpdatePatientProfileDto,
@@ -28,7 +31,11 @@ export interface PatientProfileSummary {
   pincode: string | null;
   /** YYYY-MM-DD when known; age is derived from it rather than stored. */
   dob: string | null;
-  /** Age as of their most recent visit — the fallback when there is no `dob`. */
+  /**
+   * Age as of their most recent visit — the fallback when there is no `dob`.
+   * A patient who has not visited yet gets their age today from `dob`, so a
+   * fresh registration still prefills its first booking.
+   */
   last_age: number | null;
   last_visit_date: string | null;
   visit_count: number;
@@ -70,6 +77,11 @@ export interface NewProfileDetails {
   gender?: string | null;
   /** YYYY-MM-DD. Age is derived from it so it cannot go stale between visits. */
   dob?: string | null;
+  /**
+   * What the registration forms ask for instead of a birth date. Used only
+   * when `dob` is absent, and kept as an estimated `dob` — see `dobFromAge`.
+   */
+  age?: number | null;
   address_line?: string | null;
   city?: string | null;
   state?: string | null;
@@ -103,7 +115,15 @@ export class PatientProfilesService {
     @InjectModel(Notification)
     private readonly notificationModel: typeof Notification,
     private readonly storage: StorageService,
+    private readonly config: ConfigService,
   ) {}
+
+  /** Today's date on the clinic's wall clock — what an age is measured against. */
+  private today(): string {
+    return nowInClinic(
+      this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
+    ).date;
+  }
 
   /**
    * The mobile number *is* the account. Typing a new number at the first
@@ -189,7 +209,10 @@ export class PatientProfilesService {
       name: dto.name.trim(),
       relation: dto.relation ?? null,
       gender: dto.gender ?? null,
-      dob: dto.dob || null,
+      // The patient app and site ask for an age, the clinic's desk for a birth
+      // date. Dropping the age here left a new patient's first booking with
+      // the age field blank, since there was no earlier visit to take it from.
+      dob: dto.dob || dobFromAge(dto.age, this.today()),
       // A walk-in may be registered before the desk has the address; the
       // columns are nullable and the next booking fills them in.
       address_line: dto.address_line?.trim() || null,
@@ -432,7 +455,7 @@ export class PatientProfilesService {
       city: profile.city,
       state: profile.state,
       pincode: profile.pincode,
-      last_age: latest?.patient_age ?? null,
+      last_age: latest?.patient_age ?? ageFromDob(profile.dob, this.today()),
       last_visit_date: latest?.appointment_date ?? null,
       visit_count: visits.length,
       can_delete: !consulted,

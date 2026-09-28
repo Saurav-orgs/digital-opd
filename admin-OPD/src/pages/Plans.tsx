@@ -4,9 +4,8 @@ import { billingApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { ConfirmDialog, Field, Loading, Modal } from '../components/ui';
 import { useToast } from '../components/Toast';
+import { inr } from '../lib/money';
 import type { Plan, PlanInput } from '../api/types';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 /** "every month" / "every 3 months" / "once a year". */
 const cycle = (months: number) =>

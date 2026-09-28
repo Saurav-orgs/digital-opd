@@ -51,8 +51,9 @@ export interface AppConfig {
   };
   /**
    * Cashfree Payment Gateway, which takes the subscription payment at sign-up.
-   * `env` picks the sandbox or the live API; the app id and secret come from
-   * the matching Cashfree dashboard. `notifyUrl` is the webhook Cashfree
+   * `env` picks the sandbox or the live API *and* which pair of keys is used
+   * — `CASHFREE_PROD_*` on production, the unprefixed names otherwise, so
+   * both can sit in the environment together. `notifyUrl` is the webhook Cashfree
    * calls — it must be reachable from the internet and match what the
    * dashboard has.
    */
@@ -104,6 +105,25 @@ export interface AppConfig {
 }
 
 /** `API_PUBLIC_BASE` with the API prefix taken off — the origin a route outside the prefix hangs on. */
+const cashfreeEnv = (): 'sandbox' | 'production' =>
+  process.env.CASHFREE_ENV === 'production' ? 'production' : 'sandbox';
+
+/**
+ * A Cashfree credential for whichever environment is switched on.
+ *
+ * Both sets of keys live in the environment at once — `CASHFREE_PROD_APP_ID`
+ * and `CASHFREE_PROD_SECRET_KEY` for the live account, the unprefixed names
+ * for the sandbox — so going live is `CASHFREE_ENV=production` alone, with no
+ * pasting of keys over one another and no way to end up on the live API with
+ * sandbox keys still in place. The unprefixed names remain the fallback, so a
+ * deployment that only ever set those keeps working.
+ */
+const cashfreeCredential = (name: 'APP_ID' | 'SECRET_KEY'): string => {
+  const fallback = process.env[`CASHFREE_${name}`] || '';
+  if (cashfreeEnv() !== 'production') return fallback;
+  return process.env[`CASHFREE_PROD_${name}`] || fallback;
+};
+
 const publicOrigin = (): string => {
   const prefix = process.env.API_PREFIX || 'api';
   const base =
@@ -152,9 +172,9 @@ export default (): AppConfig => ({
     otpTemplateLang: process.env.WA_OTP_TEMPLATE_LANG || 'en_US',
   },
   cashfree: {
-    appId: process.env.CASHFREE_APP_ID || '',
-    secretKey: process.env.CASHFREE_SECRET_KEY || '',
-    env: process.env.CASHFREE_ENV === 'production' ? 'production' : 'sandbox',
+    appId: cashfreeCredential('APP_ID'),
+    secretKey: cashfreeCredential('SECRET_KEY'),
+    env: cashfreeEnv(),
     apiVersion: process.env.CASHFREE_API_VERSION || '2023-08-01',
     // The webhook lives outside the API prefix (see main.ts), so it is the
     // public origin plus a fixed path rather than a route under /api.

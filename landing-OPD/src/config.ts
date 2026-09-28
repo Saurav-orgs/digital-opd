@@ -6,16 +6,16 @@
 export const AppConfig = {
   // Must include the scheme: a scheme-less baseURL resolves relative to the
   // current origin, which breaks the deployed app.
-  apiBaseUrl: 'https://76ml0vk8-3000.inc1.devtunnels.ms/api',
+  apiBaseUrl: 'https://api.mydigitalopd.com/api',
 
   /** GST added on top of every plan. The server computes the real amount; this is for display. */
   gstRatePercent: 18,
 
   links: {
     /** admin-OPD — where a doctor lands after paying. */
-    doctorLogin: 'https://app.mydigitalopd.com/login',
+    doctorLogin: 'https://doctor.mydigitalopd.com/login',
     /** patient-web-OPD — the booking side. */
-    patientPortal: 'https://book.mydigitalopd.com',
+    patientPortal: 'https://patient.mydigitalopd.com',
   },
 
   /** WhatsApp number, international format, digits only. Placeholder. */

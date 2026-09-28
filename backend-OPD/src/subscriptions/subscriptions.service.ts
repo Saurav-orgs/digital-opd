@@ -46,6 +46,16 @@ import {
  */
 export const RENEW_WINDOW_DAYS = 7;
 
+/** An Indian mobile number, the only shape Cashfree accepts on an order. */
+const MOBILE_RE = /^[6-9]\d{9}$/;
+
+/**
+ * Sent to Cashfree when the account has no usable number on it. The gateway
+ * insists on a phone; this product does not use one for anything, so a
+ * placeholder is honest about that rather than blocking the payment.
+ */
+const FALLBACK_CHECKOUT_PHONE = '9999999999';
+
 /** What the landing page needs to open the Cashfree checkout. */
 export interface CheckoutSession {
   orderId: string;
@@ -107,9 +117,11 @@ export interface SubscriptionView {
  *
  * The account (a `users` row) is created *before* payment so the doctor's
  * chosen password is never held anywhere but the users table, and so an
- * abandoned checkout can be resumed with the same email and password
- * instead of a second sign-up. What the account cannot do before paying is
- * sign in — `SubscriptionAccessService` refuses it.
+ * abandoned checkout can be resumed with the same email and password. A
+ * doctor who instead signs up again with that email takes the unpaid
+ * account over (`createAccount`) rather than being told it exists. What the
+ * account cannot do before paying is sign in — `SubscriptionAccessService`
+ * refuses it.
  *
  * Nothing about the clinic exists yet: `doctor_id` stays null until the
  * doctor's first sign-in, where the admin app collects the profile and
@@ -127,6 +139,7 @@ export class SubscriptionsService {
   constructor(
     @InjectModel(Subscription) private readonly subscriptionModel: typeof Subscription,
     @InjectModel(User) private readonly userModel: typeof User,
+    @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
     private readonly sequelize: Sequelize,
     private readonly auth: AuthService,
     private readonly users: UsersService,
@@ -153,10 +166,14 @@ export class SubscriptionsService {
     const plan = await this.plans.findSellable(dto.plan);
     await this.auth.assertEmailVerified(email);
 
-    if (await this.userModel.findOne({ where: { email }, paranoid: false })) {
-      throw new AppException(ErrorCode.CONFLICT, {
-        message: 'An account with this email already exists. Sign in to continue.',
-      });
+    const existing = await this.userModel.findOne({ where: { email }, paranoid: false });
+    if (existing) {
+      if (!(await this.canStartOver(existing))) {
+        throw new AppException(ErrorCode.CONFLICT, {
+          message: 'An account with this email already exists. Sign in to continue.',
+        });
+      }
+      return this.restartSignup(existing, plan, dto);
     }
 
     const user = await this.userModel.create({
@@ -188,8 +205,69 @@ export class SubscriptionsService {
   }
 
   /**
+   * Whether a sign-up may take over the account already on this email: one
+   * the pricing page opened and that never paid (see
+   * `SubscriptionAccessService.isUnfinishedSignup`).
+   *
+   * Its open orders are asked about first. A payment the webhook has not
+   * reported yet is still a payment, and starting over on top of it would
+   * charge the doctor a second time; reconciling activates it instead, and
+   * the doctor is sent to sign in.
+   */
+  private async canStartOver(user: User): Promise<boolean> {
+    if (user.isSoftDeleted()) return false;
+    if (!(await this.access.isUnfinishedSignup(user))) return false;
+    const pending = await this.subscriptionModel.findAll({
+      where: { user_id: user.id, status: SubscriptionStatus.PENDING },
+    });
+    if (pending.length === 0) return true;
+    for (const row of pending) await this.reconcile(row);
+    // Asked again rather than read off `reconcile`: an order paid in the
+    // meantime sets `paid_at`, whichever path activated it.
+    return this.access.isUnfinishedSignup(user);
+  }
+
+  /**
+   * The doctor signs up again over an account whose payment never went
+   * through. The email has just been re-verified, so this is the mailbox's
+   * owner, and the password they typed now replaces the one from last time —
+   * which they may well not remember, and which bought them nothing.
+   *
+   * The row is reused rather than deleted: its failed orders and their
+   * payment events stay attached to it, so the payment log still tells the
+   * whole story.
+   */
+  private async restartSignup(
+    user: User,
+    plan: Plan,
+    dto: CreateAccountDto,
+  ): Promise<CheckoutSession> {
+    await user.update({ password_hash: await bcrypt.hash(dto.password, 10) } as any);
+    await this.auth.markEmailVerificationUsed(user.email);
+
+    this.activity.record({
+      action: ActivityAction.DOCTOR_SIGNUP_STARTED,
+      actor_type: ActivityActor.USER,
+      actor_id: user.id,
+      actor_label: user.email,
+      summary: `${user.email} signed up again on the ${plan.name} plan after an unfinished payment; payment pending.`,
+      entity_type: 'user',
+      entity_id: user.id,
+      metadata: { plan: plan.code, restarted: true },
+    });
+
+    return this.openOrder(user, plan, dto.mobile);
+  }
+
+  /**
    * The same email and password, a new order. For a doctor who closed the
-   * checkout tab, or whose payment failed — and for a renewal later on.
+   * checkout tab, or whose payment failed; for a lapsed account activating
+   * itself from the sign-in screen; and for a renewal later on.
+   *
+   * The password is the whole authorisation here — there is no session, by
+   * definition, because the account this serves is one that cannot sign in. So
+   * it is checked first, and every other refusal below is about the account
+   * rather than the caller.
    */
   async resume(dto: ResumeSignupDto): Promise<CheckoutSession> {
     const plan = await this.plans.findSellable(dto.plan);
@@ -197,9 +275,25 @@ export class SubscriptionsService {
     if (!user || !(await bcrypt.compare(dto.password, user.password_hash))) {
       throw new AppException(ErrorCode.INVALID_CREDENTIALS);
     }
-    if (!user.subscription_required) {
+    // Any doctor account may buy a plan here, whoever opened it: an account
+    // created from the Doctors screen, one a super admin invited, or one that
+    // registered before plans existed has the same licence to buy as one that
+    // came through the pricing page. Refusing them left a locked-out doctor
+    // with nowhere to pay.
+    if (user.type !== UserType.DOCTOR) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: 'This account does not use online plans. Please sign in directly.',
+        message:
+          "This account does not hold the clinic's plan. Please ask the doctor to renew it.",
+      });
+    }
+    // A deactivated account, or a registration that was rejected, cannot sign
+    // in whatever it pays — so it is not allowed to pay. Taking money for
+    // access that is withheld for an unrelated reason is the one outcome here
+    // worth going out of the way to prevent.
+    if (!user.is_active) {
+      throw new AppException(ErrorCode.ACCOUNT_DISABLED, {
+        message:
+          'This account is deactivated, so a plan cannot be bought for it. Please contact the myDigitalOPD team.',
       });
     }
     if (await this.access.activeFor(user.id)) {
@@ -207,7 +301,12 @@ export class SubscriptionsService {
         message: 'This account already has an active plan. Please sign in.',
       });
     }
-    return this.openOrder(user, plan, dto.mobile);
+    // Back to wherever the payer started. The admin app's sign-in screen polls
+    // the order and then tells the doctor to sign in; the landing site has its
+    // own confirmation page.
+    const returnUrl =
+      dto.origin === 'app' ? `${this.adminBase}/login?order_id={order_id}` : undefined;
+    return this.openOrder(user, plan, dto.mobile, returnUrl);
   }
 
   /**
@@ -516,9 +615,14 @@ export class SubscriptionsService {
   async renew(user: AuthUser, dto: RenewSubscriptionDto): Promise<CheckoutSession> {
     const row = await this.userModel.findByPk(user.id);
     if (!row) throw new AppException(ErrorCode.NOT_FOUND, { message: 'Unknown account.' });
-    if (!row.subscription_required) {
-      throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: 'This account does not use online plans. Please contact the myDigitalOPD team.',
+    // The plan belongs to the doctor account, so only the doctor account can
+    // buy one: a cycle bought on a receptionist's user id would cover nobody.
+    // Nothing else is asked of the account — every doctor is licensed the same
+    // way, whether they signed up on the pricing page, were added from the
+    // Doctors screen, or predate plans altogether.
+    if (row.type !== UserType.DOCTOR) {
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: "Only the doctor's own account can buy a plan for this clinic.",
       });
     }
 
@@ -704,8 +808,10 @@ export class SubscriptionsService {
       grant_note: dto.note?.trim() || null,
     } as any);
 
-    // An account that was never gated (an older doctor) now is, so that the
-    // grant's expiry actually means something.
+    // The account now holds a plan that came from us rather than from the
+    // pricing page, and the flag records that. It no longer decides who is
+    // gated — every doctor account is — but the grant is the moment the
+    // account started living on plans, so it is the moment to say so.
     if (!user.subscription_required) {
       await user.update({ subscription_required: true } as any);
     }
@@ -806,21 +912,45 @@ export class SubscriptionsService {
 
   // ── Internals ──────────────────────────────────────────────
 
+  /**
+   * The phone number the Cashfree order carries.
+   *
+   * Cashfree will not open an order without one, but nothing in this product
+   * needs it: the receipt, the invoice and the plan confirmation all go to the
+   * account's email address. So it is no longer asked for on the renewal card —
+   * the clinic's own number stands in, and a placeholder stands in for that
+   * when the practice has not been set up yet.
+   */
+  private async checkoutPhone(user: User, given?: string): Promise<string> {
+    if (given && MOBILE_RE.test(given)) return given;
+    if (user.doctor_id) {
+      const doctor = await this.doctorModel.findByPk(user.doctor_id, {
+        attributes: ['id', 'contact_mobile', 'clinic_phone'],
+      });
+      for (const candidate of [doctor?.contact_mobile, doctor?.clinic_phone]) {
+        const digits = (candidate ?? '').replace(/\D/g, '').slice(-10);
+        if (MOBILE_RE.test(digits)) return digits;
+      }
+    }
+    return FALLBACK_CHECKOUT_PHONE;
+  }
+
   private async openOrder(
     user: User,
     plan: Plan,
-    mobile: string,
+    mobile: string | undefined,
     /** Where Cashfree sends the payer back. The landing page's own page by default. */
     returnUrl = `${this.landingBase}/signup/done?order_id={order_id}`,
   ): Promise<CheckoutSession> {
     const price = this.plans.price(plan);
+    const phone = await this.checkoutPhone(user, mobile);
     // Cashfree's order id: letters, digits, `_` and `-`, up to 50 characters.
     const orderId = `sub_${randomUUID().replace(/-/g, '')}`;
 
     const order = await this.cashfree.createOrder({
       orderId,
       amount: price.total,
-      customer: { id: user.id, email: user.email, phone: mobile, name: user.name },
+      customer: { id: user.id, email: user.email, phone, name: user.name },
       // Cashfree fills `{order_id}` in; the page it lands on then polls the
       // order — /signup/orders/:id from the landing site, /billing/me/orders/:id
       // from inside the app.

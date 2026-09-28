@@ -1,79 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { downloadFile } from '../lib/shareFile';
+import { useOrderWatch } from '../lib/checkout';
+import { daysLeft, inr, shortDate as date } from '../lib/money';
 import { Empty, Loading, Spinner } from '../components/ui';
 import { RenewPlanCard } from '../components/RenewPlanCard';
 import { useToast } from '../components/Toast';
-import type { Invoice, OrderStatus, Subscription } from '../api/types';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-
-const date = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '—';
-
-const daysLeft = (iso: string | null) =>
-  iso === null ? null : Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
-
-/** Long enough for a bank redirect to settle, short enough that nobody waits forever. */
-const POLL_MS = 2500;
-const GIVE_UP_AFTER_MS = 90_000;
-
-/**
- * Watches the order Cashfree has just sent the doctor back from.
- *
- * Everything shown comes from the server: a browser that came back
- * "successful" proves nothing until the API says the payment settled. A
- * `pending` row is re-checked against Cashfree on every ask, so a webhook that
- * never arrives cannot leave a doctor who has paid looking at a spinner.
- */
-function useOrderWatch(orderId: string | null, onSettled: () => void) {
-  const [status, setStatus] = useState<OrderStatus | null>(null);
-  const [timedOut, setTimedOut] = useState(false);
-  const startedAt = useRef(Date.now());
-  const settled = useRef(false);
-
-  useEffect(() => {
-    if (!orderId) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout>;
-    startedAt.current = Date.now();
-    settled.current = false;
-
-    const tick = async () => {
-      try {
-        const res = await billingApi.myOrder(orderId);
-        if (!live) return;
-        setStatus(res);
-        if (res.status === 'pending') {
-          if (Date.now() - startedAt.current > GIVE_UP_AFTER_MS) setTimedOut(true);
-          else timer = setTimeout(tick, POLL_MS);
-          return;
-        }
-        if (!settled.current) {
-          settled.current = true;
-          onSettled();
-        }
-      } catch {
-        if (!live) return;
-        timer = setTimeout(tick, POLL_MS * 2);
-      }
-    };
-    void tick();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-    // `onSettled` is a stable callback from the caller; re-running on the id
-    // alone is what this is for.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
-
-  return { status, timedOut };
-}
+import type { Invoice, Subscription } from '../api/types';
 
 /**
  * The doctor's own billing: the plan they are on, and every invoice the
@@ -97,7 +32,7 @@ export default function BillingPage() {
 
   // Cashfree appends ?order_id= when it sends the doctor back here.
   const orderId = params.get('order_id');
-  const { status: order, timedOut } = useOrderWatch(orderId, () => {
+  const { status: order, timedOut } = useOrderWatch(orderId, billingApi.myOrder, () => {
     // The plan, the invoice list and the renewal window have all just changed.
     qc.invalidateQueries({ queryKey: ['billing'] });
   });

@@ -1,19 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { load, type Cashfree } from '@cashfreepayments/cashfree-js';
-import { billingApi, doctorsApi } from '../api/endpoints';
-import { ApiError } from '../api/client';
+import { billingApi } from '../api/endpoints';
+import { useCashfreeCheckout } from '../lib/checkout';
+import { inr, longDate as date } from '../lib/money';
 import { Spinner } from './ui';
 import type { Plan } from '../api/types';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-
-const date = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
-    : '—';
-
-const MOBILE_RE = /^[6-9]\d{9}$/;
 
 /**
  * Buying the next cycle, from inside the app.
@@ -26,26 +17,17 @@ const MOBILE_RE = /^[6-9]\d{9}$/;
  * Paying early costs nothing — the server stacks the new cycle onto the end of
  * the running one — and the card says so, because the fear of losing the days
  * already paid for is exactly what makes people wait until the last day.
+ *
+ * Pick a plan, pay. Nothing else is asked: the receipt, the invoice and the
+ * confirmation all go to the address this doctor signs in with, so the phone
+ * number the card used to collect for Cashfree bought nothing and is now
+ * filled in by the server from the clinic record.
  */
 export function RenewPlanCard() {
   const [chosen, setChosen] = useState<string | null>(null);
-  const [mobile, setMobile] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const cashfree = useRef<Cashfree | null>(null);
+  const { open, busy, error } = useCashfreeCheckout();
 
   const renewalQ = useQuery({ queryKey: ['billing', 'me', 'renewal'], queryFn: billingApi.renewal });
-  // Only to prefill the phone box, from the clinic number on the profile. A
-  // doctor who has not set their practice up yet simply types it.
-  const meQ = useQuery({ queryKey: ['doctors', 'me'], queryFn: doctorsApi.me, retry: false });
-
-  useEffect(() => {
-    const onFile = meQ.data?.clinic_phone;
-    if (onFile && !mobile) {
-      const digits = onFile.replace(/\D/g, '').slice(-10);
-      if (MOBILE_RE.test(digits)) setMobile(digits);
-    }
-  }, [meQ.data, mobile]);
 
   if (renewalQ.isLoading) {
     return (
@@ -74,27 +56,10 @@ export function RenewPlanCard() {
 
   const plans = renewal.plans ?? [];
   const plan = plans.find((p) => p.code === chosen) ?? null;
-  const ready = !!plan && MOBILE_RE.test(mobile);
 
-  async function pay() {
-    if (!plan) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const session = await billingApi.renew({ plan: plan.code, mobile });
-      cashfree.current ??= await load({ mode: session.env });
-      if (!cashfree.current) throw new Error('checkout unavailable');
-      // '_self' navigates this tab to the gateway; Cashfree brings the doctor
-      // back to /billing?order_id=…, which the Billing screen then polls.
-      await cashfree.current.checkout({
-        paymentSessionId: session.paymentSessionId,
-        redirectTarget: '_self',
-      });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not open the payment. Please try again.');
-      setBusy(false);
-    }
-  }
+  // Cashfree brings the doctor back to /billing?order_id=…, which the Billing
+  // screen then polls.
+  const pay = () => plan && open(() => billingApi.renew({ plan: plan.code }));
 
   return (
     <div className="card">
@@ -131,24 +96,15 @@ export function RenewPlanCard() {
         ))}
       </div>
 
-      <div className="renew-pay">
-        <label className="form-label" htmlFor="renew-mobile">
-          Mobile for the payment receipt
-        </label>
-        <input
-          id="renew-mobile"
-          className="input"
-          inputMode="numeric"
-          placeholder="10-digit mobile number"
-          value={mobile}
-          onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
-        />
-      </div>
+      <p className="muted" style={{ fontSize: 13 }}>
+        The receipt and the tax invoice are emailed to you, and the invoice also
+        stays on this screen.
+      </p>
 
       {error && <p style={{ color: 'var(--danger, red)', fontSize: 13 }}>{error}</p>}
 
       <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-        <button className="btn btn-primary" disabled={!ready || busy} onClick={() => void pay()}>
+        <button className="btn btn-primary" disabled={!plan || busy} onClick={() => void pay()}>
           {busy
             ? 'Opening payment…'
             : plan

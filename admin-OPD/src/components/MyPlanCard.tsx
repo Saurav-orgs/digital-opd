@@ -1,17 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { billingApi } from '../api/endpoints';
+import { daysLeft, inr, longDate as date } from '../lib/money';
 import { Spinner } from './ui';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-
-const date = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
-    : '—';
-
-const daysLeft = (iso: string | null) =>
-  iso === null ? null : Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
 
 /**
  * "My plan" on the doctor's own profile: what they are on and when it renews.

@@ -830,6 +830,12 @@ function CredentialsModal({
         <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
           The doctor can change their password on first login. The QR link can be regenerated if needed.
         </p>
+        {/* Every doctor account needs a live plan to sign in, and this form
+            does not map one — so say it here rather than let the doctor find
+            out at the login screen. */}
+        <p style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+          Sign-in stays blocked until a plan is mapped to this account from Subscriptions.
+        </p>
 
         <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
           <button className="btn btn-primary" onClick={onClose}>Done</button>

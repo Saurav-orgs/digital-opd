@@ -247,6 +247,82 @@ def _output_config(model: str, effort: str, schema: dict[str, Any]) -> dict[str,
     return config
 
 
+async def _generate(
+    system: str,
+    content: Any,
+    schema: dict[str, Any],
+    *,
+    route: str,
+    effort: str | None,
+    max_tokens: int | None,
+    model: str | None,
+    fast: bool,
+) -> dict[str, Any]:
+    """One Messages call: send, check, cost, parse. The only place any of
+    that happens, so the text and image routes cannot drift apart in how they
+    handle a refusal, a truncation or an unparseable body.
+
+    `content` is whatever the caller assembled for the user turn — a plain
+    string for the text routes, or a list of blocks when there is an image in
+    front of the instruction.
+    """
+    client = _get_client()
+    model = model or settings.claude_model
+    effort = effort or settings.claude_effort
+    max_tokens = max_tokens or settings.claude_max_tokens
+
+    started = time.monotonic()
+    try:
+        response = await _create(
+            client,
+            fast=fast,
+            model=model,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": content}],
+            output_config=_output_config(model, effort, schema),
+        )
+    except Exception as err:
+        raise ClaudeError(f"Claude API call failed: {err}") from err
+
+    # A safety classifier can decline with HTTP 200, so stop_reason is checked
+    # before the content is read. Both of these walk down to Gemini/Ollama.
+    if response.stop_reason == "refusal":
+        raise ClaudeError("Claude declined this request.")
+    if response.stop_reason == "max_tokens":
+        raise ClaudeError(
+            f"Claude hit max_tokens ({max_tokens}); the JSON is truncated."
+        )
+
+    text = next((b.text for b in response.content if b.type == "text"), "").strip()
+    if not text:
+        raise ClaudeError("Claude returned an empty response.")
+
+    # At info, not debug: this line is how a slow draft gets diagnosed in
+    # production. cache_read staying at 0 across requests means the prefix is
+    # being invalidated somewhere; `speed` says whether fast mode served it.
+    _log_usage(
+        model,
+        effort if _supports_effort(model) else "n/a",
+        route,
+        fast,
+        response,
+        time.monotonic() - started,
+    )
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as err:
+        log.error("Claude output failed to parse as JSON: %s", text[:500])
+        raise ClaudeError(f"Claude produced invalid JSON: {err}") from err
+
+
 async def generate_json(
     system: str,
     user: str,
@@ -270,62 +346,16 @@ async def generate_json(
     model can be tried there without touching the summaries, and fast mode
     trades price for output speed on the one call a patient is waiting on.
     """
-    client = _get_client()
-    model = model or settings.claude_model
-
-    started = time.monotonic()
-    try:
-        response = await _create(
-            client,
-            fast=fast,
-            model=model,
-            max_tokens=max_tokens or settings.claude_max_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": user}],
-            output_config=_output_config(
-                model, effort or settings.claude_effort, schema
-            ),
-        )
-    except Exception as err:
-        raise ClaudeError(f"Claude API call failed: {err}") from err
-
-    # A safety classifier can decline with HTTP 200, so stop_reason is checked
-    # before the content is read. Both of these walk down to Gemini/Ollama.
-    if response.stop_reason == "refusal":
-        raise ClaudeError("Claude declined this request.")
-    if response.stop_reason == "max_tokens":
-        raise ClaudeError(
-            f"Claude hit max_tokens ({max_tokens or settings.claude_max_tokens}); "
-            "the JSON is truncated."
-        )
-
-    text = next((b.text for b in response.content if b.type == "text"), "").strip()
-    if not text:
-        raise ClaudeError("Claude returned an empty response.")
-
-    # At info, not debug: this line is how a slow draft gets diagnosed in
-    # production. cache_read staying at 0 across requests means the prefix is
-    # being invalidated somewhere; `speed` says whether fast mode served it.
-    _log_usage(
-        model,
-        (effort or settings.claude_effort) if _supports_effort(model) else "n/a",
-        route,
-        fast,
-        response,
-        time.monotonic() - started,
+    return await _generate(
+        system,
+        user,
+        schema,
+        route=route,
+        effort=effort,
+        max_tokens=max_tokens,
+        model=model,
+        fast=fast,
     )
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as err:
-        log.error("Claude output failed to parse as JSON: %s", text[:500])
-        raise ClaudeError(f"Claude produced invalid JSON: {err}") from err
 
 
 async def generate_json_from_image(
@@ -344,75 +374,29 @@ async def generate_json_from_image(
     For reports that are pictures rather than text — an X-ray film, an ECG
     strip, a scan — where OCR has nothing to give the text path. The image
     goes first and the instruction after it, which is the order the model
-    reads best. Same structured output and the same refusal/truncation
-    handling as the text call; a failure here is a ClaudeError for the caller
-    to fall back on, never a summary.
+    reads best. Fast mode is not offered: this is not a call anyone is
+    standing over, and it is already the most expensive one in the system.
     """
     import base64
 
-    client = _get_client()
-    data = base64.standard_b64encode(image).decode("ascii")
-
-    started = time.monotonic()
-    try:
-        response = await client.messages.create(
-            model=settings.claude_model,
-            max_tokens=max_tokens or settings.claude_max_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": data,
-                            },
-                        },
-                        {"type": "text", "text": user},
-                    ],
-                }
-            ],
-            output_config=_output_config(
-                settings.claude_model, effort or settings.claude_effort, schema
-            ),
-        )
-    except Exception as err:
-        raise ClaudeError(f"Claude API call failed: {err}") from err
-
-    if response.stop_reason == "refusal":
-        raise ClaudeError("Claude declined this request.")
-    if response.stop_reason == "max_tokens":
-        raise ClaudeError("Claude hit max_tokens; the JSON is truncated.")
-
-    text = next((b.text for b in response.content if b.type == "text"), "").strip()
-    if not text:
-        raise ClaudeError("Claude returned an empty response.")
-
-    # This path logged nothing before, so a photographed report — the most
-    # expensive call in the system, an image at effort=high — was invisible in
-    # both the log and any cost total built from it.
-    _log_usage(
-        settings.claude_model,
-        (effort or settings.claude_effort)
-        if _supports_effort(settings.claude_model)
-        else "n/a",
-        route,
-        False,
-        response,
-        time.monotonic() - started,
+    content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.standard_b64encode(image).decode("ascii"),
+            },
+        },
+        {"type": "text", "text": user},
+    ]
+    return await _generate(
+        system,
+        content,
+        schema,
+        route=route,
+        effort=effort,
+        max_tokens=max_tokens,
+        model=None,
+        fast=False,
     )
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as err:
-        log.error("Claude output failed to parse as JSON: %s", text[:500])
-        raise ClaudeError(f"Claude produced invalid JSON: {err}") from err

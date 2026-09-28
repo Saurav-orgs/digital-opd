@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
-from . import claude_llm, cost_log, documents, gemini_llm, llm, transcribe
+from . import claude_llm, cost_log, documents, llm, llm_chain, transcribe
 from rapidfuzz import fuzz
 
 from .spellfix import TRUSTED_THRESHOLD, speller
@@ -395,29 +395,31 @@ def _looks_like_imaging(text: str) -> bool:
 async def _summarise_from_image(path: str, content_type: str) -> ReportSummary | None:
     """Read the report off the image itself, or None if that is not possible.
 
-    Only Claude does this here: it is the one backend in the chain that takes
-    an image. Without it — no key, an outage, a refusal — the caller falls
-    back to the "could not be read" answer it has always given.
+    Either hosted backend can read a picture, and llm_chain tries both. This
+    used to be Claude or nothing, so a clinic running on a Gemini key alone
+    was told every X-ray and ECG "could not be read" — by a model that can in
+    fact read them. Without any hosted backend the caller still falls back to
+    that answer, which is honest.
     """
-    if not (settings.claude_enabled and settings.claude_api_key):
+    if not (llm_chain.claude_ready() or llm_chain.gemini_ready()):
         return None
     prepared = await asyncio.to_thread(documents.image_for_vision, path, content_type)
     if prepared is None:
         return None
     image, media_type = prepared
     try:
-        raw = await claude_llm.generate_json_from_image(
+        raw, provider = await llm_chain.generate_json_from_image(
             system=imaging_prompt.SYSTEM,
             user=imaging_prompt.USER,
             image=image,
             media_type=media_type,
             schema=REPORT_SUMMARY_JSON_SCHEMA,
             route="report-summary-image",
-            effort="high",
         )
     except Exception as err:
         log.warning("Vision read of the report failed (%s); reporting unreadable.", err)
         return None
+    log.info("Read the report off the image via %s.", provider)
     return ReportSummary.model_validate(raw)
 
 
@@ -514,49 +516,21 @@ async def _summarize_extracted(
     ir = await asyncio.to_thread(lab_parser.parse_lab_report_text, text)
     user_prompt = report_prompt.build_user_from_ir(ir, raw_text=text)
 
-    raw = None
-    if settings.claude_enabled and settings.claude_api_key:
-        try:
-            raw = await claude_llm.generate_json(
-                system=report_prompt.SYSTEM,
-                user=user_prompt,
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-                route="report-summary",
-                # A doctor reads a summary closely, and these run a
-                # fraction as often as extraction, so they can afford
-                # the deeper setting.
-                effort="high",
-            )
-        except Exception as claude_err:
-            log.warning("Claude summarization failed (%s), falling back.", claude_err)
-
-    if raw is None and settings.gemini_enabled and settings.gemini_api_key:
-        try:
-            raw = await gemini_llm.generate_json(
-                system=report_prompt.SYSTEM,
-                user=user_prompt,
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-                route="report-summary",
-            )
-        except Exception as gemini_err:
-            log.warning("Gemini report summarization failed (%s), falling back to local LLM.", gemini_err)
-
-    if raw is None and not settings.allow_local_narrative:
+    try:
+        raw, _ = await llm_chain.generate_json(
+            system=report_prompt.SYSTEM,
+            user=user_prompt,
+            schema=REPORT_SUMMARY_JSON_SCHEMA,
+            route="report-summary",
+            local=settings.allow_local_narrative,
+        )
+    except llm_chain.NoBackend as err:
         raise HTTPException(
             503,
-            "No cloud AI backend could summarise this report, and the local model "
-            "is not trusted with clinical narrative (set ALLOW_LOCAL_NARRATIVE=true "
-            "to override). Please retry, or open the report directly.",
-        )
-    if raw is None:
-        try:
-            raw = await llm.generate_json(
-                system=report_prompt.SYSTEM,
-                user=user_prompt,
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-            )
-        except llm.LlmError as err:
-            raise HTTPException(503, str(err)) from err
+            "No AI backend could summarise this report (the local model is not "
+            "trusted with clinical narrative unless ALLOW_LOCAL_NARRATIVE=true). "
+            "Please retry, or open the report directly.",
+        ) from err
 
     # 2. Contradiction Guard & Consistency Enforcement
     sanitized = contradiction_guard.validate_and_sanitize_summary(raw, ir, raw_text=text)
@@ -587,33 +561,6 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
         for r in reports
     ]
 
-    raw = None
-    if settings.claude_enabled and settings.claude_api_key:
-        try:
-            raw = await claude_llm.generate_json(
-                system=consolidate_prompt.SYSTEM,
-                user=consolidate_prompt.build_user(payload),
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-                route="consolidate",
-                # A doctor reads a summary closely, and these run a
-                # fraction as often as extraction, so they can afford
-                # the deeper setting.
-                effort="high",
-            )
-        except Exception as claude_err:
-            log.warning("Claude summarization failed (%s), falling back.", claude_err)
-
-    if raw is None and settings.gemini_enabled and settings.gemini_api_key:
-        try:
-            raw = await gemini_llm.generate_json(
-                system=consolidate_prompt.SYSTEM,
-                user=consolidate_prompt.build_user(payload),
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-                route="consolidate",
-            )
-        except Exception as gemini_err:
-            log.warning("Gemini consolidate summaries failed (%s), falling back to local LLM.", gemini_err)
-
     def deterministic() -> dict:
         """Join the per-report summaries verbatim, inventing nothing.
 
@@ -633,23 +580,20 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
             "title": f"Combined Summary ({len(reports)} reports)",
         }
 
-    if raw is None and not settings.allow_local_narrative:
-        log.warning(
-            "No cloud backend for consolidation; joining the source summaries "
-            "deterministically rather than letting the local model write prose."
+    # The one route that does not 503 when every backend is out: joining the
+    # source summaries cannot contradict them, which is the property that
+    # matters here, so a degraded answer beats no answer.
+    try:
+        raw, _ = await llm_chain.generate_json(
+            system=consolidate_prompt.SYSTEM,
+            user=consolidate_prompt.build_user(payload),
+            schema=REPORT_SUMMARY_JSON_SCHEMA,
+            route="consolidate",
+            local=settings.allow_local_narrative,
         )
+    except llm_chain.NoBackend as err:
+        log.warning("Consolidation fell back to joining the source summaries (%s).", err)
         raw = deterministic()
-
-    if raw is None:
-        try:
-            raw = await llm.generate_json(
-                system=consolidate_prompt.SYSTEM,
-                user=consolidate_prompt.build_user(payload),
-                schema=REPORT_SUMMARY_JSON_SCHEMA,
-            )
-        except Exception as err:
-            log.warning("Consolidate LLM failed (%s), falling back to deterministic consolidation.", err)
-            raw = deterministic()
 
     # Preserve all authoritative abnormal values across all source reports
     collected_abnormals = []
@@ -843,52 +787,21 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
         {"visit_date": body.current.visit_date, "reports": payload(current_reports)},
     )
 
-    raw = None
-    if settings.claude_enabled and settings.claude_api_key:
-        try:
-            raw = await claude_llm.generate_json(
-                system=progress_prompt.SYSTEM,
-                user=user,
-                schema=PROGRESS_JSON_SCHEMA,
-                route="progress",
-                # A doctor reads a summary closely, and these run a
-                # fraction as often as extraction, so they can afford
-                # the deeper setting.
-                effort="high",
-            )
-        except Exception as claude_err:
-            log.warning("Claude summarization failed (%s), falling back.", claude_err)
-
-    if raw is None and settings.gemini_enabled and settings.gemini_api_key:
-        try:
-            raw = await gemini_llm.generate_json(
-                system=progress_prompt.SYSTEM,
-                user=user,
-                schema=PROGRESS_JSON_SCHEMA,
-                route="progress",
-            )
-        except Exception as gemini_err:
-            log.warning(
-                "Gemini progress summary failed (%s), falling back to local LLM.",
-                gemini_err,
-            )
-
-    if raw is None and not settings.allow_local_narrative:
+    try:
+        raw, _ = await llm_chain.generate_json(
+            system=progress_prompt.SYSTEM,
+            user=user,
+            schema=PROGRESS_JSON_SCHEMA,
+            route="progress",
+            local=settings.allow_local_narrative,
+        )
+    except llm_chain.NoBackend as err:
         raise HTTPException(
             503,
-            "No cloud AI backend could write this progress note, and the local "
-            "model is not trusted with clinical narrative (set "
-            "ALLOW_LOCAL_NARRATIVE=true to override). Please retry.",
-        )
-    if raw is None:
-        try:
-            raw = await llm.generate_json(
-                system=progress_prompt.SYSTEM,
-                user=user,
-                schema=PROGRESS_JSON_SCHEMA,
-            )
-        except llm.LlmError as err:
-            raise HTTPException(503, str(err)) from err
+            "No AI backend could write this progress note (the local model is "
+            "not trusted with clinical narrative unless "
+            "ALLOW_LOCAL_NARRATIVE=true). Please retry.",
+        ) from err
 
     summary = _ground_trends(
         ProgressSummary.model_validate(raw), body.previous, body.current
@@ -1587,32 +1500,18 @@ async def extract_prescription(
         3B model, and applied to a frontier model's output they subtract more
         than they add.
         """
-        if settings.claude_enabled and settings.claude_api_key:
-            claude_system, claude_user = prompt_for(prescription_claude_prompt)
-            try:
-                raw = await claude_llm.generate_json(
-                    claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA, **_EXTRACT_KW
-                )
-                return raw, "claude"
-            except Exception as claude_err:
-                log.warning(
-                    "Claude extraction failed (%s), falling back to Gemini/Ollama.",
-                    claude_err,
-                )
-        if settings.gemini_enabled and settings.gemini_api_key:
-            try:
-                raw = await gemini_llm.generate_json(
-                    system, user, PRESCRIPTION_JSON_SCHEMA, route="prescription"
-                )
-                return raw, "gemini"
-            except Exception as gemini_err:
-                log.warning(
-                    "Gemini extraction failed (%s), falling back to local Ollama LLM.",
-                    gemini_err,
-                )
         try:
-            return await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA), "ollama"
-        except llm.LlmError as err:
+            return await llm_chain.generate_json(
+                system=system,
+                user=user,
+                schema=PRESCRIPTION_JSON_SCHEMA,
+                route="prescription",
+                claude_prompt=prompt_for(prescription_claude_prompt)
+                if llm_chain.claude_ready()
+                else None,
+                claude_kw=_EXTRACT_KW,
+            )
+        except llm_chain.NoBackend as err:
             raise HTTPException(503, str(err)) from err
 
     started = time.monotonic()
@@ -1661,7 +1560,7 @@ async def extract_prescription(
             # next time — so a second call is still the right move, even to the
             # same backend. An empty draft the doctor cannot tell from a real
             # "no medication today" is the outcome worth spending a call to avoid.
-            if settings.claude_enabled and settings.claude_api_key:
+            if llm_chain.claude_ready():
                 claude_system, claude_user = prompt_for(prescription_claude_prompt)
                 return (
                     await claude_llm.generate_json(

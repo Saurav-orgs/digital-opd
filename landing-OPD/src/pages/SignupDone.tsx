@@ -118,8 +118,8 @@ export default function SignupDone() {
             </span>
             <h1>That payment did not go through</h1>
             <p className="muted">
-              Nothing was charged for {inr(status.total)}. Your account is saved — pick the plan
-              again and sign in with the same email and password to retry.
+              Nothing was charged for {inr(status.total)}. Pick the plan again and sign up with
+              the same email to retry.
             </p>
             <Link to={`/signup?plan=${status.plan}`} className="btn btn-primary btn-lg">
               Try the payment again <RotateCw size={18} />

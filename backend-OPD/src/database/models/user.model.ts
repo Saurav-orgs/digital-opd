@@ -52,8 +52,14 @@ export class User extends Model<User> {
   is_active: boolean;
 
   /**
-   * Opened through the paid sign-up: sign-in needs an active subscription.
-   * False for every account that predates plans, which are not gated.
+   * Opened through the online plan flow — the pricing page, or a super-admin
+   * invite that mapped a plan.
+   *
+   * Informational only. It used to decide who needed a subscription to sign in,
+   * which left every doctor created another way ungated *and* unable to buy a
+   * plan; `SubscriptionAccessService` now gates every doctor account regardless.
+   * Kept because "did this account come in through checkout?" is still worth
+   * knowing on a support call.
    */
   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
   subscription_required: boolean;

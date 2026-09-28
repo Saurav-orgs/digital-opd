@@ -184,13 +184,16 @@ const AddPatientForm: React.FC<{
     state: '',
     pincode: '',
   });
+  // Held as typed and converted on submit, so the field can be empty.
+  const [age, setAge] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const set = (k: keyof PatientDetailsInput, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const add = useMutation({
-    mutationFn: () => patientApi.addProfile(form),
+    mutationFn: () =>
+      patientApi.addProfile({ ...form, age: age.trim() ? Number(age) : undefined }),
     onSuccess: (created) => onAdded(created.id),
     onError: (err) =>
       setError(err instanceof ApiException ? err.message : 'Could not add this patient.'),
@@ -200,6 +203,9 @@ const AddPatientForm: React.FC<{
     e.preventDefault();
     setError(null);
     if (form.name.trim().length < 2) return setError('Please enter the patient’s name.');
+    if (age.trim() && !(Number(age) >= 0 && Number(age) <= 120)) {
+      return setError('Enter a valid age.');
+    }
     if (form.address_line.trim().length < 3) return setError('Please enter the address.');
     if (form.city.trim().length < 2) return setError('Please enter the city.');
     if (form.state.trim().length < 2) return setError('Please enter the state.');
@@ -239,6 +245,16 @@ const AddPatientForm: React.FC<{
             <option value="female">Female</option>
             <option value="other">Other</option>
           </select>
+        </div>
+        <div className="form-field" style={{ flex: 1 }}>
+          <label className="form-label">Age</label>
+          <input
+            className="form-input"
+            inputMode="numeric"
+            maxLength={3}
+            value={age}
+            onChange={(e) => setAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          />
         </div>
         <div className="form-field" style={{ flex: 1 }}>
           <label className="form-label">Relation</label>

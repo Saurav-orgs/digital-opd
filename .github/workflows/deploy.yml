@@ -15,6 +15,10 @@ env:
   BACKEND_DIR: backend-OPD
   DOCTOR_DIR: doctor-fe
   PATIENT_DIR: patient-fe
+  # The pricing / sign-up site (landing-OPD in the repo). Named for the
+  # folder that already exists on the server, not for the source folder —
+  # nginx is pointed at this path and renaming it here would serve a 404.
+  LANDING_DIR: opd-landing-page
   AI_DIR: ai
   # Must match the pm2 process that is already running, not a name we would
   # like it to have. This box hosts many unrelated apps — including one
@@ -97,6 +101,22 @@ jobs:
         working-directory: patient-web-OPD/dist
         run: zip -r ../../patient-dist.zip .
 
+      # ---------- Landing / sign-up site (landing-OPD) ----------
+      - name: Install landing deps
+        working-directory: landing-OPD
+        run: npm ci
+
+      # Same story as the two frontends above: the API base and the doctor /
+      # patient links are hardcoded in src/config.ts, not read from the
+      # environment. Setting anything here does nothing — edit that file.
+      - name: Build landing
+        working-directory: landing-OPD
+        run: npm run build
+
+      - name: Zip landing dist
+        working-directory: landing-OPD/dist
+        run: zip -r ../../landing-dist.zip .
+
       # ---------- AI sidecar (Python) ----------
       # Nothing to build: Python is not compiled. What must NOT happen is
       # shipping a venv — the wheels in it (ctranslate2, Pillow, numpy) are
@@ -120,6 +140,7 @@ jobs:
             backend-database.zip
             doctor-dist.zip
             patient-dist.zip
+            landing-dist.zip
             ai-dist.zip
             backend-package.json
             backend-package-lock.json
@@ -269,12 +290,13 @@ jobs:
           RELEASE: digital-opd-${{ github.sha }}
         run: |
           scp -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
-            backend-dist.zip backend-database.zip doctor-dist.zip patient-dist.zip ai-dist.zip \
+            backend-dist.zip backend-database.zip doctor-dist.zip patient-dist.zip \
+            landing-dist.zip ai-dist.zip \
             backend-package.json backend-package-lock.json \
             "$SSH_USER@$SSH_HOST_CLEAN:/tmp/"
 
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST_CLEAN" \
-            "mkdir -p /tmp/$RELEASE && mv /tmp/backend-dist.zip /tmp/backend-database.zip /tmp/doctor-dist.zip /tmp/patient-dist.zip /tmp/ai-dist.zip /tmp/backend-package.json /tmp/backend-package-lock.json /tmp/$RELEASE/"
+            "mkdir -p /tmp/$RELEASE && mv /tmp/backend-dist.zip /tmp/backend-database.zip /tmp/doctor-dist.zip /tmp/patient-dist.zip /tmp/landing-dist.zip /tmp/ai-dist.zip /tmp/backend-package.json /tmp/backend-package-lock.json /tmp/$RELEASE/"
 
       - name: Deploy on server
         env:
@@ -282,7 +304,7 @@ jobs:
           RELEASE: digital-opd-${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST_CLEAN" \
-            "ROOT='${{ env.ROOT }}' BACKEND_DIR='${{ env.BACKEND_DIR }}' DOCTOR_DIR='${{ env.DOCTOR_DIR }}' PATIENT_DIR='${{ env.PATIENT_DIR }}' AI_DIR='${{ env.AI_DIR }}' PM2_API='${{ env.PM2_API }}' PM2_AI='${{ env.PM2_AI }}' BACKEND_PORT='${{ env.BACKEND_PORT }}' AI_PORT='${{ env.AI_PORT }}' HEALTH_PATH='${{ env.HEALTH_PATH }}' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+            "ROOT='${{ env.ROOT }}' BACKEND_DIR='${{ env.BACKEND_DIR }}' DOCTOR_DIR='${{ env.DOCTOR_DIR }}' PATIENT_DIR='${{ env.PATIENT_DIR }}' LANDING_DIR='${{ env.LANDING_DIR }}' AI_DIR='${{ env.AI_DIR }}' PM2_API='${{ env.PM2_API }}' PM2_AI='${{ env.PM2_AI }}' BACKEND_PORT='${{ env.BACKEND_PORT }}' AI_PORT='${{ env.AI_PORT }}' HEALTH_PATH='${{ env.HEALTH_PATH }}' RELEASE='$RELEASE' bash -s" <<'REMOTE'
           set -euo pipefail
 
           export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -294,8 +316,8 @@ jobs:
             /var/www/digital-opd) : ;;
             *) echo "REFUSING TO DEPLOY: unexpected ROOT '$ROOT'"; exit 1 ;;
           esac
-          case "$BACKEND_DIR/$DOCTOR_DIR/$PATIENT_DIR/$AI_DIR" in
-            backend-OPD/doctor-fe/patient-fe/ai) : ;;
+          case "$BACKEND_DIR/$DOCTOR_DIR/$PATIENT_DIR/$AI_DIR/$LANDING_DIR" in
+            backend-OPD/doctor-fe/patient-fe/ai/opd-landing-page) : ;;
             *) echo "REFUSING TO DEPLOY: unexpected app dir names"; exit 1 ;;
           esac
 
@@ -345,6 +367,7 @@ jobs:
           # directory holds, so the move is the whole deploy.
           deploy_frontend "$DOCTOR_DIR" "doctor-dist.zip"
           deploy_frontend "$PATIENT_DIR" "patient-dist.zip"
+          deploy_frontend "$LANDING_DIR" "landing-dist.zip"
 
           # ---------- AI sidecar ----------
           # Deployed before the backend so the backend's own health check runs

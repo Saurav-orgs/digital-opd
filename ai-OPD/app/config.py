@@ -202,9 +202,13 @@ class Settings:
         "yes",
     )
 
-    # ── Gemini (prescription extraction only) ────────────────
-    # When true, /extract-prescription uses Gemini (with automatic Ollama fallback).
-    # All other endpoints (report summaries, transcription) always use local models.
+    # ── Gemini ───────────────────────────────────────────────
+    # Second in the chain behind Claude, and the reason a clinic with no
+    # Anthropic key still works: it serves prescription extraction, all three
+    # summary routes, AND the imaging read of an X-ray or ECG. The comment
+    # here used to say "prescription extraction only", which stopped being
+    # true once the summaries gained a Gemini tier and stopped being harmless
+    # once imaging did.
     gemini_enabled: bool = os.environ.get("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
     gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")

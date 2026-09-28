@@ -254,7 +254,7 @@ export class DoctorsController {
   createDoctor(@CurrentUser() user: AuthUser, @Body() dto: CreateDoctorDto) {
     this.assertSuperAdmin(user);
     const base = this.settings.patientWebBase();
-    return this.doctorsService.createTenant(dto, base);
+    return this.doctorsService.createTenant(dto, base, user);
   }
 
   @Public()
@@ -297,6 +297,11 @@ export class DoctorsController {
     if (!this.config.get<boolean>('selfRegistrationOpen')) {
       // Sign-up is paid and starts on the landing site; this route stayed so
       // a deployment without plans can switch it back on with one env var.
+      //
+      // Note for whoever switches it on: every doctor account now needs a live
+      // plan to use any authenticated route, so the session this returns is
+      // refused until somebody grants the account a plan. A deployment that
+      // wants open registration wants a free or trial plan granted here too.
       throw new AppException(ErrorCode.FORBIDDEN, {
         message: 'Please choose a plan on myDigitalOPD to create your practice.',
       });

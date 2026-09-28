@@ -4,18 +4,8 @@ import { billingApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { ConfirmDialog, Empty, Field, Loading, Modal } from '../components/ui';
 import { useToast } from '../components/Toast';
+import { daysLeft, inr, shortDate as date } from '../lib/money';
 import type { Subscription, SubscriptionStatus } from '../api/types';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-
-const date = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '—';
-
-/** Days from today until `iso`; negative once it has passed. */
-const daysLeft = (iso: string | null) =>
-  iso === null ? null : Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
 
 /**
  * The status badge reuses the app's record-state colours, so a subscription

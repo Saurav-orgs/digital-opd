@@ -19,6 +19,7 @@ import { RegisterDoctorDto, SetupProfileDto } from './dto/register-doctor.dto';
 import { StorageService } from '../uploads/storage.service';
 import { prepareHeaderImage } from '../uploads/letterhead-image';
 import { ActivityLogService } from '../activity/activity-log.service';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import {
@@ -813,6 +814,14 @@ export class DoctorsService {
   async createTenant(
     dto: CreateDoctorDto,
     patientWebBase: string,
+    /**
+     * The super admin doing this. Recorded on the login as `invited_by`, which
+     * is what makes the sign-in refusal say "no plan has been added to your
+     * account yet — contact us" instead of sending a doctor who was never near
+     * a checkout off to finish a payment. Every doctor account needs a live
+     * plan to sign in, so one has to be granted before this account is usable.
+     */
+    actor?: AuthUser,
   ): Promise<{
     doctor: any;
     doctorRole: any;
@@ -876,6 +885,7 @@ export class DoctorsService {
           role_id: doctorRole.id,
           doctor_id: doctor.id,
           is_active: true,
+          invited_by: actor?.id ?? null,
         } as any,
         { transaction: t },
       );

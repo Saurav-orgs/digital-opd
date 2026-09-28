@@ -599,6 +599,30 @@ export const doctorRegistrationApi = {
 };
 
 /**
+ * The public sign-up routes, used here by one screen only: the sign-in form,
+ * when it turns a locked-out account into a checkout.
+ *
+ * No token is involved — by definition, the account this serves is one that
+ * cannot sign in. The email and password the doctor just typed are the
+ * authorisation, and the server checks them again on every call.
+ */
+export const signupApi = {
+  /** The plans on sale. The same list the landing page prices itself from. */
+  plans: () => api.get<Plan[]>('/signup/plans').then((r) => r.data),
+
+  /**
+   * Opens a Cashfree order against an account that already exists. `origin`
+   * decides where Cashfree returns the payer — here, back to `/login`.
+   */
+  resume: (body: { email: string; password: string; plan: string; origin: 'app' }) =>
+    api.post<CheckoutSession>('/signup/resume', body).then((r) => r.data),
+
+  /** Where such an order stands. Public: the buyer still has no session. */
+  order: (orderId: string) =>
+    api.get<OrderStatus>(`/signup/orders/${orderId}`).then((r) => r.data),
+};
+
+/**
  * Billing. Two audiences in one controller:
  *
  *   `mine` / `myEvents` — the signed-in account's own plan and payments.
@@ -616,8 +640,12 @@ export const billingApi = {
   /** Whether the next cycle may be bought yet, plus the plans on sale. */
   renewal: () => api.get<Renewal>('/billing/me/renewal').then((r) => r.data),
 
-  /** Opens a Cashfree order for the signed-in doctor's next cycle. */
-  renew: (body: { plan: string; mobile: string }) =>
+  /**
+   * Opens a Cashfree order for the signed-in doctor's next cycle. The plan is
+   * all it takes — the gateway's customer phone is filled in server-side, and
+   * the receipt goes to the account's email address.
+   */
+  renew: (body: { plan: string }) =>
     api.post<CheckoutSession>('/billing/me/renew', body).then((r) => r.data),
 
   /** Where a renewal order stands. Scoped to the caller. */

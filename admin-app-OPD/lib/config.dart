@@ -13,7 +13,7 @@ class AppConfig {
     if (_override.isNotEmpty) return _override;
     final fromEnv = dotenv.maybeGet('API_BASE_URL')?.trim() ?? '';
     if (fromEnv.isNotEmpty) return fromEnv;
-    return 'https://76ml0vk8-3000.inc1.devtunnels.ms/api';
+    return 'https://api.mydigitalopd.com/api';
   }
 
   /// Base URL of the patient web app — used to build QR/booking links.

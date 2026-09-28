@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { Empty, Loading, Modal } from '../components/ui';
+import { inr } from '../lib/money';
 import type { PaymentEvent, PaymentEventSource } from '../api/types';
-
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString('en-IN', {

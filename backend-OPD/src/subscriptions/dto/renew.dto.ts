@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
 /**
  * A signed-in doctor buys their next cycle.
@@ -17,11 +17,18 @@ export class RenewSubscriptionDto {
   plan: string;
 
   /**
-   * Cashfree needs a customer phone on every order. Asked rather than read
-   * off the profile: the number on the clinic record is the one patients ring,
-   * which is not always the one that should get the payment receipt.
+   * Cashfree needs a customer phone on every order, so one is sent — but it is
+   * no longer asked for here. The receipt and the invoice go to the address on
+   * the account, which is the address the doctor signs in with, so a second
+   * field on the renewal card only stood between the doctor and paying. The
+   * server falls back to the number on the clinic record; see
+   * `SubscriptionsService.checkoutPhone`.
+   *
+   * Still accepted, and still validated when present, so an older build of the
+   * app keeps working.
    */
-  @ApiProperty({ example: '9876543210' })
+  @ApiPropertyOptional({ example: '9876543210' })
+  @IsOptional()
   @Matches(/^[6-9]\d{9}$/, { message: 'Please enter a valid 10-digit mobile number.' })
-  mobile: string;
+  mobile?: string;
 }

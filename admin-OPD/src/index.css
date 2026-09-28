@@ -963,6 +963,18 @@ textarea.input:focus {
   color: var(--state-error);
   font-size: 12px;
 }
+/* The same class outside a field — the message an auth screen leads with. It
+   had no rule at all, so a refusal ("your subscription has ended") read as
+   ordinary body text on the one screen where it is the whole point. */
+.err {
+  color: var(--state-error);
+  font-size: 13px;
+}
+.err a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
 /* A field carrying a message reads as wrong at a glance, not just in the text. */
 .field:has(.err) .input,
 .field:has(.err) .select,
@@ -1393,6 +1405,29 @@ tr.appt-row.upcoming td:first-child {
   text-align: center;
   padding: 32px 28px;
   box-shadow: 0 10px 40px rgba(22, 56, 50, 0.06);
+}
+/* The same card carrying the plan list instead of the sign-in form. */
+.login-card.is-wide {
+  max-width: 440px;
+}
+
+/* ── Activating a locked-out account, from the sign-in screen ─ */
+.activate {
+  text-align: left;
+  margin-top: 18px;
+}
+.activate-lead {
+  margin: 0;
+  text-align: left;
+}
+.activate-note {
+  font-size: 12.5px;
+  margin: 10px 0 0;
+  text-align: left;
+}
+.activate-back {
+  display: block;
+  margin: 14px auto 0;
 }
 .login-card .field {
   text-align: left;
@@ -4591,6 +4626,17 @@ tr.row-warn td {
   gap: 10px;
   margin: 14px 0 4px;
 }
+/* One per row — the sign-in card is too narrow to read plans side by side. */
+.renew-plans.is-stacked {
+  grid-template-columns: 1fr;
+}
+.renew-plans.is-stacked .renew-plan {
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+}
+.renew-plans.is-stacked .renew-plan-sub {
+  grid-column: 1 / -1;
+}
 .renew-plan {
   display: grid;
   gap: 2px;
@@ -4632,10 +4678,6 @@ tr.row-warn td {
 .renew-plan-sub {
   font-size: 12px;
   color: var(--text-secondary);
-}
-.renew-pay {
-  max-width: 280px;
-  margin-top: 12px;
 }
 /* The banner the doctor lands on when Cashfree sends them back. */
 .renew-result {

@@ -27,6 +27,16 @@ export interface CashfreePayment {
   payment_time?: string;
 }
 
+/** How long to wait on Cashfree before giving up and saying so. */
+const GATEWAY_TIMEOUT_MS = 30_000;
+
+/**
+ * What a doctor is told when the gateway is unreachable, slow, or broken —
+ * all three mean the same thing to them: nothing happened, try again.
+ */
+const GATEWAY_UNREACHABLE =
+  'The payment gateway is not responding right now. Nothing was charged — please try again in a moment.';
+
 /**
  * The slice of Cashfree's Payment Gateway API this server uses: create an
  * order, read it back, and check a webhook's signature.
@@ -61,6 +71,22 @@ export class CashfreeService {
     if (!this.appId || !this.secretKey) {
       this.logger.warn('CASHFREE_APP_ID / CASHFREE_SECRET_KEY not set — paid sign-up will fail.');
     }
+    // Cashfree labels its own keys `cfsk_ma_test_` / `cfsk_ma_prod_`, so the
+    // one mistake that matters — going live with the sandbox keys still in
+    // place, or the reverse — is worth saying out loud at boot rather than
+    // leaving to be read off a failed payment.
+    const label = this.secretKey.startsWith('cfsk_ma_prod_')
+      ? 'production'
+      : this.secretKey.startsWith('cfsk_ma_test_')
+        ? 'sandbox'
+        : null;
+    if (label && label !== this.env) {
+      this.logger.error(
+        `CASHFREE_ENV is ${this.env} but the secret key is a ${label} key — ` +
+          'set the CASHFREE_PROD_* keys for production. Payments will fail.',
+      );
+    }
+    this.logger.log(`Cashfree ${this.env} — ${this.baseUrl}, webhook ${this.notifyUrl}`);
   }
 
   get configured(): boolean {
@@ -129,11 +155,18 @@ export class CashfreeService {
           accept: 'application/json',
         },
         body: body ? JSON.stringify(body) : undefined,
+        // Cashfree's own edge gives up with a 504 after about a minute. A
+        // doctor watching a spinner should not wait that long to be told to
+        // try again, and a request that hangs holds a connection open here.
+        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
       });
     } catch (err: any) {
-      this.logger.error(`Cashfree ${method} ${path} failed: ${err?.message}`);
+      const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      this.logger.error(
+        `Cashfree ${method} ${path} ${timedOut ? `timed out after ${GATEWAY_TIMEOUT_MS}ms` : `failed: ${err?.message}`}`,
+      );
       throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: 'Could not reach the payment gateway. Please try again.',
+        message: GATEWAY_UNREACHABLE,
       });
     }
     const text = await res.text();
@@ -145,6 +178,13 @@ export class CashfreeService {
     }
     if (!res.ok) {
       this.logger.error(`Cashfree ${method} ${path} → ${res.status}: ${text.slice(0, 500)}`);
+      // A 5xx is the gateway having trouble, not a refusal: nothing was
+      // wrong with the request and nothing was charged, so the doctor is
+      // told to try again rather than that they were rejected. Cashfree's
+      // own message is only quoted for a 4xx, where it explains the refusal.
+      if (res.status >= 500) {
+        throw new AppException(ErrorCode.INTERNAL_ERROR, { message: GATEWAY_UNREACHABLE });
+      }
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message: json?.message || 'The payment gateway rejected the request.',
       });
