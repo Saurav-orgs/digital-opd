@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { consultationApi } from '../api/endpoints';
+import { consultationApi, doctorsApi } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
 import type { DraftFlushRef } from '../lib/draftFlush';
+import { bodyHeightPt } from '../lib/letterhead';
+import { Loading } from './ui';
 import { PrintPrescriptionButton } from './PrescriptionPreview';
 
 /** How long the pad waits after the pen lifts before saving. */
@@ -9,9 +12,11 @@ const AUTOSAVE_DELAY_MS = 2000;
 
 type Tool = 'pen' | 'eraser';
 
-// Backing resolution: 2× the A4 body (515 × 507 pt) so exports stay crisp.
+// Backing resolution: 2× the A4 body so exports stay crisp. The width is the
+// page's content width; the height is whatever the doctor's header leaves
+// (`bodyHeightPt`), so the drawing fills the sheet instead of being scaled
+// down with air at the sides under a tall header.
 const CANVAS_W = 1030;
-const CANVAS_H = 1014;
 const SCALE = CANVAS_W / 515; // canvas px per PDF pt
 const PEN_PT = 2.6;
 const ERASER_PT = 26;
@@ -43,6 +48,24 @@ export function HandwritingCanvas({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const qc = useQueryClient();
+  const { isDoctor } = useAuth();
+
+  /*
+   * The pad's height comes from the doctor's header: the PDF sizes the header
+   * to the image and the body gets what is left. Fixed once, before the
+   * canvas mounts — changing a canvas's height wipes it, so the pad waits for
+   * the doctor's profile (cached from the shell, so rarely a visible wait)
+   * rather than resize under a drawing. A staff account, or a profile that
+   * fails to load, gets the body under the standard header.
+   */
+  const meQ = useQuery({ queryKey: ['doctor-me'], queryFn: doctorsApi.me, enabled: isDoctor });
+  const canvasHRef = useRef<number | null>(null);
+  if (canvasHRef.current == null && (!isDoctor || !meQ.isPending)) {
+    const me = meQ.data;
+    const ratio = me?.letterhead_header_url ? me.letterhead_header_ratio : null;
+    canvasHRef.current = Math.round(bodyHeightPt(ratio) * SCALE);
+  }
+  const canvasH = canvasHRef.current;
 
   /*
    * What is on the pad, kept outside the canvas element.
@@ -71,7 +94,7 @@ export function HandwritingCanvas({
 
   const snapshot = () => {
     const ctx = ctxRef.current;
-    if (ctx) snapshotRef.current = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+    if (ctx && canvasH) snapshotRef.current = ctx.getImageData(0, 0, CANVAS_W, canvasH);
   };
 
   useEffect(() => {
@@ -102,7 +125,8 @@ export function HandwritingCanvas({
       canvas.removeEventListener('touchend', preventTouchScroll);
       canvas.removeEventListener('touchcancel', preventTouchScroll);
     };
-  }, [isFullscreen]);
+    // `canvasH`: the pad is not in the tree until its height is known.
+  }, [isFullscreen, canvasH]);
 
   /*
    * Pick up where the doctor left off. The saved page comes through the API
@@ -125,7 +149,7 @@ export function HandwritingCanvas({
       if (!ctx) return;
       ctx.save();
       ctx.globalCompositeOperation = 'destination-over';
-      ctx.drawImage(bitmap, 0, 0, CANVAS_W, CANVAS_H);
+      ctx.drawImage(bitmap, 0, 0, CANVAS_W, canvasH ?? CANVAS_W);
       ctx.restore();
       snapshot();
       done = true;
@@ -147,7 +171,7 @@ export function HandwritingCanvas({
   const pushUndo = () => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    undoStack.current.push(ctx.getImageData(0, 0, CANVAS_W, CANVAS_H));
+    undoStack.current.push(ctx.getImageData(0, 0, CANVAS_W, canvasH ?? CANVAS_W));
     if (undoStack.current.length > 20) undoStack.current.shift();
   };
 
@@ -163,7 +187,7 @@ export function HandwritingCanvas({
     const ctx = ctxRef.current;
     if (!ctx) return;
     pushUndo();
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.clearRect(0, 0, CANVAS_W, canvasH ?? CANVAS_W);
     // A cleared pad is a change like any other — the saved page goes too.
     changed();
   };
@@ -172,7 +196,7 @@ export function HandwritingCanvas({
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * CANVAS_W;
-    const y = ((e.clientY - rect.top) / rect.height) * CANVAS_H;
+    const y = ((e.clientY - rect.top) / rect.height) * (canvasH ?? CANVAS_W);
     return { x, y };
   };
 
@@ -232,8 +256,8 @@ export function HandwritingCanvas({
     let canvas: HTMLCanvasElement | null = canvasRef.current;
     if (!canvas && snapshotRef.current) {
       canvas = document.createElement('canvas');
-      canvas.width = CANVAS_W;
-      canvas.height = CANVAS_H;
+      canvas.width = snapshotRef.current.width;
+      canvas.height = snapshotRef.current.height;
       canvas.getContext('2d')?.putImageData(snapshotRef.current, 0, 0);
     }
     if (!canvas) throw new Error('No canvas');
@@ -348,12 +372,14 @@ export function HandwritingCanvas({
     );
   }
 
+  if (canvasH == null) return <Loading label="Preparing your pad…" />;
+
   const canvasContent = (
     <div
       style={{
         width: '100%',
         height: isFullscreen ? 'calc(100vh - 120px)' : 'auto',
-        aspectRatio: isFullscreen ? undefined : `${CANVAS_W} / 1200`,
+        aspectRatio: isFullscreen ? undefined : `${CANVAS_W} / ${canvasH}`,
         background: '#fff',
         border: 'var(--hairline)',
         borderRadius: 8,
@@ -368,7 +394,7 @@ export function HandwritingCanvas({
       <canvas
         ref={canvasRef}
         width={CANVAS_W}
-        height={CANVAS_H}
+        height={canvasH ?? CANVAS_W}
         style={{
           width: '100%',
           height: '100%',

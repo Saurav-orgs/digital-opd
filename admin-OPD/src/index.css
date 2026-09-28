@@ -963,6 +963,18 @@ textarea.input:focus {
   color: var(--state-error);
   font-size: 12px;
 }
+/* The same class outside a field — the message an auth screen leads with. It
+   had no rule at all, so a refusal ("your subscription has ended") read as
+   ordinary body text on the one screen where it is the whole point. */
+.err {
+  color: var(--state-error);
+  font-size: 13px;
+}
+.err a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
 /* A field carrying a message reads as wrong at a glance, not just in the text. */
 .field:has(.err) .input,
 .field:has(.err) .select,
@@ -1394,6 +1406,29 @@ tr.appt-row.upcoming td:first-child {
   padding: 32px 28px;
   box-shadow: 0 10px 40px rgba(22, 56, 50, 0.06);
 }
+/* The same card carrying the plan list instead of the sign-in form. */
+.login-card.is-wide {
+  max-width: 440px;
+}
+
+/* ── Activating a locked-out account, from the sign-in screen ─ */
+.activate {
+  text-align: left;
+  margin-top: 18px;
+}
+.activate-lead {
+  margin: 0;
+  text-align: left;
+}
+.activate-note {
+  font-size: 12.5px;
+  margin: 10px 0 0;
+  text-align: left;
+}
+.activate-back {
+  display: block;
+  margin: 14px auto 0;
+}
 .login-card .field {
   text-align: left;
 }
@@ -1769,10 +1804,10 @@ tr.appt-row.upcoming td:first-child {
 .fab-walkin:active:not(:disabled) {
   transform: scale(0.96);
 }
-/* The uploaded prescription header, at the height the PDF gives it: full
-   width, its own proportions. The min-height keeps the empty state a box. */
+/* The header at the shape it prints — the aspect ratio comes inline from the
+   doctor's own image, since the PDF box is sized to it. */
 .lh-header-box {
-  min-height: 90px;
+  aspect-ratio: 2000 / 355; /* legacy fallback; overridden inline */
   width: 100%;
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -1788,6 +1823,77 @@ tr.appt-row.upcoming td:first-child {
   height: auto;
   display: block;
 }
+/* ── Header cropper ──────────────────────────────────────────
+   The doctor's whole pad, with the strip to keep between two handles. The
+   stage is `touch-action: none` so a finger dragging a handle on a phone
+   moves the handle, not the page. */
+.lh-crop-stage {
+  position: relative;
+  /* Narrowed inline so the whole page fits on screen; the handles' positions
+     are fractions of this box, so the image must fill it exactly. */
+  width: 100%;
+  margin: 0 auto;
+  border: var(--hairline);
+  border-radius: 8px;
+  background: #fff;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.lh-crop-stage img {
+  display: block;
+  width: 100%;
+  pointer-events: none;
+}
+.lh-crop-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(22, 56, 50, 0.45);
+  pointer-events: none;
+}
+.lh-crop-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid var(--primary, #1b6ef3);
+  cursor: ns-resize;
+}
+/* A wide invisible hit area, so the 2px line is not what has to be grabbed. */
+.lh-crop-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -14px;
+  height: 28px;
+}
+.lh-crop-handle span {
+  position: absolute;
+  right: 8px;
+  top: -11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary, #1b6ef3);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  pointer-events: none;
+}
+.lh-crop-result {
+  width: 100%;
+  overflow: hidden;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.lh-crop-result img {
+  display: block;
+  width: 100%;
+}
+
 /* The booking-QR dialog: the code large enough to scan off a phone screen. */
 .qr-sheet {
   display: flex;
@@ -4255,4 +4361,368 @@ tr.appt-row.upcoming td:first-child {
 /* Autosave status beside the editor's Save draft button. */
 .rx-save-state.is-error {
   color: var(--state-error);
+}
+
+/* ── Billing: plans, subscriptions, payment log ────────────────
+   Super-admin screens. They reuse the app's table, badge and stat-tile
+   vocabulary; only the pieces with no existing equivalent are here. */
+
+.page-sub {
+  font-size: 13px;
+  margin: -10px 0 16px;
+  max-width: 62ch;
+}
+
+.plan-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* A retired plan is still readable — it is history, not an error — but it
+   should not compete with the plans actually on sale. */
+.plan-card.is-retired {
+  opacity: 0.72;
+  background: var(--surface-2);
+}
+.plan-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.plan-card-head h3 {
+  font-size: 16px;
+  margin: 0;
+}
+.plan-code {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.plan-flags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.plan-card-tagline {
+  font-size: 13px;
+  margin: 0;
+}
+.plan-card-price {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.plan-card-price strong {
+  font-family: var(--font-heading);
+  font-size: 26px;
+  line-height: 1;
+}
+.plan-card-facts {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  border-top: var(--hairline);
+  padding-top: 10px;
+}
+.plan-card-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.plan-card-facts dt {
+  color: var(--text-secondary);
+}
+.plan-card-facts dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+.plan-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+/* The GST sum worked out live, so nobody has to do it in their head before
+   committing a price. */
+.plan-preview {
+  background: var(--sage-tint);
+  color: var(--teal-dark);
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.form-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.check-row input {
+  margin-top: 2px;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--teal);
+  flex: none;
+}
+.check-row .hint,
+.field .hint {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.filter-row {
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+/* `.filter-btn` is full-width by default because its usual home is a
+   `.filter-btn-wrap` that owns the column. Here they are a row of choices,
+   so each one is only as wide as its label. */
+.filter-row .filter-btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 8px 14px;
+}
+
+/* Table cells that carry a second line of context under the main value. */
+.cell-strong {
+  font-weight: 600;
+}
+.cell-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.cell-warn {
+  color: var(--marigold-dark);
+}
+.cell-nowrap {
+  white-space: nowrap;
+}
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+/* A webhook whose signature did not match: recorded, never acted on, and it
+   should be obvious at a glance which rows those are. */
+tr.row-warn td {
+  background: #fdf6ec;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.detail-list {
+  margin: 0;
+  display: grid;
+  gap: 9px;
+}
+.detail-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 13px;
+  border-bottom: var(--hairline);
+  padding-bottom: 8px;
+}
+.detail-list dt {
+  color: var(--text-secondary);
+  flex: none;
+}
+.detail-list dd {
+  margin: 0;
+  text-align: right;
+  word-break: break-all;
+}
+.payload-box {
+  background: var(--surface-2);
+  border: var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── "My plan" on the doctor's own profile ─────────────────── */
+.my-plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.my-plan-name {
+  font-family: var(--font-heading);
+  font-size: 17px;
+}
+.my-plan-renew {
+  font-size: 13.5px;
+  margin: 10px 0 0;
+}
+.my-plan-renew.is-soon {
+  color: var(--marigold-dark);
+}
+.my-plan-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: var(--hairline);
+}
+.my-plan-history {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+.my-plan-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+/* ── Renewing a plan from inside the app ──────────────────── */
+.renew-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+/* One per row — the sign-in card is too narrow to read plans side by side. */
+.renew-plans.is-stacked {
+  grid-template-columns: 1fr;
+}
+.renew-plans.is-stacked .renew-plan {
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+}
+.renew-plans.is-stacked .renew-plan-sub {
+  grid-column: 1 / -1;
+}
+.renew-plan {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.renew-plan:hover {
+  border-color: var(--teal);
+}
+.renew-plan.is-chosen {
+  border-color: var(--teal);
+  box-shadow: inset 0 0 0 1px var(--teal);
+}
+.renew-plan-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.renew-plan-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--marigold-dark);
+}
+.renew-plan-price {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  color: var(--text);
+}
+.renew-plan-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+/* The banner the doctor lands on when Cashfree sends them back. */
+.renew-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+.renew-result.is-good {
+  background: var(--sage-tint, #e8f3f1);
+  color: var(--teal-dark);
+}
+.renew-result.is-waiting {
+  background: #fdf3e0;
+  color: var(--marigold-dark);
+}
+.renew-result.is-bad {
+  background: #fdecec;
+  color: #a12020;
+}
+
+/* The profile card's way through to the full Billing screen. */
+.my-plan-link {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: var(--hairline);
+  font-size: 13.5px;
+}
+.my-plan-link a {
+  color: var(--teal);
+  font-weight: 600;
+  text-decoration: none;
+}
+.my-plan-link a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 700px) {
+  .form-row-2 {
+    grid-template-columns: 1fr;
+  }
+  .plan-grid {
+    grid-template-columns: 1fr;
+  }
 }

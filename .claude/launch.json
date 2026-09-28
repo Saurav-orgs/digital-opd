@@ -47,6 +47,45 @@
         "patient-web-OPD"
       ],
       "port": 5175
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "landing-OPD"
+      ],
+      "port": 5176
+    },
+    {
+      "name": "ref-design",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5199",
+        "--directory",
+        "/private/tmp/claude-501/-Users-rohitsingh-Desktop-workspace-digital-opd/3cbfb542-3bcd-4564-957a-d1866adf37e7/scratchpad/ref"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "../mydigitalopd-site",
+        "--",
+        "--port",
+        "4330",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 4330
     }
   ]
 }

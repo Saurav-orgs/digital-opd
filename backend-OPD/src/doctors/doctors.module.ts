@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { DoctorsService } from './doctors.service';
 import { DoctorsController } from './doctors.controller';
 import { Doctor } from '../database/models/doctor.model';
@@ -17,6 +18,8 @@ import { ScheduleException } from '../database/models/schedule-exception.model';
     ConfigModule,
     // Registration ends in a signed-in session, minted the same way login is.
     AuthModule,
+    // First-login setup points the paid subscription at the tenant it built.
+    SubscriptionsModule,
     SequelizeModule.forFeature([
       Doctor,
       Role,

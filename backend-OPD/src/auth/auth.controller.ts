@@ -11,6 +11,7 @@ import {
   VerifyResetCodeDto,
 } from './dto/password-reset.dto';
 import { Public } from '../common/decorators/public.decorator';
+import { AllowsTemporaryPassword } from '../common/decorators/temporary-password.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Auth')
@@ -71,6 +72,8 @@ export class AuthController {
 
   @Post('change-password')
   @ApiBearerAuth()
+  // Reachable on a temporary password — it is the way out of one.
+  @AllowsTemporaryPassword()
   @ApiOperation({ summary: 'Change your own password (requires the current one)' })
   async changePassword(
     @CurrentUser() user: AuthUser,
@@ -82,6 +85,9 @@ export class AuthController {
 
   @Get('me')
   @ApiBearerAuth()
+  // The app asks this on every load, including the load that shows the
+  // change-password screen, so it has to answer on a temporary password.
+  @AllowsTemporaryPassword()
   @ApiOperation({ summary: 'Current authenticated principal + permissions' })
   me(@CurrentUser() user: AuthUser) {
     return this.authService.me(user);

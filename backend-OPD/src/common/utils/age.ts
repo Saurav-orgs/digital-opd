@@ -28,3 +28,28 @@ export function ageFromDob(
   if (age < 0 || age > 120) return null;
   return age;
 }
+
+/**
+ * An estimated YYYY-MM-DD date of birth for someone who gave only their age:
+ * `age` years before `onDate`, so {@link ageFromDob} gives back exactly that
+ * age today and moves on by a year a year from now.
+ *
+ * Registration asks for an age, not a birth date — a patient knows the first
+ * and often not the second. Keeping it as an estimated birth date rather than
+ * a bare number is what stops it going stale, the same reason the column holds
+ * a date at all. 29 February becomes 28 February in a year that lacks it.
+ */
+export function dobFromAge(
+  age: number | null | undefined,
+  onDate: string,
+): string | null {
+  if (age == null || !Number.isInteger(age) || age < 0 || age > 120) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(onDate)) return null;
+
+  const [y, m, d] = onDate.split('-').map(Number);
+  const year = y - age;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const day = m === 2 && d === 29 && !leap ? 28 : d;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${String(year).padStart(4, '0')}-${pad(m)}-${pad(day)}`;
+}

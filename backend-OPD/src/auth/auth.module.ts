@@ -9,11 +9,14 @@ import { UsersModule } from '../users/users.module';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { EmailVerification } from '../database/models/email-verification.model';
 import { PasswordReset } from '../database/models/password-reset.model';
+import { SubscriptionAccessModule } from '../subscriptions/subscription-access.module';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
+    // Login and token validation refuse an unpaid or lapsed plan.
+    SubscriptionAccessModule,
     SequelizeModule.forFeature([EmailVerification, PasswordReset]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -11,6 +11,13 @@ export interface AuthUser {
   /** The role's display name, for the header — null for a role-less account. */
   roleName: string | null;
   doctorId: string | null;
+  /** Opened through the paid sign-up — sign-in depends on an active plan. */
+  subscriptionRequired: boolean;
+  /**
+   * Somebody else chose this password. Until it is replaced the session can
+   * reach the change-password screen and nothing else.
+   */
+  mustChangePassword: boolean;
   permissions: string[]; // "module:action" strings
 }
 

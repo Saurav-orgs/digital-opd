@@ -9,6 +9,7 @@ import {
 } from '../database/models/appointment.model';
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
 import { AiClientService, AiVisitInput } from '../ai/ai-client.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { StorageService } from '../uploads/storage.service';
@@ -81,6 +82,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     @InjectModel(AiTrainingSample)
     private readonly trainingModel: typeof AiTrainingSample,
     private readonly ai: AiClientService,
+    private readonly aiUsage: AiUsageService,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
   ) {
@@ -198,7 +200,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     );
 
     try {
-      const { summary } = await this.ai.consolidateSummaries(
+      const { summary, usage } = await this.ai.consolidateSummaries(
         ready
           .filter((r) => r.ai_summary)
           .map((r) => ({
@@ -208,6 +210,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
             abnormal_values: r.ai_summary!.abnormal_values ?? [],
           })),
       );
+      await this.aiUsage.record(usage, { appointmentId });
       await this.appointmentModel.update(
         {
           reports_summary: summary,
@@ -289,7 +292,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     );
 
     try {
-      const { summary } = await this.ai.summarizeProgress({
+      const { summary, usage } = await this.ai.summarizeProgress({
         patient: {
           age: appointment.patient_age,
           gender: appointment.patient_gender ?? undefined,
@@ -297,6 +300,7 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         previous: previousInput,
         current,
       });
+      await this.aiUsage.record(usage, { appointmentId });
       await this.appointmentModel.update(
         {
           progress_summary: summary,
@@ -609,7 +613,15 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     );
 
     try {
-      const { summary, model_version } = await this.ai.summarizeReport(file);
+      const { summary, model_version, usage } = await this.ai.summarizeReport(file);
+      // The report carries the appointment, which may be null when it was
+      // uploaded before one existed — the spend is still recorded, just
+      // unattached. See the migration.
+      const report = await this.reportModel.findByPk(reportId);
+      await this.aiUsage.record(usage, {
+        appointmentId: report?.appointment_id ?? null,
+        reportId,
+      });
       await this.reportModel.update(
         {
           ai_summary: summary,

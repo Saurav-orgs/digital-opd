@@ -22,6 +22,19 @@ import type {
   User,
   ProgressSummary,
   PatientProfile,
+  Plan,
+  PlanInput,
+  Subscription,
+  SubscriptionSummary,
+  PaymentEvent,
+  Paged,
+  MyBilling,
+  BillingAccount,
+  Invoice,
+  DoctorInviteResult,
+  CheckoutSession,
+  OrderStatus,
+  Renewal,
 } from './types';
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -103,6 +116,13 @@ export const doctorsApi = {
     license_number?: string;
     contact_mobile?: string;
   }) => api.post<CreateDoctorResult>('/doctors', body).then((r) => r.data),
+  /**
+   * Super-admin: open an account for a doctor — name, email and the plan it
+   * runs on. The server makes the password and emails the way in; the doctor
+   * fills in the practice itself on their first sign-in.
+   */
+  invite: (body: { name: string; email: string; plan_id?: string; months?: number; note?: string }) =>
+    api.post<DoctorInviteResult>('/doctors/invite', body).then((r) => r.data),
   /** Super-admin: full profile including a signed link to the certificate. */
   profile: (id: string) =>
     api.get<DoctorProfile>(`/doctors/${id}/profile`).then((r) => r.data),
@@ -179,9 +199,25 @@ function upload(url: string, file: File) {
     .then((r) => r.data);
 }
 
+/** Shared by both invoice download routes: bytes in, a named PDF out. */
+async function invoiceFile(url: string, fallbackName: string): Promise<File> {
+  const res = await api.get<Blob>(url, { responseType: 'blob' });
+  const name = filenameFromDisposition(res.headers['content-disposition'], fallbackName);
+  return new File([res.data], name, { type: 'application/pdf' });
+}
+
 // ── Platform settings (super-admin) ──────────────────────────
 export interface AppSettings {
   patient_web_base: string;
+  /** Who subscription invoices are issued by; stamped onto each one at issue. */
+  invoice_legal_name: string;
+  invoice_address: string;
+  invoice_gstin: string;
+  invoice_pan: string;
+  invoice_state: string;
+  invoice_email: string;
+  invoice_phone: string;
+  invoice_prefix: string;
 }
 
 export const settingsApi = {
@@ -534,8 +570,13 @@ export const blockedNumbersApi = {
 };
 
 /**
- * Doctor self-registration. Public — no token, because the account it creates
- * cannot be used until the super admin approves it.
+ * Opening a practice. Two ways in:
+ *
+ *   register — the old free self-sign-up. Public, and closed by default on
+ *     the server now that sign-up is paid (SELF_REGISTRATION_OPEN).
+ *   setup — after a paid sign-up: the account exists and has a subscription,
+ *     but no clinic. Authenticated; the answer is a fresh session, because
+ *     the principal gains a doctor id and the tenant's Doctor role.
  */
 export const doctorRegistrationApi = {
   // The answer is a session: the doctor is signed in the moment the account
@@ -547,4 +588,111 @@ export const doctorRegistrationApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data),
+
+  /** First login after paying: build the tenant around the account that exists. */
+  setup: (form: FormData) =>
+    api
+      .post<{ ok: boolean } & Partial<LoginResponse>>('/doctors/me/setup', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data),
+};
+
+/**
+ * The public sign-up routes, used here by one screen only: the sign-in form,
+ * when it turns a locked-out account into a checkout.
+ *
+ * No token is involved — by definition, the account this serves is one that
+ * cannot sign in. The email and password the doctor just typed are the
+ * authorisation, and the server checks them again on every call.
+ */
+export const signupApi = {
+  /** The plans on sale. The same list the landing page prices itself from. */
+  plans: () => api.get<Plan[]>('/signup/plans').then((r) => r.data),
+
+  /**
+   * Opens a Cashfree order against an account that already exists. `origin`
+   * decides where Cashfree returns the payer — here, back to `/login`.
+   */
+  resume: (body: { email: string; password: string; plan: string; origin: 'app' }) =>
+    api.post<CheckoutSession>('/signup/resume', body).then((r) => r.data),
+
+  /** Where such an order stands. Public: the buyer still has no session. */
+  order: (orderId: string) =>
+    api.get<OrderStatus>(`/signup/orders/${orderId}`).then((r) => r.data),
+};
+
+/**
+ * Billing. Two audiences in one controller:
+ *
+ *   `mine` / `myEvents` — the signed-in account's own plan and payments.
+ *   everything else     — the super admin's: the price list, who is on what,
+ *                         and the payment activity log.
+ */
+export const billingApi = {
+  mine: () => api.get<MyBilling>('/billing/me').then((r) => r.data),
+
+  myEvents: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<PaymentEvent>>('/billing/me/events', { params }).then((r) => r.data),
+
+  myInvoices: () => api.get<Invoice[]>('/billing/me/invoices').then((r) => r.data),
+
+  /** Whether the next cycle may be bought yet, plus the plans on sale. */
+  renewal: () => api.get<Renewal>('/billing/me/renewal').then((r) => r.data),
+
+  /**
+   * Opens a Cashfree order for the signed-in doctor's next cycle. The plan is
+   * all it takes — the gateway's customer phone is filled in server-side, and
+   * the receipt goes to the account's email address.
+   */
+  renew: (body: { plan: string }) =>
+    api.post<CheckoutSession>('/billing/me/renew', body).then((r) => r.data),
+
+  /** Where a renewal order stands. Scoped to the caller. */
+  myOrder: (orderId: string) =>
+    api.get<OrderStatus>(`/billing/me/orders/${orderId}`).then((r) => r.data),
+
+  /**
+   * The PDF itself, as a File named the way the server named it.
+   *
+   * Fetched through the client rather than linked to: the route needs the
+   * bearer token, and an `<a href>` carries no headers.
+   */
+  myInvoicePdf: (id: string, fallbackName: string) =>
+    invoiceFile(`/billing/me/invoices/${id}/pdf`, fallbackName),
+
+  invoices: () => api.get<Invoice[]>('/billing/invoices').then((r) => r.data),
+
+  invoicePdf: (id: string, fallbackName: string) =>
+    invoiceFile(`/billing/invoices/${id}/pdf`, fallbackName),
+
+  plans: () => api.get<Plan[]>('/billing/plans').then((r) => r.data),
+
+  createPlan: (body: PlanInput) =>
+    api.post<Plan>('/billing/plans', body).then((r) => r.data),
+
+  updatePlan: (id: string, body: PlanInput) =>
+    api.patch<Plan>(`/billing/plans/${id}`, body).then((r) => r.data),
+
+  removePlan: (id: string) =>
+    api.delete<Plan>(`/billing/plans/${id}`).then((r) => r.data),
+
+  subscriptions: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<Subscription>>('/billing/subscriptions', { params }).then((r) => r.data),
+
+  summary: () =>
+    api.get<SubscriptionSummary>('/billing/subscriptions/summary').then((r) => r.data),
+
+  accounts: () => api.get<BillingAccount[]>('/billing/accounts').then((r) => r.data),
+
+  grant: (body: { user_id: string; plan_id: string; months?: number; note?: string }) =>
+    api.post<Subscription>('/billing/subscriptions/grant', body).then((r) => r.data),
+
+  cancel: (id: string, reason?: string) =>
+    api
+      .post<Subscription>(`/billing/subscriptions/${id}/cancel`, { reason })
+      .then((r) => r.data),
+
+  events: (params: Record<string, unknown> = {}) =>
+    api.get<Paged<PaymentEvent>>('/billing/events', { params }).then((r) => r.data),
 };

@@ -31,6 +31,27 @@ export enum DoctorVerificationStatus {
   REJECTED = 'rejected',
 }
 
+/** Where a paid sign-up's payment stands. `active` with a future `ends_at` grants sign-in. */
+export enum SubscriptionStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  FAILED = 'failed',
+  EXPIRED = 'expired',
+  CANCELLED = 'cancelled',
+}
+
+/** Who or what produced a payment_events row. */
+export enum PaymentEventSource {
+  /** Cashfree called our webhook. */
+  WEBHOOK = 'webhook',
+  /** Our own status check asked Cashfree and found something new. */
+  POLL = 'poll',
+  /** A super admin granted, extended or cancelled a plan by hand. */
+  ADMIN = 'admin',
+  /** The server itself — an order opened, a renewal computed. */
+  SYSTEM = 'system',
+}
+
 /** Kinds of in-app patient notification. */
 export enum NotificationType {
   REPORT_AVAILABLE = 'report_available',
@@ -177,9 +198,18 @@ export enum ActivityAction {
 
   // ── Tenant administration. Always written straight through. ──
   DOCTOR_REGISTERED = 'doctor.registered',
+  DOCTOR_SIGNUP_STARTED = 'doctor.signup_started',
+  SUBSCRIPTION_PAID = 'subscription.paid',
+  SUBSCRIPTION_GRANTED = 'subscription.granted',
+  SUBSCRIPTION_CANCELLED = 'subscription.cancelled',
+  PLAN_CREATED = 'plan.created',
+  PLAN_UPDATED = 'plan.updated',
+  DOCTOR_PROFILE_COMPLETED = 'doctor.profile_completed',
   DOCTOR_APPROVED = 'doctor.approved',
   DOCTOR_REJECTED = 'doctor.rejected',
   DOCTOR_CREATED = 'doctor.created',
+  /** A super admin opened an account for a doctor, who has not signed in yet. */
+  DOCTOR_INVITED = 'doctor.invited',
   DOCTOR_DELETED = 'doctor.deleted',
   USER_CREATED = 'user.created',
   USER_DELETED = 'user.deleted',

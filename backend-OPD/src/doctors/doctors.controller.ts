@@ -26,10 +26,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SettingsService } from '../settings/settings.service';
 import { AuthService } from '../auth/auth.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { InviteDoctorDto } from '../subscriptions/dto/invite.dto';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, UpdateDoctorDto, UpdateOwnDoctorDto } from './dto/doctor.dto';
 import { ResetDoctorPasswordDto } from './dto/reset-doctor-password.dto';
-import { RegisterDoctorDto, RejectDoctorDto } from './dto/register-doctor.dto';
+import { RegisterDoctorDto, RejectDoctorDto, SetupProfileDto } from './dto/register-doctor.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -60,9 +62,53 @@ export class DoctorsController {
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
     private readonly auth: AuthService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // ── Doctor self-service (declared before :id) ──────────────
+
+  @Post('me/setup')
+  @ApiOperation({
+    summary:
+      'First sign-in after a paid sign-up: the account sends its practice profile and the tenant is built around it.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'license', maxCount: 1 },
+        { name: 'photo', maxCount: 1 },
+        { name: 'letterhead_header', maxCount: 1 },
+      ],
+      { storage: memoryStorage(), limits: { fileSize: 6 * 1024 * 1024 } },
+    ),
+  )
+  async setupOwn(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SetupProfileDto,
+    @UploadedFiles()
+    files: {
+      license?: Express.Multer.File[];
+      photo?: Express.Multer.File[];
+      letterhead_header?: Express.Multer.File[];
+    },
+  ) {
+    const created = await this.doctorsService.setupForUser(
+      user.id,
+      dto,
+      files?.license?.[0],
+      files?.photo?.[0],
+      files?.letterhead_header?.[0],
+    );
+    // The subscription was bought before the clinic existed; point it at the
+    // tenant now so an invoice or a renewal knows which practice it is for.
+    await this.subscriptions.attachDoctor(user.id, created.id);
+    // A fresh session: the principal gained a doctor id and the tenant's
+    // Doctor role, and the token the client holds predates both.
+    const session = await this.auth.sessionForNewUser(user.id);
+    return { ok: true, ...session };
+  }
+
   @Get('me')
   @ApiOperation({ summary: 'Logged-in doctor’s own profile' })
   getOwn(@CurrentUser() user: AuthUser) {
@@ -183,13 +229,32 @@ export class DoctorsController {
    * Super-admin only: the caller must be type=super_admin; the permission
    * check (doctors:create) is a secondary guard.
    */
+  /**
+   * Opens an account for a doctor and mails them the way in.
+   *
+   * The lighter of the two ways a super admin adds a doctor: a name, an
+   * address and a plan, with the practice itself left to the doctor's own
+   * first sign-in. `POST /doctors` below is the other — it builds the whole
+   * tenant in one go, for when the admin is filling everything in themselves.
+   */
+  @Post('invite')
+  @ApiOperation({
+    summary:
+      'Super-admin: open an account for a doctor (name, email, plan) and email them a temporary password',
+  })
+  @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
+  inviteDoctor(@CurrentUser() user: AuthUser, @Body() dto: InviteDoctorDto) {
+    this.assertSuperAdmin(user);
+    return this.subscriptions.inviteDoctor(dto, user);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Super-admin: create a new doctor tenant' })
   @Permissions({ module: PermissionModule.DOCTORS, action: PermissionAction.CREATE })
   createDoctor(@CurrentUser() user: AuthUser, @Body() dto: CreateDoctorDto) {
     this.assertSuperAdmin(user);
     const base = this.settings.patientWebBase();
-    return this.doctorsService.createTenant(dto, base);
+    return this.doctorsService.createTenant(dto, base, user);
   }
 
   @Public()
@@ -229,6 +294,18 @@ export class DoctorsController {
       letterhead_header?: Express.Multer.File[];
     },
   ) {
+    if (!this.config.get<boolean>('selfRegistrationOpen')) {
+      // Sign-up is paid and starts on the landing site; this route stayed so
+      // a deployment without plans can switch it back on with one env var.
+      //
+      // Note for whoever switches it on: every doctor account now needs a live
+      // plan to use any authenticated route, so the session this returns is
+      // refused until somebody grants the account a plan. A deployment that
+      // wants open registration wants a free or trial plan granted here too.
+      throw new AppException(ErrorCode.FORBIDDEN, {
+        message: 'Please choose a plan on myDigitalOPD to create your practice.',
+      });
+    }
     // The address must have been verified with the emailed code first; a
     // form that skipped that step gets nothing. Checked before anything is
     // written and spent only once the account exists, so a sign-up that

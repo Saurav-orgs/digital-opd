@@ -2,6 +2,12 @@
 __pycache__/
 *.pyc
 .env
+# Backups of .env made while testing carry live keys. `git add -A` would
+# otherwise sweep one into the repo.
+.env.*
+!.env.example
 .cache/
 finetune/data/
 finetune/adapters/
+# Runtime spend log and any rotated copies. Never source.
+data/

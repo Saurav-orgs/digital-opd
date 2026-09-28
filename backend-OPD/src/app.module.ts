@@ -30,9 +30,11 @@ import { ReportsModule } from './reports/reports.module';
 import { PathlabsModule } from './pathlabs/pathlabs.module';
 import { MedicinesModule } from './medicines/medicines.module';
 import { ConsultationsModule } from './consultations/consultations.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { HealthController } from './health/health.controller';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { TemporaryPasswordGuard } from './common/guards/temporary-password.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
@@ -91,12 +93,18 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     PathlabsModule,
     MedicinesModule,
     ConsultationsModule,
+    // Paid sign-up: plans, the Cashfree order and its webhook.
+    SubscriptionsModule,
   ],
   controllers: [HealthController],
   providers: [
     // Order matters: throttle → authenticate → authorize.
     { provide: APP_GUARD, useClass: SessionThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Between authentication and permissions: the principal has to exist
+    // before its password can be judged, and nothing else should be reachable
+    // while that password is still the one we mailed.
+    { provide: APP_GUARD, useClass: TemporaryPasswordGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

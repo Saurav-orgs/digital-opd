@@ -138,6 +138,22 @@ export class Appointment extends Model<Appointment> {
   @Column({ type: DataType.STRING, allowNull: false })
   source: BookingSource;
 
+  // ── What the AI on this appointment has cost so far ────────
+  // A running total over `ai_usage_events`, kept here so "what did this
+  // appointment cost" is one column rather than a join. That table is the
+  // source of truth; these are derived and can be rebuilt from it.
+  //
+  // Both currencies, because the providers do not share one: Sarvam bills
+  // speech in rupees per hour, Gemini and Claude bill tokens in dollars.
+  // The dollar figure is the WOULD-cost — what a paid key charges — so a
+  // free-tier key does not make an appointment look free to run.
+
+  @Column({ type: DataType.DECIMAL(12, 6), allowNull: false, defaultValue: 0 })
+  ai_cost_inr: number;
+
+  @Column({ type: DataType.DECIMAL(14, 8), allowNull: false, defaultValue: 0 })
+  ai_cost_usd: number;
+
   // ── Consolidated AI summary of the patient's uploaded reports ──
 
   @Column({ type: DataType.JSONB, allowNull: true })

@@ -1,9 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { ConfigService } from '@nestjs/config';
 import type { Socket } from 'socket.io';
 import { Appointment } from '../database/models/appointment.model';
 import { ConsultationSession } from '../database/models/consultation-session.model';
 import { AiClientService } from '../ai/ai-client.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { ConsultationsService } from './consultations.service';
 import { ConsultationSessionStatus } from '../common/enums';
@@ -20,15 +22,21 @@ interface StreamSession {
   user: AuthUser;
   client: Socket;
   catalog: string[];
-  /** Segments that arrived early, keyed by their position. */
+  /** Segments that arrived and have not been dispatched yet, by position. */
   pending: Map<number, Buffer>;
-  /** The position the transcript is waiting on next. */
+  /** Finished text by position. The transcript is these, joined in key order. */
+  done: Map<number, string>;
+  /** The lowest position not yet dispatched. */
   nextSeq: number;
+  /** How many are in flight right now — see `pump`. */
+  inFlight: number;
   transcript: string;
   durationSeconds: number;
   modelVersion: string | null;
-  /** One piece in flight at a time per session — see `pump`. */
+  /** True while the pump is running or anything is still in flight. */
   processing: boolean;
+  /** Pending debounced write of the transcript to the row. */
+  writeTimer: NodeJS.Timeout | null;
   /** Set by `stop`: how many pieces to expect in total, once known. */
   totalSegments: number | null;
   /** Wall-clock of the last thing the client sent. */
@@ -39,6 +47,8 @@ interface StreamSession {
 /** A session with nothing from the client for this long is abandoned. */
 const IDLE_MS = 60_000;
 const SWEEP_MS = 15_000;
+/** How long the transcript write waits for more pieces before going to the DB. */
+const WRITE_DEBOUNCE_MS = 1_000;
 
 /**
  * Live transcription: a consultation that arrives in pieces while the doctor
@@ -63,14 +73,18 @@ export class ConsultationStreamService implements OnModuleDestroy {
   private readonly logger = new Logger(ConsultationStreamService.name);
   private readonly sessions = new Map<string, StreamSession>();
   private readonly sweeper: NodeJS.Timeout;
+  private readonly parallelChunks: number;
 
   constructor(
     @InjectModel(ConsultationSession)
     private readonly sessionModel: typeof ConsultationSession,
     private readonly consultations: ConsultationsService,
     private readonly ai: AiClientService,
+    private readonly aiUsage: AiUsageService,
     private readonly medicines: MedicinesService,
+    config: ConfigService,
   ) {
+    this.parallelChunks = config.get<number>('ai.parallelChunks') ?? 1;
     this.sweeper = setInterval(() => void this.sweepIdle(), SWEEP_MS);
     this.sweeper.unref?.();
   }
@@ -101,6 +115,9 @@ export class ConsultationStreamService implements OnModuleDestroy {
       client,
       catalog,
       pending: new Map(),
+      done: new Map(),
+      inFlight: 0,
+      writeTimer: null,
       nextSeq: 0,
       transcript: '',
       durationSeconds: 0,
@@ -121,7 +138,7 @@ export class ConsultationStreamService implements OnModuleDestroy {
     s.lastActivity = Date.now();
     if (seq < s.nextSeq || s.pending.has(seq)) return; // duplicate — already heard
     s.pending.set(seq, wav);
-    void this.pump(s);
+    this.pump(s);
   }
 
   /**
@@ -133,8 +150,14 @@ export class ConsultationStreamService implements OnModuleDestroy {
     if (!s) return;
     s.lastActivity = Date.now();
     s.totalSegments = totalSegments;
-    this.setStatus(s, ConsultationSessionStatus.TRANSCRIBING);
-    void this.pump(s);
+    void this.setStatus(s, ConsultationSessionStatus.TRANSCRIBING);
+    this.pump(s);
+    // Stop can arrive after the last piece has already been transcribed, in
+    // which case the pump has nothing to do and nothing would ever call
+    // finish(). Only possible now that pieces complete out of order.
+    if (s.inFlight === 0 && s.pending.size === 0 && s.nextSeq >= totalSegments) {
+      void this.finish(s);
+    }
   }
 
   /** The doctor gave up. Same outcome as `DELETE consultation`. */
@@ -157,77 +180,130 @@ export class ConsultationStreamService implements OnModuleDestroy {
   // ── pipeline ───────────────────────────────────────────────
 
   /**
-   * Transcribe whatever is next in line, one piece at a time.
+   * Transcribe whatever has arrived, up to `parallelChunks` at a time.
    *
-   * One at a time because each piece is prompted with the text before it,
-   * and because two of them at the sidecar would only queue behind one
-   * model anyway. Re-entered on every arrival; a call that finds the pump
-   * already running returns and the running one picks the new piece up.
+   * This used to be strictly one at a time, for two reasons that were both
+   * true of a self-hosted Whisper: each piece was prompted with the text
+   * before it, so the order mattered; and two at the sidecar would only have
+   * queued behind one model anyway.
+   *
+   * A hosted STT provider has neither property. The calls are independent and
+   * network-bound, so serialising them means N pieces cost N round trips of
+   * pure waiting. Now they overlap, and the transcript is assembled from
+   * `done` in sequence order — so completion order stops mattering, but the
+   * doctor's words still come out in the order they said them.
+   *
+   * `CONSULTATION_PARALLEL_CHUNKS=1` restores the old behaviour exactly.
    */
-  private async pump(s: StreamSession): Promise<void> {
-    if (s.processing) return;
-    s.processing = true;
+  private pump(s: StreamSession): void {
+    while (s.inFlight < this.parallelChunks && s.pending.has(s.nextSeq)) {
+      const seq = s.nextSeq;
+      const wav = s.pending.get(seq)!;
+      s.pending.delete(seq);
+      s.nextSeq = seq + 1;
+      s.inFlight += 1;
+      s.processing = true;
+      void this.runSegment(s, seq, wav);
+    }
+  }
+
+  /** One piece, start to finish. Never throws — see the catch. */
+  private async runSegment(s: StreamSession, seq: number, wav: Buffer): Promise<void> {
     try {
-      while (s.pending.has(s.nextSeq)) {
-        if (!this.sessions.has(s.sessionId)) return;
-        const seq = s.nextSeq;
-        const wav = s.pending.get(seq)!;
-        s.pending.delete(seq);
-
-        let text = '';
-        try {
-          const result = await this.ai.transcribeChunk(
-            wav,
-            seq,
-            s.transcript,
-            s.catalog,
-            s.controller.signal,
-          );
-          text = result.text.trim();
-          s.durationSeconds += result.duration_seconds;
-          s.modelVersion = result.model_version;
-        } catch (err) {
-          if (await this.consultations.wasCancelled(s.sessionId)) {
-            this.drop(s);
-            return;
-          }
-          // One bad piece must not sink the consultation: the doctor sees
-          // the gap in the live text and can say it again. The failure is
-          // logged with the piece number so it can be found later.
-          this.logger.warn(`Segment ${seq} of ${s.sessionId} failed: ${(err as Error).message}`);
-          s.client.emit('error', {
-            message: 'A few seconds of speech could not be transcribed.',
-            fatal: false,
-          });
-        }
-        s.nextSeq = seq + 1;
-
-        if (text) {
-          s.transcript = s.transcript ? `${s.transcript} ${text}` : text;
-        }
-
-        // Written on every piece so a refresh mid-consultation still shows
-        // what has been heard, and so `retryDraft` has it if drafting fails.
-        if (await this.consultations.wasCancelled(s.sessionId)) {
-          this.drop(s);
-          return;
-        }
-        await this.sessionModel.update(
-          {
-            transcript: s.transcript,
-            duration_seconds: Math.round(s.durationSeconds),
-            model_version: s.modelVersion,
-          } as any,
-          { where: { id: s.sessionId } },
-        );
-        s.client.emit('transcript', { seq, text, transcript: s.transcript });
+      const result = await this.ai.transcribeChunk(
+        wav,
+        seq,
+        s.transcript,
+        s.catalog,
+        s.controller.signal,
+        s.sessionId,
+      );
+      s.done.set(seq, result.text.trim());
+      s.durationSeconds += result.duration_seconds;
+      s.modelVersion = result.model_version;
+      // Not awaited: what this chunk cost must not sit between the doctor and
+      // the next one. AiUsageService swallows its own failures.
+      void this.aiUsage.record(result.usage, {
+        appointmentId: s.appointment.id,
+        sessionId: s.sessionId,
+      });
+    } catch (err) {
+      if (await this.consultations.wasCancelled(s.sessionId)) {
+        this.drop(s);
+        return;
       }
+      // One bad piece must not sink the consultation: the doctor sees the gap
+      // in the live text and can say it again. Recorded as an empty piece so
+      // the ones after it still land in the right place.
+      s.done.set(seq, '');
+      this.logger.warn(`Segment ${seq} of ${s.sessionId} failed: ${(err as Error).message}`);
+      s.client.emit('error', {
+        message: 'A few seconds of speech could not be transcribed.',
+        fatal: false,
+      });
     } finally {
-      s.processing = false;
+      s.inFlight -= 1;
     }
 
-    if (s.totalSegments !== null && s.nextSeq >= s.totalSegments) {
-      await this.finish(s);
+    if (!this.sessions.has(s.sessionId)) return;
+
+    s.transcript = [...s.done.keys()]
+      .sort((a, b) => a - b)
+      .map((k) => s.done.get(k)!)
+      .filter(Boolean)
+      .join(' ');
+
+    // The socket first, Postgres after. The doctor is watching the text
+    // appear; there is no reason for that to wait on a round trip to the
+    // database, which is what an awaited UPDATE between every piece was doing.
+    s.client.emit('transcript', { seq, text: s.done.get(seq) ?? '', transcript: s.transcript });
+    this.scheduleWrite(s);
+
+    this.pump(s);
+
+    if (s.inFlight === 0 && s.pending.size === 0) {
+      s.processing = false;
+      if (s.totalSegments !== null && s.nextSeq >= s.totalSegments) {
+        await this.finish(s);
+      }
+    }
+  }
+
+  /**
+   * Persist the transcript, but not on the critical path.
+   *
+   * It is written so a refresh mid-consultation still shows what has been
+   * heard, and so `retryDraft` has it if drafting fails — neither of which
+   * needs to be true within milliseconds of each piece. Debounced, and always
+   * flushed before the draft starts.
+   */
+  private scheduleWrite(s: StreamSession): void {
+    if (s.writeTimer) return;
+    s.writeTimer = setTimeout(() => {
+      s.writeTimer = null;
+      void this.flushWrite(s);
+    }, WRITE_DEBOUNCE_MS);
+    s.writeTimer.unref?.();
+  }
+
+  private async flushWrite(s: StreamSession): Promise<void> {
+    if (s.writeTimer) {
+      clearTimeout(s.writeTimer);
+      s.writeTimer = null;
+    }
+    try {
+      await this.sessionModel.update(
+        {
+          transcript: s.transcript,
+          duration_seconds: Math.round(s.durationSeconds),
+          model_version: s.modelVersion,
+        } as any,
+        { where: { id: s.sessionId } },
+      );
+    } catch (err) {
+      // The transcript is in memory and will be written again on the next
+      // piece and once more before drafting, so one lost write is survivable.
+      this.logger.warn(`Transcript write for ${s.sessionId} failed: ${(err as Error).message}`);
     }
   }
 
@@ -235,6 +311,9 @@ export class ConsultationStreamService implements OnModuleDestroy {
   private async finish(s: StreamSession): Promise<void> {
     if (!this.sessions.delete(s.sessionId)) return; // finished already
     try {
+      // The debounced write may still be pending, and `retryDraft` reads the
+      // row — so the transcript lands before anything else looks at it.
+      await this.flushWrite(s);
       if (await this.consultations.wasCancelled(s.sessionId)) return;
 
       if (!s.transcript.trim()) {
@@ -274,6 +353,10 @@ export class ConsultationStreamService implements OnModuleDestroy {
 
   private drop(s: StreamSession): void {
     this.sessions.delete(s.sessionId);
+    if (s.writeTimer) {
+      clearTimeout(s.writeTimer);
+      s.writeTimer = null;
+    }
     s.controller.abort();
     this.consultations.releaseInFlight(s.sessionId);
   }

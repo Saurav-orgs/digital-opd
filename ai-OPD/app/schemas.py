@@ -9,6 +9,99 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+def _as_list(v: Any) -> list[Any]:
+    """Whatever the model emitted, as a list.
+
+    Every list field here is constrained by a JSON schema, and the models
+    still get it wrong in the same three ways: an empty list comes back as
+    `{}`, a populated one as an object keyed by index or by name, and a
+    single-item one as the bare item. None of those is a reason to fail a
+    request the doctor is waiting on — the summary is the product, and a
+    field arriving in the wrong container is a shape problem, not a content
+    problem.
+
+    `{}` becoming `[]` is the common case by far, and it is unambiguous: an
+    empty object holds nothing, so there is nothing to lose.
+    """
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    if isinstance(v, dict):
+        # Keyed by index ("0", "1") or by name — either way the values are
+        # the items. An empty dict is simply an empty list.
+        return list(v.values())
+    return [v]
+
+
+def _dicts_only(items: list[Any]) -> list[dict[str, Any]]:
+    """Keep the entries that are objects; drop the rest.
+
+    Models sometimes return a structured row as prose —
+    "CBC: Haemoglobin 9.9 g/dL (low)" — instead of {label, value}. It is
+    tempting to parse that back apart, and that temptation is the bug: the
+    split has to guess which number belongs to which test, and a wrong guess
+    puts a fabricated value in a medical summary under a real test's name.
+    Dropping the row loses information the prose summary almost always still
+    carries; inventing one does not lose anything, it adds something false.
+
+    This is the same choice `contradiction_guard.coerce_abnormal_values`
+    already makes, kept identical on purpose.
+    """
+    return [i for i in items if isinstance(i, dict)]
+
+
+def _strings_only(items: list[Any]) -> list[str]:
+    """Flatten a list of bullet points to strings, dropping empties."""
+    out: list[str] = []
+    for i in items:
+        if isinstance(i, dict):
+            # A bullet returned as an object: take its text-bearing field
+            # rather than rendering a dict into the UI.
+            i = i.get("text") or i.get("finding") or i.get("label") or ""
+        text = str(i).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+# ── What a call cost ─────────────────────────────────────────
+
+
+class UsageEvent(BaseModel):
+    """One billable model call, as the backend will store it.
+
+    Returned on every route that spends money, so the backend can write it
+    against the appointment. This service has no database and should not grow
+    one — it is stateless and shared between environments — but it is the only
+    side that knows the token counts and the audio length, so it reports and
+    the backend records.
+
+    Both currencies travel together. Sarvam bills in rupees and the LLMs in
+    dollars, so converting either way here would bake today's exchange rate
+    into a stored row; each is carried in the unit it was actually priced in.
+    """
+
+    route: str
+    provider: str
+    model: str = ""
+    # Speech: what was charged is the audio length, billed per second.
+    audio_seconds: float | None = None
+    # Text: thinking bills at the output rate, so it is kept separate but is
+    # never free.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    thinking_tokens: int | None = None
+    cost_inr: float = 0.0
+    cost_usd: float = 0.0
+    # What a paid key WOULD charge. On the Gemini free tier cost_usd is 0 and
+    # this is not, and this is the one to plan with — "free today" is not an
+    # answer to "what does an appointment cost to run".
+    would_cost_usd: float = 0.0
+    free_tier: bool = False
+    elapsed_seconds: float = 0.0
+
+
 # ── Transcription ────────────────────────────────────────────
 
 
@@ -17,6 +110,7 @@ class TranscribeResponse(BaseModel):
     language: str
     duration_seconds: float
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 class TranscribeChunkResponse(BaseModel):
@@ -26,6 +120,7 @@ class TranscribeChunkResponse(BaseModel):
     text: str
     duration_seconds: float
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 # ── Report summary ───────────────────────────────────────────
@@ -63,6 +158,16 @@ class ReportSummary(BaseModel):
             return " ".join(str(item) for item in v)
         return str(v or "")
 
+    @field_validator("key_findings", mode="before")
+    @classmethod
+    def coerce_key_findings(cls, v: Any) -> list[str]:
+        return _strings_only(_as_list(v))
+
+    @field_validator("abnormal_values", mode="before")
+    @classmethod
+    def coerce_abnormal_values(cls, v: Any) -> list[Any]:
+        return _dicts_only(_as_list(v))
+
 
 class SummarizeReportResponse(BaseModel):
     summary: ReportSummary
@@ -71,6 +176,7 @@ class SummarizeReportResponse(BaseModel):
     # the image itself (an X-ray, an ECG strip).
     extraction_method: Literal["pdf_text", "ocr", "none", "vision"]
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 REPORT_SUMMARY_JSON_SCHEMA: dict[str, Any] = {
@@ -115,6 +221,7 @@ class ConsolidateResponse(BaseModel):
     summary: ReportSummary
     source_count: int
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 # ── Across-visit progress ────────────────────────────────────
@@ -159,11 +266,27 @@ class ProgressSummary(BaseModel):
             return " ".join(str(item) for item in v)
         return str(v or "")
 
+    @field_validator(
+        "improvements", "deteriorations", "unchanged", "watch_points", mode="before"
+    )
+    @classmethod
+    def coerce_bullets(cls, v: Any) -> list[str]:
+        return _strings_only(_as_list(v))
+
+    @field_validator("trends", mode="before")
+    @classmethod
+    def coerce_trends(cls, v: Any) -> list[Any]:
+        # `{}` for "no trends" is what this route actually fails on in
+        # practice — the model has nothing to report and says so with the
+        # wrong bracket.
+        return _dicts_only(_as_list(v))
+
 
 class ProgressResponse(BaseModel):
     summary: ProgressSummary
     visit_count: int
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 PROGRESS_JSON_SCHEMA: dict[str, Any] = {
@@ -217,6 +340,10 @@ class ExtractPrescriptionRequest(BaseModel):
     # The clinic's own catalogue. Passed in so the model spells medicines the
     # way this doctor actually prescribes them.
     medicine_catalog: list[str] = Field(default_factory=list)
+    # The consultation this transcript came from. Only used to group the cost
+    # log, so one prescription's transcription and extraction rows can be
+    # added together; blank simply leaves the rows ungrouped.
+    session_id: str = ""
 
 
 class DraftMedicine(BaseModel):
@@ -308,6 +435,7 @@ class DraftPrescription(BaseModel):
 class ExtractPrescriptionResponse(BaseModel):
     prescription: DraftPrescription
     model_version: str
+    usage: list[UsageEvent] = Field(default_factory=list)
 
 
 PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
@@ -361,6 +489,12 @@ PRESCRIPTION_JSON_SCHEMA: dict[str, Any] = {
 
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
+    # Which speech provider is serving this box: "sarvam" or "whisper".
+    stt_provider: str = "whisper"
+    # Named for Whisper because it was once the only option. They now report
+    # the active provider's readiness and model, whichever that is — kept under
+    # the old names because the backend reads only `status`, so renaming them
+    # would break deployments mid-upgrade for no gain.
     whisper_loaded: bool
     whisper_model: str
     # Wall time / audio seconds on the most recent transcription. Live

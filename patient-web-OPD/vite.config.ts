@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5175,
     proxy: {
       '/api': {
-        target: 'https://76ml0vk8-3000.inc1.devtunnels.ms',
+        target: 'https://api.mydigitalopd.com',
         changeOrigin: true,
       },
     },

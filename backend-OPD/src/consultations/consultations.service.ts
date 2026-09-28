@@ -6,6 +6,7 @@ import { ConsultationSession } from '../database/models/consultation-session.mod
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { AiClientService, AiDraftPrescription } from '../ai/ai-client.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
@@ -85,6 +86,7 @@ export class ConsultationsService {
     @InjectModel(EPrescriptionMedicine)
     private readonly medicineModel: typeof EPrescriptionMedicine,
     private readonly ai: AiClientService,
+    private readonly aiUsage: AiUsageService,
     private readonly medicines: MedicinesService,
     private readonly config: ConfigService,
   ) {
@@ -279,9 +281,13 @@ export class ConsultationsService {
       // 1. Speech → text, biased toward the tenant's medicine vocabulary.
       try {
         const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 60);
-        const result = await this.ai.transcribe(audio, vocabulary, controller.signal);
+        const result = await this.ai.transcribe(audio, vocabulary, controller.signal, sessionId);
         transcript = result.text;
         modelVersion = result.model_version;
+        await this.aiUsage.record(result.usage, {
+          appointmentId: appointment.id,
+          sessionId,
+        });
 
         if (await this.wasCancelled(sessionId)) return;
 
@@ -342,7 +348,7 @@ export class ConsultationsService {
   ): Promise<void> {
     try {
       const vocabulary = await this.medicines.vocabulary(appointment.doctor_id, 120);
-      const { prescription, model_version } = await this.ai.extractPrescription(
+      const { prescription, model_version, usage } = await this.ai.extractPrescription(
         {
           transcript,
           patient: {
@@ -352,9 +358,11 @@ export class ConsultationsService {
             complaint: appointment.description ?? '',
           },
           medicine_catalog: vocabulary,
+          session_id: sessionId,
         },
         controller.signal,
       );
+      await this.aiUsage.record(usage, { appointmentId: appointment.id, sessionId });
 
       // The last and most important check: past this line the draft would
       // land in the editor, and a doctor who cancelled has very likely

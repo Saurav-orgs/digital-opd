@@ -51,6 +51,35 @@ export class User extends Model<User> {
   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: true })
   is_active: boolean;
 
+  /**
+   * Opened through the online plan flow — the pricing page, or a super-admin
+   * invite that mapped a plan.
+   *
+   * Informational only. It used to decide who needed a subscription to sign in,
+   * which left every doctor created another way ungated *and* unable to buy a
+   * plan; `SubscriptionAccessService` now gates every doctor account regardless.
+   * Kept because "did this account come in through checkout?" is still worth
+   * knowing on a support call.
+   */
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+  subscription_required: boolean;
+
+  /**
+   * The super admin who opened this account from the Doctors screen, if it
+   * was not opened by the doctor paying for it. It is what lets the sign-in
+   * screen say "ask us for a plan" rather than "finish paying" to somebody
+   * who was never sent to a checkout.
+   */
+  @Column({ type: DataType.UUID, allowNull: true })
+  invited_by: string | null;
+
+  /**
+   * The password on this account was set by somebody else and has to be
+   * replaced before the account can be used. Cleared by any password write.
+   */
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+  must_change_password: boolean;
+
   @BelongsTo(() => Role)
   role: Role;
 

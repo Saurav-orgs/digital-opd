@@ -79,8 +79,21 @@ def main() -> int:
         return 1
 
     transcribe.load_model()
-    mode = f"batched x{settings.whisper_batch_size}" if settings.whisper_batched else "sequential"
-    print(f"model={settings.whisper_model} {settings.whisper_device}/{settings.whisper_compute_type} beam={settings.whisper_beam_size} {mode}\n")
+    # The header says which provider produced the numbers below. Without it two
+    # runs of this script are indistinguishable once pasted into a ticket, and
+    # comparing the providers is the whole reason to run it twice.
+    if settings.stt_provider == "sarvam":
+        print(
+            f"provider=sarvam model={settings.sarvam_model} "
+            f"mode={settings.sarvam_mode} language={settings.sarvam_language}\n"
+        )
+    else:
+        mode = f"batched x{settings.whisper_batch_size}" if settings.whisper_batched else "sequential"
+        print(
+            f"provider=whisper model={settings.whisper_model} "
+            f"{settings.whisper_device}/{settings.whisper_compute_type} "
+            f"beam={settings.whisper_beam_size} {mode}\n"
+        )
 
     tmp = args.bench_dir / ".chunks"
     tmp.mkdir(exist_ok=True)

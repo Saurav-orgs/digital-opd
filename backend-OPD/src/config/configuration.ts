@@ -8,6 +8,8 @@ export interface AppConfig {
   patientWebBase: string;
   /** Base URL of the admin web app (no trailing slash): the sign-in link in staff emails. */
   adminWebBase: string;
+  /** Base URL of the landing / sign-up site (no trailing slash): where Cashfree sends the doctor back. */
+  landingWebBase: string;
   /**
    * This API's own public base including the prefix (no trailing slash),
    * for links that must open without a login — the prescription link a
@@ -47,11 +49,40 @@ export interface AppConfig {
     otpTemplate: string;
     otpTemplateLang: string;
   };
+  /**
+   * Cashfree Payment Gateway, which takes the subscription payment at sign-up.
+   * `env` picks the sandbox or the live API *and* which pair of keys is used
+   * — `CASHFREE_PROD_*` on production, the unprefixed names otherwise, so
+   * both can sit in the environment together. `notifyUrl` is the webhook Cashfree
+   * calls — it must be reachable from the internet and match what the
+   * dashboard has.
+   */
+  cashfree: {
+    appId: string;
+    secretKey: string;
+    env: 'sandbox' | 'production';
+    apiVersion: string;
+    notifyUrl: string;
+  };
+  /** GST charged on top of every plan, as a percentage. */
+  gstRatePercent: number;
+  /**
+   * The old free self-registration (`POST /doctors/register`). Off by
+   * default now that sign-up is paid — left in so a deployment without
+   * plans can switch it back on.
+   */
+  selfRegistrationOpen: boolean;
   bookingWindowDays: number;
   maxUploadSizeMb: number;
   jwt: { secret: string; expiresIn: string };
   superAdmin: { email: string; password: string; name: string };
-  ai: { url: string; timeoutSeconds: number; enabled: boolean; streaming: boolean };
+  ai: {
+    url: string;
+    timeoutSeconds: number;
+    enabled: boolean;
+    streaming: boolean;
+    parallelChunks: number;
+  };
   database: {
     host: string;
     port: number;
@@ -73,6 +104,33 @@ export interface AppConfig {
   throttle: { ttl: number; limit: number };
 }
 
+/** `API_PUBLIC_BASE` with the API prefix taken off — the origin a route outside the prefix hangs on. */
+const cashfreeEnv = (): 'sandbox' | 'production' =>
+  process.env.CASHFREE_ENV === 'production' ? 'production' : 'sandbox';
+
+/**
+ * A Cashfree credential for whichever environment is switched on.
+ *
+ * Both sets of keys live in the environment at once — `CASHFREE_PROD_APP_ID`
+ * and `CASHFREE_PROD_SECRET_KEY` for the live account, the unprefixed names
+ * for the sandbox — so going live is `CASHFREE_ENV=production` alone, with no
+ * pasting of keys over one another and no way to end up on the live API with
+ * sandbox keys still in place. The unprefixed names remain the fallback, so a
+ * deployment that only ever set those keeps working.
+ */
+const cashfreeCredential = (name: 'APP_ID' | 'SECRET_KEY'): string => {
+  const fallback = process.env[`CASHFREE_${name}`] || '';
+  if (cashfreeEnv() !== 'production') return fallback;
+  return process.env[`CASHFREE_PROD_${name}`] || fallback;
+};
+
+const publicOrigin = (): string => {
+  const prefix = process.env.API_PREFIX || 'api';
+  const base =
+    process.env.API_PUBLIC_BASE || `http://localhost:${process.env.PORT || '3000'}/${prefix}`;
+  return base.replace(new RegExp(`/${prefix}/?$`), '');
+};
+
 export default (): AppConfig => ({
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),
@@ -88,6 +146,7 @@ export default (): AppConfig => ({
   },
   patientWebBase: process.env.PATIENT_WEB_BASE || 'http://localhost:5174',
   adminWebBase: process.env.ADMIN_WEB_BASE || 'http://localhost:5173',
+  landingWebBase: process.env.LANDING_WEB_BASE || 'http://localhost:5176',
   apiPublicBase:
     process.env.API_PUBLIC_BASE ||
     `http://localhost:${process.env.PORT || '3000'}/${process.env.API_PREFIX || 'api'}`,
@@ -112,6 +171,17 @@ export default (): AppConfig => ({
     otpTemplate: process.env.WA_OTP_TEMPLATE_NAME || 'otp_verification',
     otpTemplateLang: process.env.WA_OTP_TEMPLATE_LANG || 'en_US',
   },
+  cashfree: {
+    appId: cashfreeCredential('APP_ID'),
+    secretKey: cashfreeCredential('SECRET_KEY'),
+    env: cashfreeEnv(),
+    apiVersion: process.env.CASHFREE_API_VERSION || '2023-08-01',
+    // The webhook lives outside the API prefix (see main.ts), so it is the
+    // public origin plus a fixed path rather than a route under /api.
+    notifyUrl: process.env.CASHFREE_NOTIFY_URL || `${publicOrigin()}/payment/webhook`,
+  },
+  gstRatePercent: parseFloat(process.env.GST_RATE_PERCENT || '18'),
+  selfRegistrationOpen: process.env.SELF_REGISTRATION_OPEN === 'true',
   bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
   jwt: {
@@ -135,6 +205,18 @@ export default (): AppConfig => ({
     // always did — the client falls back to that on its own when the socket
     // is refused, so this can be flipped without a client release.
     streaming: process.env.CONSULTATION_STREAMING !== 'false',
+    // How many pieces of one live recording may be transcribed at the same
+    // time. 1 is the original behaviour and the right one for a self-hosted
+    // Whisper sidecar: the pieces were chained (each prompted with the text
+    // before it) and would only have queued behind one model anyway.
+    //
+    // Neither is true of a hosted STT provider — the calls are independent and
+    // network-bound — so there the queue is pure waiting. Raise it to ~4 when
+    // the sidecar runs STT_PROVIDER=sarvam.
+    parallelChunks: Math.max(
+      1,
+      parseInt(process.env.CONSULTATION_PARALLEL_CHUNKS || '1', 10) || 1,
+    ),
   },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',

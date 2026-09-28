@@ -10,6 +10,8 @@ import {
   AccountIcon,
   BlockIcon,
   CalendarIcon,
+  WalletIcon,
+  ReceiptIcon,
   ChevronIcon,
   DocumentIcon,
   FlaskIcon,
@@ -28,6 +30,8 @@ const NAV_ICON: Record<NavIconName, (props: { size?: string | number }) => JSX.E
   roles: ShieldIcon,
   hospital: HospitalIcon,
   settings: GearIcon,
+  wallet: WalletIcon,
+  receipt: ReceiptIcon,
   flask: FlaskIcon,
   document: DocumentIcon,
 };
@@ -46,7 +50,7 @@ const NAV_ICON: Record<NavIconName, (props: { size?: string | number }) => JSX.E
  * it on every page load would be answering them back.
  */
 export default function Layout() {
-  const { logout, can, isDoctor, isSuperAdmin } = useAuth();
+  const { user, logout, can, isDoctor, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -61,7 +65,10 @@ export default function Layout() {
       !n.hidden &&
       can(n.module, 'read') &&
       (!n.superAdminOnly || isSuperAdmin) &&
-      (!n.doctorOnly || !isSuperAdmin),
+      (!n.doctorOnly || !isSuperAdmin) &&
+      // Staff the doctor added are `admin` accounts inside the tenant; what
+      // the clinic pays for is not theirs to see.
+      (!n.ownerOnly || user?.type === 'doctor'),
   );
 
   // On a phone the drawer is either open or off-canvas; "collapsed" is a

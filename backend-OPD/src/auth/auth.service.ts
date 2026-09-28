@@ -25,6 +25,7 @@ import { ActivityAction, ActivityActor } from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { DoctorVerificationStatus } from '../common/enums';
 import { User } from '../database/models/user.model';
+import { SubscriptionAccessService } from '../subscriptions/subscription-access.service';
 
 /** How long a sign-up code is good for, and how long a verified email stays usable. */
 const CODE_MINUTES = 10;
@@ -48,6 +49,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly activity: ActivityLogService,
     private readonly mail: MailService,
+    private readonly subscriptionAccess: SubscriptionAccessService,
     config: ConfigService,
     @InjectModel(EmailVerification)
     private readonly verificationModel: typeof EmailVerification,
@@ -66,12 +68,15 @@ export class AuthService {
    * the dashboard: there is no inert account waiting on a click in an inbox,
    * and a mistyped address is caught while the doctor is still on the form.
    * An address already in use is refused here, at the first step, rather
-   * than after three screens of typing.
+   * than after three screens of typing — unless all that uses it is an
+   * earlier sign-up whose payment never went through, which the new sign-up
+   * takes over (`SubscriptionsService.createAccount`).
    */
   async sendEmailCode(dto: SendEmailCodeDto): Promise<{ ok: true; resendAfter: number }> {
     const email = dto.email.toLowerCase();
 
-    if (await this.usersService.findForAuth(email)) {
+    const existing = await this.usersService.findForAuth(email);
+    if (existing && !(await this.subscriptionAccess.isUnfinishedSignup(existing))) {
       throw new AppException(ErrorCode.CONFLICT, {
         message: 'An account with this email already exists. Sign in instead.',
       });
@@ -350,6 +355,10 @@ export class AuthService {
       }
       throw new AppException(ErrorCode.ACCOUNT_DISABLED);
     }
+
+    // A paid-plan account with nothing paid — or a plan that has run out —
+    // stops here, with a message that says which and what to do about it.
+    await this.subscriptionAccess.assertAccess(user);
 
     const principal = UsersService.toAuthUser(user);
 

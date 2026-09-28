@@ -315,6 +315,10 @@ export class UsersService {
     const user = await this.findOne(id);
     await user.update({
       password_hash: await bcrypt.hash(password, 10),
+      // Whatever route set this — the forced screen, Forgot password, an
+      // admin — the account now has a password of the holder's own choosing,
+      // so the obligation is discharged.
+      must_change_password: false,
     } as any);
   }
 
@@ -359,6 +363,8 @@ export class UsersService {
       roleId: user.role_id,
       roleName: user.role?.name ?? null,
       doctorId: user.doctor_id,
+      subscriptionRequired: !!user.subscription_required,
+      mustChangePassword: !!user.must_change_password,
       permissions,
     };
   }

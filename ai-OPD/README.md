@@ -89,13 +89,77 @@ parameter), so malformed output is not a failure mode the backend has to handle.
 `/transcribe-chunk` write the upload to a temp file, transcribe it, and delete
 it in a `finally` block.
 
+## Speech-to-text providers
+
+`STT_PROVIDER` picks one of two, and nothing else in the service changes:
+
+| | `sarvam` (default) | `whisper` |
+|---|---|---|
+| Where | Sarvam's hosted `saaras:v4` | faster-whisper, on this box |
+| Startup | instant (one TLS handshake) | ~20 s, ~1 GB RAM per pool slot |
+| Measured RTF | **~0.06** | 0.15–0.25 |
+| 70 s of audio | 0.8 s (split into 3, sent at once) | ~15 s |
+| Concurrency | `SARVAM_CONCURRENCY` (8) | `WHISPER_POOL_SIZE` (1) |
+| Cost | per minute of audio | free, but CPU it takes from everything else |
+| Network | required | none |
+
+Whisper is off, not removed. `STT_PROVIDER=whisper` restores the old behaviour
+exactly; `app/stt/whisper_stt.py` is unchanged from when it was the only path.
+
+**`SARVAM_MODE=translit` is load-bearing.** Everything downstream — `spellfix`,
+the medicine-catalogue match, the extraction prompt — was written against
+Roman-script Hinglish, which Whisper produced via its `initial_prompt`.
+Measured on one code-switched dictation:
+
+| mode | output |
+|---|---|
+| `translit` | `Mareez ko teen din se bukhar hai, Dolo 650 ek goli twice a day...` |
+| `codemix` | `Patient ko teen din se bukhar hai Dolo 650 ek goli twice a day...` |
+| `transcribe` | `मरीज को तीन दिन से बुखार है। डालोड 650 ...` |
+| `verbatim` | `Patient has fever for three days Dolo six fifty one tablet...` |
+
+Only `translit` keeps both the script and the doctor's own words. `verbatim` is
+the dangerous one: it translates to English without failing, which would gut
+`previous_history` — a field the prompt requires to be as spoken.
+
+One known gap: a strength the doctor speaks in *Hindi* number words comes back
+as words (`Dolo chheh sau pachaas`), not digits. Spoken in English inside a
+Hindi sentence — how strengths are nearly always dictated — digits survive.
+
+Two things do **not** carry over from Whisper:
+
+- `previous_text`. Sarvam's REST endpoint is stateless per call, so a chunk cut
+  mid-sentence no longer hears its own lead-in. That is also what makes chunks
+  independent, which is what lets the backend put several in flight at once
+  (`CONSULTATION_PARALLEL_CHUNKS`) — a much larger win than the context was.
+- The vocabulary `initial_prompt`. The clinic's medicine names go to Sarvam as
+  `keyterms` instead, which is a first-class parameter rather than a prompt
+  hack. Capped by the API at 50 terms.
+
+Compare the two on the same audio with `scripts/bench_stt.py`, which takes the
+provider from the environment:
+
+```bash
+STT_PROVIDER=whisper PYTHONPATH=. .venv/bin/python scripts/bench_stt.py $BENCH_DIR --chunk 5
+STT_PROVIDER=sarvam  PYTHONPATH=. .venv/bin/python scripts/bench_stt.py $BENCH_DIR --chunk 5
+```
+
+---
+
 ### Latency
 
 Every transcription logs its real-time factor (`RTF` = wall time ÷ audio
-length) and `/health` reports the last one as `whisper_rtf_last`. Live
-transcription — the backend sending pieces while the doctor is still talking —
-only keeps up when RTF stays comfortably under 1.0. Two knobs, both measured
-with `scripts/bench_stt.py` before changing:
+length) and `/health` reports the last one as `whisper_rtf_last` (named before
+there were two providers; it reports whichever is active). Live transcription —
+the backend sending pieces while the doctor is still talking — only keeps up
+when RTF stays comfortably under 1.0.
+
+On Sarvam the knobs are `SARVAM_CONCURRENCY` here and
+`CONSULTATION_PARALLEL_CHUNKS` in the backend; the Sarvam path also logs its
+network time separately, so "was it them or us" is answerable from the log.
+
+On Whisper, two knobs, both measured with `scripts/bench_stt.py` before
+changing:
 
 - `WHISPER_BATCHED=true` — same weights, decodes silence-split pieces
   together; 2–4× faster on the same CPU, and in testing it also kept trailing

@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import {
   IsEmail,
   IsOptional,
@@ -120,3 +120,9 @@ export class RejectDoctorDto {
   @MaxLength(500)
   reason?: string;
 }
+
+/**
+ * The profile a paid sign-up fills in on first login. The account already
+ * has its email and password; everything else is what registration asked.
+ */
+export class SetupProfileDto extends OmitType(RegisterDoctorDto, ['email', 'password'] as const) {}

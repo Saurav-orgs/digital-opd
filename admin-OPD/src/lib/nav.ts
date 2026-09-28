@@ -6,6 +6,8 @@ import type { PermModule } from '../api/types';
  */
 export type NavIconName =
   | 'calendar'
+  | 'wallet'
+  | 'receipt'
   | 'people'
   | 'block'
   | 'users'
@@ -25,6 +27,11 @@ export interface NavItem {
   /** When true, the super-admin does not see it — it is clinic-side only. */
   doctorOnly?: boolean;
   /**
+   * When true, only the doctor who owns the clinic sees it — not the staff
+   * they added. What the clinic pays for is the doctor's own business.
+   */
+  ownerOnly?: boolean;
+  /**
    * Temporarily hidden from the sidebar. The page, its route and its
    * permissions all stay in place — this only takes it out of the menu, so
    * showing it again is a one-line change.
@@ -35,6 +42,12 @@ export interface NavItem {
 /** Sidebar config — rendered dynamically from the user's read permissions. */
 export const NAV: NavItem[] = [
   { path: '/doctors', label: 'Doctors', module: 'doctors', icon: 'hospital', superAdminOnly: true },
+  // Billing — the platform's own business, so super-admin only, next to the
+  // tenants it bills. `doctors` is the permission behind them; the controller
+  // narrows to the super admin, the same way Settings does.
+  { path: '/plans', label: 'Plans', module: 'doctors', icon: 'wallet', superAdminOnly: true },
+  { path: '/subscriptions', label: 'Subscriptions', module: 'doctors', icon: 'receipt', superAdminOnly: true },
+  { path: '/payment-log', label: 'Payment log', module: 'doctors', icon: 'receipt', superAdminOnly: true },
   { path: '/settings', label: 'Settings', module: 'doctors', icon: 'settings', superAdminOnly: true },
   // Clinic-side screens: the platform super-admin manages doctors, not patients.
   // One screen, one permission: the counters on top of the list are not a
@@ -58,6 +71,11 @@ export const NAV: NavItem[] = [
   // route and the permission module keep the old name; only the words the
   // doctor sees changed.
   { path: '/users', label: 'My Team', module: 'users', icon: 'users', doctorOnly: true },
+  // The doctor's own plan and invoices. Clinic-side, but not for the team:
+  // `ownerOnly` keeps it to the account the subscription belongs to. The
+  // permission is `users` only because every item needs one the role can
+  // read — the API behind it is scoped to the caller, not to a module.
+  { path: '/billing', label: 'Billing', module: 'users', icon: 'receipt', doctorOnly: true, ownerOnly: true },
   // Out of the menu: permissions are ticked straight on the team member now
   // (My Team keeps a role per person behind the scenes), so a separate Roles
   // screen only asked the doctor to name things twice. Route and page stay.
