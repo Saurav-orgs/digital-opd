@@ -34,17 +34,18 @@ import {
 
 // Modules the tenant Doctor role receives (all clinical modules).
 // doctors:create and doctors:delete stay super-admin-only.
-const TENANT_DOCTOR_PERMS: { module: PermissionModule; action: PermissionAction }[] = [
-  ...Object.values(PermissionModule).flatMap((module) =>
-    Object.values(PermissionAction).map((action) => ({ module, action })),
-  ),
-].filter(
-  ({ module, action }) =>
-    !(
-      module === PermissionModule.DOCTORS &&
-      (action === PermissionAction.CREATE || action === PermissionAction.DELETE)
-    ),
-);
+const TENANT_DOCTOR_PERMS: { module: PermissionModule; action: PermissionAction }[] =
+  Object.values(PermissionModule)
+    .flatMap((module) =>
+      Object.values(PermissionAction).map((action) => ({ module, action })),
+    )
+    .filter(
+      ({ module, action }) =>
+        !(
+          module === PermissionModule.DOCTORS &&
+          (action === PermissionAction.CREATE || action === PermissionAction.DELETE)
+        ),
+    );
 
 // Tenant Pathlab role — upload and view reports only.
 const TENANT_PATHLAB_PERMS = [

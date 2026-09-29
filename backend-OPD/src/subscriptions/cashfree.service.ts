@@ -139,9 +139,7 @@ export class CashfreeService {
 
   private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
     if (!this.configured) {
-      throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: 'Online payment is not configured on this server.',
-      });
+      throw new AppException(ErrorCode.PAYMENT_NOT_CONFIGURED);
     }
     let res: Response;
     try {
@@ -154,7 +152,11 @@ export class CashfreeService {
           'content-type': 'application/json',
           accept: 'application/json',
         },
-        body: body ? JSON.stringify(body) : undefined,
+        // The key is absent entirely on a GET: fetch rejects a GET that
+        // carries a body, even a body of `undefined` in some runtimes, so a
+        // future GET caller passing one is dropped here rather than throwing
+        // from inside fetch.
+        ...(method === 'POST' && body ? { body: JSON.stringify(body) } : {}),
         // Cashfree's own edge gives up with a 504 after about a minute. A
         // doctor watching a spinner should not wait that long to be told to
         // try again, and a request that hangs holds a connection open here.
@@ -165,9 +167,10 @@ export class CashfreeService {
       this.logger.error(
         `Cashfree ${method} ${path} ${timedOut ? `timed out after ${GATEWAY_TIMEOUT_MS}ms` : `failed: ${err?.message}`}`,
       );
-      throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: GATEWAY_UNREACHABLE,
-      });
+      throw new AppException(
+        timedOut ? ErrorCode.UPSTREAM_TIMEOUT : ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE,
+        { message: GATEWAY_UNREACHABLE },
+      );
     }
     const text = await res.text();
     let json: any = null;
@@ -183,7 +186,9 @@ export class CashfreeService {
       // told to try again rather than that they were rejected. Cashfree's
       // own message is only quoted for a 4xx, where it explains the refusal.
       if (res.status >= 500) {
-        throw new AppException(ErrorCode.INTERNAL_ERROR, { message: GATEWAY_UNREACHABLE });
+        throw new AppException(ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE, {
+          message: GATEWAY_UNREACHABLE,
+        });
       }
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message: json?.message || 'The payment gateway rejected the request.',

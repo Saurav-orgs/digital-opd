@@ -31,9 +31,18 @@ env:
   BACKEND_PORT: 3305
   AI_PORT: 8000
   HEALTH_PATH: /api/docs
+  # backend-OPD's engines.node. @aws-sdk/client-s3 requires >=20.0.0 and sharp
+  # ^20.3.0 || >=21, so an older major installs native binaries that fail on
+  # import rather than failing the install. Checked on the server below.
+  NODE_MIN_MAJOR: 20
+  NODE_MIN_MINOR: 3
 
 jobs:
-  build:
+  # Gate the deploy on the checks that used to exist only as package.json
+  # scripts nobody could run: two apps declared an `eslint` script with eslint
+  # installed in neither, and the backend's jest suite had never once blocked a
+  # release. A red check here stops the build job below from running at all.
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,7 +51,49 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # One source of truth, shared with whoever sets the server up. A
+          # version hardcoded here and a different one on the box is invisible
+          # until something native fails at runtime.
+          node-version-file: .nvmrc
+
+      # Root holds the one lint config and the one linter binary for all four
+      # apps; the app-level `lint` scripts delegate to it.
+      - name: Install root tooling
+        run: npm ci
+
+      - name: Lint (all apps)
+        run: npm run lint
+
+      # Type-checking needs each app's own deps and its own TypeScript: admin
+      # and the backend are on 5.5, the two newer web apps on 6.0, and checking
+      # one with the other's compiler proves nothing about its build.
+      - name: Install app deps
+        run: |
+          npm ci --prefix backend-OPD
+          npm ci --prefix admin-OPD
+          npm ci --prefix patient-web-OPD
+          npm ci --prefix landing-OPD
+
+      - name: Typecheck (all apps)
+        run: npm run typecheck
+
+      - name: Test (backend)
+        run: npm test --prefix backend-OPD
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # One source of truth, shared with whoever sets the server up. A
+          # version hardcoded here and a different one on the box is invisible
+          # until something native fails at runtime.
+          node-version-file: .nvmrc
 
       # ---------- Backend (NestJS) ----------
       - name: Install backend deps
@@ -304,7 +355,7 @@ jobs:
           RELEASE: digital-opd-${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST_CLEAN" \
-            "ROOT='${{ env.ROOT }}' BACKEND_DIR='${{ env.BACKEND_DIR }}' DOCTOR_DIR='${{ env.DOCTOR_DIR }}' PATIENT_DIR='${{ env.PATIENT_DIR }}' LANDING_DIR='${{ env.LANDING_DIR }}' AI_DIR='${{ env.AI_DIR }}' PM2_API='${{ env.PM2_API }}' PM2_AI='${{ env.PM2_AI }}' BACKEND_PORT='${{ env.BACKEND_PORT }}' AI_PORT='${{ env.AI_PORT }}' HEALTH_PATH='${{ env.HEALTH_PATH }}' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+            "ROOT='${{ env.ROOT }}' BACKEND_DIR='${{ env.BACKEND_DIR }}' DOCTOR_DIR='${{ env.DOCTOR_DIR }}' PATIENT_DIR='${{ env.PATIENT_DIR }}' LANDING_DIR='${{ env.LANDING_DIR }}' AI_DIR='${{ env.AI_DIR }}' PM2_API='${{ env.PM2_API }}' PM2_AI='${{ env.PM2_AI }}' BACKEND_PORT='${{ env.BACKEND_PORT }}' AI_PORT='${{ env.AI_PORT }}' HEALTH_PATH='${{ env.HEALTH_PATH }}' NODE_MIN_MAJOR='${{ env.NODE_MIN_MAJOR }}' NODE_MIN_MINOR='${{ env.NODE_MIN_MINOR }}' RELEASE='$RELEASE' bash -s" <<'REMOTE'
           set -euo pipefail
 
           export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -325,6 +376,48 @@ jobs:
           command -v pm2       >/dev/null || { echo "pm2 is not on PATH for this ssh session"; exit 1; }
           command -v curl      >/dev/null || { echo "curl is not installed"; exit 1; }
           command -v python3.12>/dev/null || { echo "python3.12 is not installed (needed by the AI sidecar)"; exit 1; }
+          command -v node      >/dev/null || { echo "node is not on PATH for this ssh session (is nvm sourced for non-interactive shells?)"; exit 1; }
+          command -v npm       >/dev/null || { echo "npm is not on PATH for this ssh session"; exit 1; }
+
+          # The Node that runs `npm ci --omit=dev` below is the one that decides
+          # which prebuilt native binaries land in node_modules — sharp, bcrypt,
+          # pg. On too old a major, npm does not fail: it installs something
+          # that throws on import, the API dies on boot, and the only signal is
+          # the health check timing out several minutes later. Checked here so
+          # the reason is the first line of the log instead of the last.
+          #
+          # This is deliberately NOT "must equal the version that built it".
+          # The frontends ship as static files and the backend's dist is plain
+          # ES2021, so the build machine's version does not have to match — only
+          # the floor its dependencies declare has to hold.
+          NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+          NODE_MINOR=$(node -p 'process.versions.node.split(".")[1]')
+          echo "server node $(node -v), npm $(npm -v) (needs >= ${NODE_MIN_MAJOR}.${NODE_MIN_MINOR}.0)"
+          if [ "$NODE_MAJOR" -lt "$NODE_MIN_MAJOR" ] ||
+             { [ "$NODE_MAJOR" -eq "$NODE_MIN_MAJOR" ] && [ "$NODE_MINOR" -lt "$NODE_MIN_MINOR" ]; }; then
+            echo "REFUSING TO DEPLOY: this server runs $(node -v), below the"
+            echo "  Node >= ${NODE_MIN_MAJOR}.${NODE_MIN_MINOR}.0 that backend-OPD's dependencies require"
+            echo "  (@aws-sdk/client-s3 >= 20.0.0, sharp ^20.3.0 || >= 21)."
+            echo "  Nothing has been changed on the server."
+            echo "  Fix, as the deploy user:"
+            echo "    nvm install 22 && nvm alias default 22   # 22 is what .nvmrc pins"
+            echo "    pm2 update            # restarts pm2 itself under the new Node"
+            echo "  Then re-run this workflow."
+            exit 1
+          fi
+
+          # pm2 keeps running under whatever Node it was started with, so the
+          # API's runtime version can lag the shell's until `pm2 update`. Worth
+          # saying out loud rather than guessing at it from a crash later.
+          PM2_NODE=$(pm2 report 2>/dev/null | grep -iE '^\s*node version' | head -1 | awk '{print $NF}' || true)
+          if [ -n "$PM2_NODE" ]; then
+            echo "pm2 daemon is running under node $PM2_NODE"
+            case "$PM2_NODE" in
+              "$(node -v | tr -d v)"|"$(node -v)") : ;;
+              *) echo "NOTE: pm2's Node ($PM2_NODE) differs from this shell's $(node -v);" \
+                      "run 'pm2 update' if the API misbehaves after this deploy." ;;
+            esac
+          fi
 
           RELDIR="/tmp/$RELEASE"
 

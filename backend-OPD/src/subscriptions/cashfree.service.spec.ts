@@ -52,7 +52,7 @@ describe('CashfreeService', () => {
   it('treats a gateway 504 as "try again", not as a rejection', async () => {
     reply(504, '<html><title>504 Gateway Time-out</title></html>');
     const err = await thrownBy(order);
-    expect(err.code).toBe(ErrorCode.INTERNAL_ERROR);
+    expect(err.code).toBe(ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE);
     expect(err.getResponse()).toMatchObject({
       message: expect.stringContaining('Nothing was charged'),
     });

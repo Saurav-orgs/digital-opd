@@ -1,0 +1,28 @@
+{
+  "name": "digital-opd",
+  "private": true,
+  "description": "myDigitalOPD monorepo \u2014 shared dev tooling and cross-app checks.",
+  "scripts": {
+    "lint": "oxlint --config .oxlintrc.json admin-OPD/src backend-OPD/src patient-web-OPD/src landing-OPD/src",
+    "lint:admin": "oxlint --config .oxlintrc.json admin-OPD/src",
+    "lint:backend": "oxlint --config .oxlintrc.json backend-OPD/src",
+    "lint:patient": "oxlint --config .oxlintrc.json patient-web-OPD/src",
+    "lint:landing": "oxlint --config .oxlintrc.json landing-OPD/src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck:backend && npm run typecheck:admin && npm run typecheck:patient && npm run typecheck:landing",
+    "typecheck:admin": "npm run typecheck --prefix admin-OPD",
+    "typecheck:backend": "npm run typecheck --prefix backend-OPD",
+    "typecheck:patient": "npm run typecheck --prefix patient-web-OPD",
+    "typecheck:landing": "npm run typecheck --prefix landing-OPD",
+    "test": "npm test --prefix backend-OPD",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "oxlint": "^1.71.0",
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20.3.0"
+  }
+}

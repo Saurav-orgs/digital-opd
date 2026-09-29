@@ -247,7 +247,7 @@ export class WhatsAppService {
         ? 'WhatsApp is not fully set up for this clinic yet. Please try again later.'
         : 'The WhatsApp OTP template is missing or does not match — check WA_OTP_TEMPLATE_NAME / LANG.';
     }
-    return new AppException(ErrorCode.INTERNAL_ERROR, { message });
+    return new AppException(ErrorCode.WHATSAPP_SEND_FAILED, { message });
   }
 }
 

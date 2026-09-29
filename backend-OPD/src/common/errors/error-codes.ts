@@ -37,6 +37,31 @@ export enum ErrorCode {
   PATIENT_NOT_FOUND = 'PATIENT_NOT_FOUND',
   PATIENT_EXISTS = 'PATIENT_EXISTS',
 
+  // Depended-on services. All of these are "come back in a moment", never
+  // "something went wrong": the request was fine, something we call was not.
+  /** The payment gateway could not be reached, or answered nonsense. */
+  PAYMENT_GATEWAY_UNAVAILABLE = 'PAYMENT_GATEWAY_UNAVAILABLE',
+  /** Online payment has no keys configured on this server. */
+  PAYMENT_NOT_CONFIGURED = 'PAYMENT_NOT_CONFIGURED',
+  /** The mail server refused or timed out. */
+  EMAIL_SEND_FAILED = 'EMAIL_SEND_FAILED',
+  /** WhatsApp refused the send — wrong number, template, or setup. */
+  WHATSAPP_SEND_FAILED = 'WHATSAPP_SEND_FAILED',
+  /** The transcription / summary sidecar is down or still loading. */
+  AI_UNAVAILABLE = 'AI_UNAVAILABLE',
+  /** The database is unreachable, or too busy to answer in time. */
+  SERVICE_BUSY = 'SERVICE_BUSY',
+  /** Something we call took too long and we stopped waiting. */
+  UPSTREAM_TIMEOUT = 'UPSTREAM_TIMEOUT',
+  /** This clinic's records are still being prepared (roles, codes, defaults). */
+  TENANT_SETUP_INCOMPLETE = 'TENANT_SETUP_INCOMPLETE',
+
+  // Data integrity — a request that cannot be satisfied as written.
+  /** Points at a record that does not exist (or is not this tenant's). */
+  RELATED_RECORD_MISSING = 'RELATED_RECORD_MISSING',
+  /** Cannot be removed while other records still point at it. */
+  RECORD_IN_USE = 'RECORD_IN_USE',
+
   // Generic
   VALIDATION_FAILED = 'VALIDATION_FAILED',
   NOT_FOUND = 'NOT_FOUND',
@@ -136,6 +161,62 @@ export const ERROR_CATALOG: Record<
     status: HttpStatus.CONFLICT,
     message: 'An account with this mobile number already exists. Please login instead.',
   },
+  [ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'The payment service is not responding right now. No money has left your ' +
+      'account. Please try again in a minute.',
+  },
+  [ErrorCode.PAYMENT_NOT_CONFIGURED]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'Online payment is not switched on for this clinic yet. Please contact ' +
+      'support to complete your subscription.',
+  },
+  [ErrorCode.EMAIL_SEND_FAILED]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message: 'We could not send that email just now. Please try again in a moment.',
+  },
+  [ErrorCode.WHATSAPP_SEND_FAILED]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'We could not send the WhatsApp message. Please check the number and try again.',
+  },
+  [ErrorCode.AI_UNAVAILABLE]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'The assistant that writes up consultations is not available right now. ' +
+      'You can still write the prescription yourself, and recordings will be ' +
+      'processed once it is back.',
+  },
+  [ErrorCode.SERVICE_BUSY]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'The system is busy and could not complete that. Nothing was saved — ' +
+      'please try again in a few seconds.',
+  },
+  [ErrorCode.UPSTREAM_TIMEOUT]: {
+    status: HttpStatus.GATEWAY_TIMEOUT,
+    message: 'That took too long to finish. Please try again.',
+  },
+  [ErrorCode.TENANT_SETUP_INCOMPLETE]: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message:
+      'This clinic is still being set up. Please try again shortly, or contact ' +
+      'support if it keeps happening.',
+  },
+  [ErrorCode.RELATED_RECORD_MISSING]: {
+    status: HttpStatus.CONFLICT,
+    message:
+      'Something this refers to no longer exists. Please refresh the page and ' +
+      'try again.',
+  },
+  [ErrorCode.RECORD_IN_USE]: {
+    status: HttpStatus.CONFLICT,
+    message:
+      'This is still being used elsewhere, so it cannot be removed. Remove ' +
+      'those entries first.',
+  },
   [ErrorCode.VALIDATION_FAILED]: {
     status: HttpStatus.UNPROCESSABLE_ENTITY,
     message: 'Some of the details are invalid. Please review and try again.',
@@ -158,6 +239,12 @@ export const ERROR_CATALOG: Record<
   },
   [ErrorCode.INTERNAL_ERROR]: {
     status: HttpStatus.INTERNAL_SERVER_ERROR,
-    message: 'Something went wrong on our end. Please try again.',
+    // The genuine last resort: a fault nothing anticipated. Every failure a
+    // user can actually cause has its own code above, so reaching this one is
+    // a bug report waiting to happen — the filter appends a short reference
+    // that also goes into the server log, so "it broke" becomes traceable.
+    message:
+      'Something went wrong on our end and your last action did not go ' +
+      'through. Please try again.',
   },
 };

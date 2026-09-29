@@ -7,9 +7,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
+import { randomUUID } from 'node:crypto';
 import {
   BaseError as SequelizeBaseError,
+  ConnectionError,
   UniqueConstraintError,
+  ForeignKeyConstraintError,
+  TimeoutError as SequelizeTimeoutError,
   ValidationError as SequelizeValidationError,
   DatabaseError,
 } from 'sequelize';
@@ -23,14 +27,87 @@ interface ErrorResponseBody {
   error: ErrorCode | string;
   message: string;
   details?: unknown;
+  /** Only present on a true 500 — the id to quote when reporting it. */
+  reference?: string;
   path: string;
   timestamp: string;
 }
+
+type ResolvedError = Omit<ErrorResponseBody, 'path' | 'timestamp'>;
+
+/**
+ * PostgreSQL SQLSTATE codes we can say something useful about.
+ *
+ * Without this table every one of these arrives as `DatabaseError` and leaves
+ * as a 500 reading "something went wrong on our end" — which is both unhelpful
+ * and untrue: a mobile number one character too long for its column is the
+ * user's typo, not our outage, and telling them so is the difference between a
+ * corrected field and a support call.
+ */
+const PG_CODE_MAP: Record<string, { code: ErrorCode; message?: string }> = {
+  // 23502 not_null_violation — a required column arrived empty.
+  '23502': {
+    code: ErrorCode.VALIDATION_FAILED,
+    message: 'A required detail is missing. Please fill in every required field.',
+  },
+  // 22001 string_data_right_truncation — longer than the column allows.
+  '22001': {
+    code: ErrorCode.VALIDATION_FAILED,
+    message: 'One of the details is too long. Please shorten it and try again.',
+  },
+  // 22P02 invalid_text_representation — a malformed id, number or date.
+  '22P02': {
+    code: ErrorCode.VALIDATION_FAILED,
+    message: 'One of the details is not in a form we recognise. Please check and try again.',
+  },
+  // 22003 numeric_value_out_of_range
+  '22003': {
+    code: ErrorCode.VALIDATION_FAILED,
+    message: 'A number is outside the range we can store. Please check and try again.',
+  },
+  // 23514 check_violation — a value the schema forbids.
+  '23514': {
+    code: ErrorCode.VALIDATION_FAILED,
+    message: 'One of the details is not allowed here. Please review and try again.',
+  },
+  // 23505 unique_violation — normally caught as UniqueConstraintError first.
+  '23505': { code: ErrorCode.CONFLICT },
+  // Contention, not corruption: the same request usually succeeds on a retry.
+  '40001': { code: ErrorCode.SERVICE_BUSY }, // serialization_failure
+  '40P01': { code: ErrorCode.SERVICE_BUSY }, // deadlock_detected
+  '55P03': { code: ErrorCode.SERVICE_BUSY }, // lock_not_available
+  '53300': { code: ErrorCode.SERVICE_BUSY }, // too_many_connections
+  '53200': { code: ErrorCode.SERVICE_BUSY }, // out_of_memory
+  '57014': { code: ErrorCode.UPSTREAM_TIMEOUT }, // query_canceled (statement timeout)
+  '08006': { code: ErrorCode.SERVICE_BUSY }, // connection_failure
+  '08003': { code: ErrorCode.SERVICE_BUSY }, // connection_does_not_exist
+};
+
+/** Socket-level failures reaching anything we depend on. */
+const UNREACHABLE_ERRNOS = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+const TIMEOUT_ERRNOS = new Set(['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ERR_SOCKET_CONNECTION_TIMEOUT']);
 
 /**
  * Global filter producing the single, consistent error contract (plan §13):
  *   { success:false, statusCode, error, message, path, timestamp, details? }
  * `message` is always safe to render directly to the end user.
+ *
+ * Its second job is to make a 500 rare. Anything a user can cause — a clash, a
+ * missing parent row, a column overflow, a gateway that is down, a query that
+ * timed out — is translated here into a code and a sentence that means
+ * something to whoever is looking at the screen. A response that still reaches
+ * `INTERNAL_ERROR` is a fault nobody anticipated, so it carries a short
+ * `reference` that is logged alongside the stack: "it broke" becomes a line a
+ * developer can find.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -46,7 +123,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // Log server-side faults with full context; client faults stay quiet.
     if (body.statusCode >= 500) {
       this.logger.error(
-        `${request.method} ${request.url} → ${body.statusCode} ${body.error}`,
+        `${request.method} ${request.url} → ${body.statusCode} ${body.error}` +
+          (body.reference ? ` [ref ${body.reference}]` : ''),
         exception instanceof Error ? exception.stack : String(exception),
       );
     } else {
@@ -62,9 +140,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     });
   }
 
-  private resolve(
-    exception: unknown,
-  ): Omit<ErrorResponseBody, 'path' | 'timestamp'> {
+  /** Body straight from the catalog, optionally with a more specific sentence. */
+  private fromCatalog(code: ErrorCode, message?: string, details?: unknown): ResolvedError {
+    return {
+      success: false,
+      statusCode: ERROR_CATALOG[code].status,
+      error: code,
+      message: message ?? ERROR_CATALOG[code].message,
+      details,
+    };
+  }
+
+  private resolve(exception: unknown): ResolvedError {
     // 1. Our own domain exceptions — already shaped.
     if (exception instanceof AppException) {
       const res = exception.getResponse() as {
@@ -83,12 +170,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     // 2. Rate limiting.
     if (exception instanceof ThrottlerException) {
-      return {
-        success: false,
-        statusCode: HttpStatus.TOO_MANY_REQUESTS,
-        error: ErrorCode.RATE_LIMITED,
-        message: ERROR_CATALOG[ErrorCode.RATE_LIMITED].message,
-      };
+      return this.fromCatalog(ErrorCode.RATE_LIMITED);
     }
 
     // 3. Framework HttpExceptions (validation pipe, NotFound, Forbidden, ...).
@@ -96,52 +178,128 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return this.fromHttpException(exception);
     }
 
-    // 4. Sequelize errors.
+    // 4. Sequelize, most specific first — TimeoutError extends DatabaseError,
+    //    and both extend BaseError, so order here is load-bearing.
     if (exception instanceof UniqueConstraintError) {
-      return {
-        success: false,
-        statusCode: HttpStatus.CONFLICT,
-        error: ErrorCode.CONFLICT,
-        message: 'A record with these details already exists.',
-        details: this.env() ? exception.errors?.map((e) => e.message) : undefined,
-      };
-    }
-    if (exception instanceof SequelizeValidationError) {
-      return {
-        success: false,
-        statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
-        error: ErrorCode.VALIDATION_FAILED,
-        message: ERROR_CATALOG[ErrorCode.VALIDATION_FAILED].message,
-        details: exception.errors?.map((e) => ({
-          field: e.path,
-          message: e.message,
-        })),
-      };
-    }
-    if (
-      exception instanceof DatabaseError ||
-      exception instanceof SequelizeBaseError
-    ) {
-      return {
-        success: false,
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: ErrorCode.INTERNAL_ERROR,
-        message: ERROR_CATALOG[ErrorCode.INTERNAL_ERROR].message,
-      };
+      return this.fromCatalog(
+        ErrorCode.CONFLICT,
+        'A record with these details already exists.',
+        this.isDev() ? exception.errors?.map((e) => e.message) : undefined,
+      );
     }
 
-    // 5. Anything else — never leak internals.
+    if (exception instanceof ForeignKeyConstraintError) {
+      // Postgres words the two directions differently: a delete blocked by
+      // children says "is still referenced from", a write naming a parent that
+      // is gone does not. They need opposite advice, so they get opposite codes.
+      const detail = String(
+        (exception as { parent?: { detail?: string } }).parent?.detail ?? exception.message,
+      );
+      return this.fromCatalog(
+        /still referenced from/i.test(detail)
+          ? ErrorCode.RECORD_IN_USE
+          : ErrorCode.RELATED_RECORD_MISSING,
+      );
+    }
+
+    if (exception instanceof SequelizeValidationError) {
+      return this.fromCatalog(
+        ErrorCode.VALIDATION_FAILED,
+        undefined,
+        exception.errors?.map((e) => ({ field: e.path, message: e.message })),
+      );
+    }
+
+    if (exception instanceof SequelizeTimeoutError) {
+      return this.fromCatalog(ErrorCode.UPSTREAM_TIMEOUT);
+    }
+
+    // The database is unreachable / refusing / out of connections. Not the
+    // user's fault and not permanent, so it must not read like a crash.
+    if (exception instanceof ConnectionError) {
+      return this.fromCatalog(ErrorCode.SERVICE_BUSY);
+    }
+
+    if (exception instanceof DatabaseError) {
+      const sqlState = (exception as { parent?: { code?: string } }).parent?.code;
+      const mapped = sqlState ? PG_CODE_MAP[sqlState] : undefined;
+      if (mapped) return this.fromCatalog(mapped.code, mapped.message);
+      return this.unexpected(exception);
+    }
+
+    if (exception instanceof SequelizeBaseError) {
+      return this.unexpected(exception);
+    }
+
+    // 5. Services we call out to.
+    //    Matched by name rather than imported: this filter sits in `common` and
+    //    has no business depending on the AI module to catch its error.
+    if ((exception as { constructor?: { name?: string } })?.constructor?.name === 'AiUnavailableError') {
+      return this.fromCatalog(ErrorCode.AI_UNAVAILABLE);
+    }
+
+    const errno = (exception as { code?: unknown })?.code;
+    if (typeof errno === 'string') {
+      // Multer reports upload limits through the same `code` channel.
+      if (errno === 'LIMIT_FILE_SIZE') return this.fromCatalog(ErrorCode.FILE_TOO_LARGE);
+      if (errno === 'LIMIT_FILE_COUNT') {
+        return this.fromCatalog(
+          ErrorCode.BAD_REQUEST,
+          'Too many files at once. Please upload fewer and try again.',
+        );
+      }
+      if (errno === 'LIMIT_UNEXPECTED_FILE') {
+        return this.fromCatalog(
+          ErrorCode.BAD_REQUEST,
+          'That file was not expected here. Please use the upload button on this screen.',
+        );
+      }
+      if (TIMEOUT_ERRNOS.has(errno)) return this.fromCatalog(ErrorCode.UPSTREAM_TIMEOUT);
+      if (UNREACHABLE_ERRNOS.has(errno)) return this.fromCatalog(ErrorCode.SERVICE_BUSY);
+    }
+
+    // `AbortSignal.timeout()` and manual aborts surface as DOMExceptions whose
+    // name, not code, carries the reason.
+    const name = (exception as { name?: unknown })?.name;
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return this.fromCatalog(ErrorCode.UPSTREAM_TIMEOUT);
+    }
+
+    // A malformed JSON body reaches us as a plain SyntaxError when it escapes
+    // body-parser's own HttpException.
+    if (exception instanceof SyntaxError) {
+      return this.fromCatalog(
+        ErrorCode.BAD_REQUEST,
+        'We could not read that request. Please try again.',
+      );
+    }
+
+    // 6. Genuinely unanticipated — never leak internals.
+    return this.unexpected(exception);
+  }
+
+  /**
+   * The last resort. Stays a 500 because that is what it is — a fault on our
+   * side, not a request the caller can fix — but it carries a reference that
+   * also lands in the log, so the person who hit it has something to quote.
+   */
+  private unexpected(exception: unknown): ResolvedError {
+    const reference = randomUUID().slice(0, 8);
     return {
       success: false,
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       error: ErrorCode.INTERNAL_ERROR,
-      message: ERROR_CATALOG[ErrorCode.INTERNAL_ERROR].message,
+      message:
+        `${ERROR_CATALOG[ErrorCode.INTERNAL_ERROR].message} ` +
+        `If it happens again, quote reference ${reference} to support.`,
+      reference,
+      details: this.isDev()
+        ? { cause: exception instanceof Error ? exception.message : String(exception) }
+        : undefined,
     };
   }
 
-  private fromHttpException(
-    exception: HttpException,
-  ): Omit<ErrorResponseBody, 'path' | 'timestamp'> {
+  private fromHttpException(exception: HttpException): ResolvedError {
     const status = exception.getStatus();
     const raw = exception.getResponse();
 
@@ -162,6 +320,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         };
       }
     }
+
+    // A 5xx from the framework is still a fault on our side, and Nest's default
+    // text for it ("Internal server error") says nothing to a receptionist.
+    if (status >= 500) return this.unexpected(exception);
 
     // Otherwise map the HTTP status to a domain code + readable message.
     const code = this.statusToCode(status);
@@ -187,23 +349,51 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return ErrorCode.VALIDATION_FAILED;
       case HttpStatus.TOO_MANY_REQUESTS:
         return ErrorCode.RATE_LIMITED;
+      case HttpStatus.REQUEST_TIMEOUT:
+      case HttpStatus.GATEWAY_TIMEOUT:
+        return ErrorCode.UPSTREAM_TIMEOUT;
+      case HttpStatus.SERVICE_UNAVAILABLE:
+        return ErrorCode.SERVICE_BUSY;
       default:
-        return status >= 500 ? ErrorCode.INTERNAL_ERROR : ErrorCode.BAD_REQUEST;
+        return ErrorCode.BAD_REQUEST;
     }
   }
 
-  /** Prefer the framework message, but fall back to our friendly catalog text. */
+  /**
+   * Prefer the framework message, but fall back to our friendly catalog text.
+   *
+   * Nest's stock one-word bodies ("Bad Request", "Not Found") are not sentences
+   * and are not worth showing anyone, so they are dropped in favour of the
+   * catalog's.
+   */
   private readableMessage(raw: unknown, code: ErrorCode): string {
-    if (typeof raw === 'string' && raw.trim()) return raw;
+    const stock = new Set([
+      'Bad Request',
+      'Unauthorized',
+      'Forbidden',
+      'Not Found',
+      'Conflict',
+      'Unprocessable Entity',
+      'Payload Too Large',
+      'Unsupported Media Type',
+      'Too Many Requests',
+      'Request Timeout',
+      'Service Unavailable',
+      'Gateway Timeout',
+    ]);
+    const usable = (m: unknown): m is string =>
+      typeof m === 'string' && m.trim().length > 0 && !stock.has(m.trim());
+
+    if (usable(raw)) return raw;
     if (raw && typeof raw === 'object' && 'message' in raw) {
       const m = (raw as { message: unknown }).message;
-      if (typeof m === 'string' && m.trim()) return m;
+      if (usable(m)) return m;
       if (Array.isArray(m) && m.length) return m.join(' ');
     }
     return ERROR_CATALOG[code]?.message ?? 'Request failed.';
   }
 
-  private env(): boolean {
+  private isDev(): boolean {
     return process.env.NODE_ENV !== 'production';
   }
 }

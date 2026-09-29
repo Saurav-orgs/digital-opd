@@ -78,9 +78,7 @@ export class PathlabsService {
       order: [['doctor_id', 'DESC NULLS LAST']], // prefer tenant-specific
     });
     if (!role) {
-      throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: 'The Pathlab role is not set up for this tenant. Please try again shortly.',
-      });
+      throw new AppException(ErrorCode.TENANT_SETUP_INCOMPLETE);
     }
     return role;
   }

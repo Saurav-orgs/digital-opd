@@ -16,6 +16,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Type safety — matches admin-OPD. Without `strict`, strictNullChecks
+       is off and null-safety bugs pass the build. */
+    "strict": true,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,

@@ -958,9 +958,7 @@ export class SubscriptionsService {
       note: `myDigitalOPD ${plan.name} plan`,
     });
     if (!order.payment_session_id) {
-      throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: 'The payment gateway did not return a checkout session.',
-      });
+      throw new AppException(ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE);
     }
 
     // One live attempt at a time: an older pending order is superseded, so

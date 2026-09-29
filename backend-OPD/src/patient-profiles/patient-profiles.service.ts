@@ -13,10 +13,7 @@ import { ErrorCode } from '../common/errors/error-codes';
 import { AppointmentStatus, ConsultationStatus } from '../common/enums';
 import { ageFromDob, dobFromAge } from '../common/utils/age';
 import { nowInClinic } from '../common/utils/clinic-time';
-import {
-  PatientDetailsDto,
-  UpdatePatientProfileDto,
-} from './dto/patient-profile.dto';
+import { UpdatePatientProfileDto } from './dto/patient-profile.dto';
 
 /** One entry in the booking picker. */
 export interface PatientProfileSummary {
@@ -480,8 +477,9 @@ export class PatientProfilesService {
       });
       if (!taken) return code;
     }
-    throw new AppException(ErrorCode.INTERNAL_ERROR, {
-      message: 'Could not allocate a patient code. Please try again.',
+    throw new AppException(ErrorCode.SERVICE_BUSY, {
+      message:
+        'We could not assign a patient number just now. Please try saving again.',
     });
   }
 }
