@@ -1,0 +1,76 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "react",
+    "typescript",
+    "oxc",
+    "unicorn"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "env": {
+    "es2023": true
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/build/**",
+    "**/node_modules/**",
+    "**/*.d.ts",
+    "**/coverage/**"
+  ],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": [
+      "warn",
+      {
+        "allowConstantExport": true
+      }
+    ],
+    "no-console": "off",
+    "no-debugger": "error",
+    "typescript/no-explicit-any": "off",
+    "react/react-in-jsx-scope": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "after-used",
+        "argsIgnorePattern": "^_",
+        "caughtErrors": "all",
+        "caughtErrorsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "react/set-state-in-effect": "warn",
+    "react/purity": "warn",
+    "react/refs": "warn",
+    "react/immutability": "warn",
+    "react-hooks/exhaustive-deps": "warn"
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/backend-OPD/**"
+      ],
+      "env": {
+        "node": true
+      },
+      "rules": {
+        "react/rules-of-hooks": "off",
+        "react/only-export-components": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.spec.ts",
+        "**/*.test.ts"
+      ],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    }
+  ]
+}

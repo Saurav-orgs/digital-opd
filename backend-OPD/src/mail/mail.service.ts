@@ -118,9 +118,7 @@ export class MailService implements OnModuleInit {
       });
     } catch (err) {
       this.logger.error(`Could not send "${msg.subject}" to ${msg.to}: ${(err as Error).message}`);
-      throw new AppException(ErrorCode.INTERNAL_ERROR, {
-        message: 'We could not send the email right now. Please try again in a moment.',
-      });
+      throw new AppException(ErrorCode.EMAIL_SEND_FAILED);
     }
     this.logger.log(`Sent "${msg.subject}" to ${msg.to}.`);
   }

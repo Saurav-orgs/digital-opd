@@ -229,6 +229,24 @@ export const BookingForm: React.FC = () => {
   const [stateError, setStateError] = useState<string | null>(null);
   const [pincodeError, setPincodeError] = useState<string | null>(null);
 
+  /*
+   * A patient who is already signed in has nothing to prove: their number is
+   * the account they are signed into, so booking starts at "who is this visit
+   * for?" instead of asking for a number and a password they just used.
+   *
+   * Waits for the session to finish loading, or a signed-in patient would see
+   * the number field flash on every page load.
+   */
+  useEffect(() => {
+    if (authLoading || !patient || step !== 1) return;
+    setMobile(patient.mobile);
+    setKnownPatients(profiles);
+    setStep(profiles.length > 0 ? 2 : 3);
+  }, [authLoading, patient, profiles, step]);
+
+  // Declared above the "nothing to book" guard below: that guard returns
+  // early, so any hook after it is skipped on those renders and React sees a
+  // different hook count between renders of the same component.
   if (!doctor || !date || !slot) {
     return (
       <div style={{ padding: '48px 24px', textAlign: 'center' }}>
@@ -321,21 +339,6 @@ export const BookingForm: React.FC = () => {
 
     return valid;
   };
-
-  /*
-   * A patient who is already signed in has nothing to prove: their number is
-   * the account they are signed into, so booking starts at "who is this visit
-   * for?" instead of asking for a number and a password they just used.
-   *
-   * Waits for the session to finish loading, or a signed-in patient would see
-   * the number field flash on every page load.
-   */
-  useEffect(() => {
-    if (authLoading || !patient || step !== 1) return;
-    setMobile(patient.mobile);
-    setKnownPatients(profiles);
-    setStep(profiles.length > 0 ? 2 : 3);
-  }, [authLoading, patient, profiles, step]);
 
   /**
    * Once signed in, go where the number used to lead: pick a patient, or add

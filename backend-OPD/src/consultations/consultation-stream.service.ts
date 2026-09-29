@@ -368,6 +368,10 @@ export class ConsultationStreamService implements OnModuleDestroy {
    */
   private async sweepIdle(): Promise<void> {
     const cutoff = Date.now() - IDLE_MS;
+    // Snapshot, not a redundant copy: drop() below deletes from
+    // this.sessions, and mutating a Map while iterating its live
+    // iterator skips entries.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const s of [...this.sessions.values()]) {
       if (s.lastActivity > cutoff || s.processing) continue;
       this.logger.warn(`Live consultation ${s.sessionId} idle for ${IDLE_MS / 1000}s; abandoning.`);

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+package-lock.json
+
+# Flutter and Python apps — formatted by dart format / ruff, not prettier.
+admin-app-OPD/
+patient-OPD/
+ai-OPD/
+
+# Generated or vendored.
+**/*.min.*
+admin-OPD/src/lib/audio/segmenter.worklet.js

@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { SlotsService } from './slots.service';
-import { dayOfWeek, toHHMM } from '../common/utils/clinic-time';
+import { dayOfWeek } from '../common/utils/clinic-time';
 
 /**
  * Slot-engine unit tests (plan §5). Models are mocked so we exercise the pure
