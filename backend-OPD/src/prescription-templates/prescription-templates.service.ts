@@ -23,15 +23,11 @@ export type TemplateScope = 'builtin' | 'mine';
 /**
  * Prescription templates: the doctor's saved starting points.
  *
- * Two things here are load-bearing and easy to get wrong.
- *
- * **Built-ins are shared rows.** `doctor_id IS NULL` means every tenant reads
- * the same row, so a doctor "editing a built-in in place" must never write to
- * it — one clinic's change would reach every other clinic. `update()` detects
- * that case and writes a private override instead, linked back by
- * `builtin_source_id`, and `list()` swaps the override in where it shadows
- * one. The doctor sees an edited built-in; every other doctor sees the
- * original.
+ * Every template belongs to one clinic. The product used to ship eight
+ * built-ins owned by nobody, with an override mechanism so a doctor could edit
+ * one without it reaching every other clinic; that was removed (migration
+ * `20261006000001`) because templates should only ever be what the doctor
+ * wrote. The `is_builtin` / `builtin_source_id` columns survive unread.
  *
  * **Applying is a server-side operation**, not a form fill the client could do
  * for itself. It has to replace the draft's medicines in one go, bump
@@ -69,40 +65,15 @@ export class PrescriptionTemplatesService {
   ) {
     const doctorId = this.requireDoctor(user);
 
-    const [builtins, own] = await Promise.all([
-      opts.scope === 'mine'
-        ? []
-        : this.templateModel.findAll({
-            where: { doctor_id: null },
-            include: [this.medicineInclude()],
-            order: [['name', 'ASC']],
-          }),
-      this.templateModel.findAll({
-        where: { doctor_id: doctorId },
-        include: [this.medicineInclude()],
-        order: [['name', 'ASC']],
-      }),
-    ]);
-
-    // An override stands in for the built-in it shadows; it is not a template
-    // of the doctor's own and must not appear in both tabs.
-    const overrideBySource = new Map(
-      own
-        .filter((t) => t.builtin_source_id)
-        .map((t) => [t.builtin_source_id as string, t]),
-    );
-
-    const resolvedBuiltins = builtins.map(
-      (b) => overrideBySource.get(b.id) ?? b,
-    );
-    const ownTemplates = own.filter((t) => !t.builtin_source_id);
-
-    const rows =
-      opts.scope === 'builtin'
-        ? resolvedBuiltins
-        : opts.scope === 'mine'
-          ? ownTemplates
-          : [...resolvedBuiltins, ...ownTemplates];
+    // Only what this clinic wrote. There are no shipped templates any more —
+    // the eight built-ins and the Pre-added tab that showed them were removed
+    // (migration `20261006000001`), so `scope` has one meaning left and is
+    // kept only so an older client asking for `mine` still works.
+    const rows = await this.templateModel.findAll({
+      where: { doctor_id: doctorId },
+      include: [this.medicineInclude()],
+      order: [['name', 'ASC']],
+    });
 
     const usage = await this.usageFor(doctorId);
     return this.filter(rows, opts).map((t) => this.view(t, usage));
@@ -113,7 +84,7 @@ export class PrescriptionTemplatesService {
     const doctorId = this.requireDoctor(user);
     const rows = await this.templateModel.findAll({
       attributes: ['category'],
-      where: { [Op.or]: [{ doctor_id: null }, { doctor_id: doctorId }] },
+      where: { doctor_id: doctorId },
       group: ['category'],
       order: [['category', 'ASC']],
       raw: true,
@@ -184,34 +155,13 @@ export class PrescriptionTemplatesService {
 
     this.assertNotEmpty(merged.advice ?? undefined, medicines);
 
-    const isBuiltin = target.doctor_id === null;
-    const existingOverride = isBuiltin
-      ? await this.templateModel.findOne({
-          where: { doctor_id: doctorId, builtin_source_id: target.id },
-        })
-      : null;
-    const row = existingOverride ?? (isBuiltin ? null : target);
+    await this.assertNameFree(merged.name, doctorId, target.id);
 
-    await this.assertNameFree(merged.name, doctorId, row?.id ?? null);
-
+    // Every template is the doctor's own now, so an edit is simply a rewrite.
     const saved = await this.sequelize.transaction(async (t) => {
-      if (row) {
-        await row.update(merged as any, { transaction: t });
-        await this.writeMedicines(row.id, medicines, t);
-        return row;
-      }
-      // First edit of a built-in: the override is born here.
-      const override = await this.templateModel.create(
-        {
-          doctor_id: doctorId,
-          builtin_source_id: target.id,
-          ...merged,
-          is_builtin: false,
-        } as any,
-        { transaction: t },
-      );
-      await this.writeMedicines(override.id, medicines, t);
-      return override;
+      await target.update(merged as any, { transaction: t });
+      await this.writeMedicines(target.id, medicines, t);
+      return target;
     });
 
     this.activity.recordForUser(user, {
@@ -220,10 +170,7 @@ export class PrescriptionTemplatesService {
       entity_type: 'prescription_template',
       entity_id: saved.id,
       doctor_id: doctorId,
-      metadata: {
-        category: saved.category,
-        overrides_builtin: isBuiltin ? target.id : undefined,
-      },
+      metadata: { category: saved.category },
     });
 
     return this.view(await this.reload(saved.id), await this.usageFor(doctorId));
@@ -241,26 +188,14 @@ export class PrescriptionTemplatesService {
     const doctorId = this.requireDoctor(user);
     const template = await this.findVisible(id, doctorId);
 
-    if (template.doctor_id === null) {
-      throw new AppException(ErrorCode.FORBIDDEN, {
-        message:
-          'Built-in templates cannot be deleted. You can edit one instead, ' +
-          'and your changes stay with your clinic.',
-      });
-    }
-
-    const wasOverride = !!template.builtin_source_id;
     await template.destroy();
 
     this.activity.recordForUser(user, {
       action: ActivityAction.PRESCRIPTION_TEMPLATE_DELETED,
-      summary: wasOverride
-        ? `Reverted the built-in template "${template.name}" to its original.`
-        : `Deleted the prescription template "${template.name}".`,
+      summary: `Deleted the prescription template "${template.name}".`,
       entity_type: 'prescription_template',
       entity_id: template.id,
       doctor_id: doctorId,
-      metadata: { reverted_builtin: wasOverride },
     });
   }
 
@@ -363,16 +298,13 @@ export class PrescriptionTemplatesService {
     return user.doctorId;
   }
 
-  /** A template is visible when it is shared or the doctor's own. */
+  /** A template is visible when it is the doctor's own — all of them are. */
   private async findVisible(
     id: string,
     doctorId: string,
   ): Promise<PrescriptionTemplate> {
     const template = await this.templateModel.findOne({
-      where: {
-        id,
-        [Op.or]: [{ doctor_id: null }, { doctor_id: doctorId }],
-      },
+      where: { id, doctor_id: doctorId },
     });
     if (!template) {
       throw new AppException(ErrorCode.NOT_FOUND, {
@@ -567,22 +499,11 @@ export class PrescriptionTemplatesService {
       name: t.name,
       advice: t.advice,
       follow_up_days: t.follow_up_days,
-      /**
-       * True for a shared row *and* for a doctor's override of one — both are
-       * "one of the eight" as far as the tabs are concerned, and the override
-       * must not jump to the My templates tab the moment it is edited.
-       */
-      is_builtin: t.is_builtin || !!t.builtin_source_id,
-      /** So the UI can offer "revert to the original". */
-      overrides_builtin: !!t.builtin_source_id,
-      /**
-       * This clinic's own count. An override and the built-in it shadows are
-       * two rows, so the override inherits the built-in's tally rather than
-       * restarting at zero the moment the doctor tweaks the advice.
-       */
-      usage_count:
-        (usage.get(t.id) ?? 0) +
-        (t.builtin_source_id ? (usage.get(t.builtin_source_id) ?? 0) : 0),
+      /** Always false now — nothing ships pre-added. Kept so an older client
+       *  that still reads it does not break. */
+      is_builtin: false,
+      overrides_builtin: false,
+      usage_count: usage.get(t.id) ?? 0,
       medicines: medicines.map((m) => ({
         medicine_name: m.medicine_name,
         strength: m.strength,

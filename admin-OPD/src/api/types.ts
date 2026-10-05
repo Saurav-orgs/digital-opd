@@ -679,3 +679,86 @@ export interface DoctorInviteResult {
   tempPassword: string;
   plan: { name: string; endsAt: string } | null;
 }
+
+// ── IVF case sheet ───────────────────────────────────────────
+
+/** One investigation's date + result. */
+export interface IvfInvestigationValue {
+  date?: string;
+  report?: string;
+}
+
+/** One semen-analysis attempt. */
+export interface IvfSemenRow {
+  datePlace?: string;
+  vol?: string;
+  count?: string;
+  motility?: string;
+  morphology?: string;
+  pc?: string;
+  fructose?: string;
+}
+
+/**
+ * The whole IVF case-sheet body. Every field is optional — the sheet fills in
+ * over the visit. Mirrors the server's `IvfCaseSheetData`; the server is the
+ * authority and drops anything it does not recognise.
+ */
+export interface IvfCaseSheetData {
+  wife?: { name?: string; age?: string; occupation?: string };
+  husband?: { name?: string; age?: string; occupation?: string };
+  vitals?: { weight?: string; height?: string; bmi?: string; bp?: string; date?: string };
+
+  marriedSinceYrs?: string;
+  durationOfInfertility?: string;
+  menstrualCycle?: string;
+  lmp?: string;
+  obstetricHistory?: string;
+  medicalHistory?: { dm?: string; ht?: string; thyroid?: string; tb?: string; others?: string };
+  coitalDifficulty?: string;
+  contraception?: string;
+  surgicalHistory?: string;
+  familyHistory?: string;
+  drugAllergy?: string;
+  ovulationInduction?: string;
+  previousIUI?: string;
+  stimulation?: string;
+  previousIVFDetails?: string;
+  hsg?: { date?: string; uterus?: string; tubes?: string };
+  laparoscopy?: { date?: string; notes?: string };
+  hysteroscopy?: { date?: string; notes?: string };
+  clinicalExam?: { thyroid?: string; galactorrhoea?: string; hirsutism?: string; psppv?: string };
+  partnerHistory?: { medical?: string; surgical?: string };
+  smoking?: string;
+  substanceAbuse?: string;
+
+  femaleBloodGroup?: string;
+  femaleInvestigations?: Record<string, IvfInvestigationValue>;
+  thrombophilias?: string;
+  karyotypeWife?: string;
+  papSmear?: string;
+  hpv?: string;
+  semenAnalysis?: IvfSemenRow[];
+  maleBloodGroup?: string;
+  maleInvestigations?: Record<string, IvfInvestigationValue>;
+  usgPelvis?: { date?: string; notes?: string };
+  afc?: { rt?: string; lt?: string };
+
+  diagnosisAndPlan?: string;
+}
+
+/** The case-sheet for one visit, as the editor reads it. */
+export interface IvfCaseSheet {
+  id: string;
+  appointment_id: string;
+  status: 'draft' | 'issued';
+  data: IvfCaseSheetData;
+  issued_at: string | null;
+}
+
+/** A doctor's saved case-sheet, reusable as a starting point. */
+export interface IvfCaseSheetTemplate {
+  id: string;
+  name: string;
+  data: IvfCaseSheetData;
+}

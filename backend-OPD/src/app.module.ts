@@ -25,6 +25,7 @@ import { PatientAuthModule } from './patient-auth/patient-auth.module';
 import { PatientProfilesModule } from './patient-profiles/patient-profiles.module';
 import { BlockedNumbersModule } from './blocked-numbers/blocked-numbers.module';
 import { PrescriptionTemplatesModule } from './prescription-templates/prescription-templates.module';
+import { IvfCaseSheetsModule } from './ivf-case-sheets/ivf-case-sheets.module';
 import { PatientPortalModule } from './patient-portal/patient-portal.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
@@ -89,6 +90,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     PatientProfilesModule,
     BlockedNumbersModule,
     PrescriptionTemplatesModule,
+    IvfCaseSheetsModule,
     PatientAuthModule,
     PatientPortalModule,
     ReportsModule,

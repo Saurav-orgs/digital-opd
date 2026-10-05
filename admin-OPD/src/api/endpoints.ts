@@ -10,6 +10,9 @@ import type {
   CreateDoctorResult,
   DoctorProfile,
   EPrescription,
+  IvfCaseSheet,
+  IvfCaseSheetData,
+  IvfCaseSheetTemplate,
   MedicineCatalogEntry,
   DashboardSummary,
   DaySlots,
@@ -493,6 +496,84 @@ export const templatesApi = {
   apply: (id: string, appointmentId: string) =>
     api
       .post<EPrescription>(`/prescription-templates/${id}/apply/${appointmentId}`)
+      .then((r) => r.data),
+};
+
+/**
+ * The IVF case-sheet — a per-appointment intake/investigations document offered
+ * only to IVF & Fertility doctors. Same draft → issue → PDF-on-letterhead
+ * lifecycle as the prescription; the server enforces the specialization gate.
+ */
+export const ivfCaseSheetApi = {
+  get: (appointmentId: string) =>
+    api
+      .get<IvfCaseSheet>(`/appointments/${appointmentId}/ivf-case-sheet`)
+      .then((r) => r.data),
+
+  save: (appointmentId: string, data: IvfCaseSheetData) =>
+    api
+      .patch<IvfCaseSheet>(`/appointments/${appointmentId}/ivf-case-sheet`, { data })
+      .then((r) => r.data),
+
+  issue: (appointmentId: string) =>
+    api
+      .post<IvfCaseSheet>(`/appointments/${appointmentId}/ivf-case-sheet/issue`)
+      .then((r) => r.data),
+
+  /** Withdraw an issued sheet back to a draft; the PDF and the notice go. */
+  withdraw: (appointmentId: string) =>
+    api
+      .delete<IvfCaseSheet>(`/appointments/${appointmentId}/ivf-case-sheet`)
+      .then((r) => r.data),
+
+  /** The draft rendered as the PDF it would be issued as — nothing is sent. */
+  preview: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/ivf-case-sheet/preview`, {
+        responseType: 'blob',
+      })
+      .then((r) => r.data as Blob),
+
+  /** The same page with the header blank, for printing onto a pre-printed pad. */
+  printCopy: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/ivf-case-sheet/preview`, {
+        params: { letterhead: 'false' },
+        responseType: 'blob',
+      })
+      .then((r) => r.data as Blob),
+
+  /** The issued PDF itself, for the share sheet or a download. */
+  pdf: (appointmentId: string) =>
+    api
+      .get(`/appointments/${appointmentId}/ivf-case-sheet/pdf`, { responseType: 'blob' })
+      .then((r) => ({
+        blob: r.data as Blob,
+        filename: filenameFromDisposition(
+          r.headers['content-disposition'],
+          'ivf-case-sheet.pdf',
+        ),
+      })),
+};
+
+/** A doctor's saved IVF case-sheets, applied as starting points. */
+export const ivfTemplatesApi = {
+  list: () =>
+    api.get<IvfCaseSheetTemplate[]>('/ivf-case-sheet-templates').then((r) => r.data),
+
+  create: (body: { name: string; data: IvfCaseSheetData }) =>
+    api.post<IvfCaseSheetTemplate>('/ivf-case-sheet-templates', body).then((r) => r.data),
+
+  update: (id: string, body: { name?: string; data?: IvfCaseSheetData }) =>
+    api.patch<IvfCaseSheetTemplate>(`/ivf-case-sheet-templates/${id}`, body).then((r) => r.data),
+
+  remove: (id: string) =>
+    api.delete<{ ok: boolean }>(`/ivf-case-sheet-templates/${id}`).then((r) => r.data),
+
+  /** Fills the visit's draft from this template and returns the sheet. */
+  apply: (id: string, appointmentId: string) =>
+    api
+      .post<IvfCaseSheet>(`/ivf-case-sheet-templates/${id}/apply/${appointmentId}`)
       .then((r) => r.data),
 };
 

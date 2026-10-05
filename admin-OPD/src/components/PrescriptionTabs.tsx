@@ -7,10 +7,11 @@ import { ConsultationRecorder } from './ConsultationRecorder';
 import { PrescriptionEditor } from './PrescriptionEditor';
 import { HandwritingCanvas } from './HandwritingCanvas';
 import { CameraCapture, cameraAvailable } from './CameraCapture';
-import { KeyboardIcon, MicIcon, PenIcon, UploadIcon } from './icons';
+import { DocumentIcon, KeyboardIcon, MicIcon, PenIcon, UploadIcon } from './icons';
+import { IvfCaseSheetEditor } from './IvfCaseSheetEditor';
 import type { DraftFlushRef } from '../lib/draftFlush';
 
-type Mode = 'voice' | 'upload' | 'type' | 'handwrite';
+export type Mode = 'voice' | 'upload' | 'type' | 'handwrite' | 'ivf';
 
 const MODES: Mode[] = ['voice', 'upload', 'type', 'handwrite'];
 const MODE_KEY = 'opd_admin_rx_mode:';
@@ -43,7 +44,7 @@ function writeMode(appointmentId: string, mode: Mode) {
 }
 
 /**
- * The four ways a doctor/clinic can handle prescriptions for an appointment,
+ * The ways a doctor/clinic can handle prescriptions for an appointment,
  * listed in the order they are actually reached for:
  *   🎙 Voice     — dictate/record; system drafts; doctor reviews
  *   📷 Upload    — upload physical prescription photos/scans
@@ -58,10 +59,26 @@ export function PrescriptionTabs({
   onRecorderBusy,
   footer,
   patientChip,
+  modes = MODES,
+  patientName,
+  patientAge,
 }: {
   appointmentId: string;
   canEdit: boolean;
   disabled?: boolean;
+  /**
+   * Which ways of writing a prescription this doctor is offered.
+   *
+   * An IVF & Fertility doctor gets `['ivf', 'handwrite', 'upload']`: the IVF
+   * form replaces the medicine-row editor and the recorder, and sits as a tab
+   * beside the two that still make sense for them — a scan of a pad, or an
+   * e-pen page. Everyone else gets the default four. `ivf` is never in the
+   * default list.
+   */
+  modes?: Mode[];
+  /** Prefill for the IVF form's patient fields. */
+  patientName?: string;
+  patientAge?: number | null;
   /**
    * Preview and Issue, pinned under whichever mode is showing.
    *
@@ -85,7 +102,14 @@ export function PrescriptionTabs({
    */
   flushRef?: DraftFlushRef;
 }) {
-  const [mode, setModeState] = useState<Mode>(() => readMode(appointmentId) ?? 'voice');
+  const [mode, setModeState] = useState<Mode>(() => {
+    const remembered = readMode(appointmentId);
+    // A doctor who last typed here, and whose card no longer offers Type,
+    // must not be left on a tab that is not rendered.
+    return remembered && modes.includes(remembered) ? remembered : modes[0];
+  });
+  /** Only switch to a tab this card actually shows. */
+  const offers = (m: Mode) => modes.includes(m);
   const setMode = (m: Mode) => {
     setModeState(m);
     writeMode(appointmentId, m);
@@ -132,9 +156,16 @@ export function PrescriptionTabs({
   useEffect(() => {
     if (inferredRef.current || !draft || !appointment) return;
     inferredRef.current = true;
-    if (draft.handwriting_image_url) setModeState('handwrite');
-    else if (hasDraft) setModeState(draft.consultation_session_id ? 'voice' : 'type');
-    else if (prescriptions.length > 0) setModeState('upload');
+    const prefer = draft.handwriting_image_url
+      ? 'handwrite'
+      : hasDraft
+        ? draft.consultation_session_id
+          ? 'voice'
+          : 'type'
+        : prescriptions.length > 0
+          ? 'upload'
+          : null;
+    if (prefer && offers(prefer)) setModeState(prefer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, appointment]);
 
@@ -175,34 +206,60 @@ export function PrescriptionTabs({
       <div className="rx-head">
         <h3>Prescription</h3>
         <div className="rx-modes">
-          <TabBtn
-            label="Type"
-            icon={<KeyboardIcon size={15} />}
-            active={mode === 'type'}
-            onClick={() => setMode('type')}
-          />
-          <TabBtn
-            label="Record"
-            icon={<MicIcon size={15} />}
-            active={mode === 'voice'}
-            onClick={() => setMode('voice')}
-          />
-          <TabBtn
-            label="Handwrite"
-            icon={<PenIcon size={15} />}
-            active={mode === 'handwrite'}
-            onClick={() => setMode('handwrite')}
-          />
-          <TabBtn
-            label={prescriptions.length > 0 ? `Upload (${prescriptions.length})` : 'Upload'}
-            icon={<UploadIcon size={15} />}
-            active={mode === 'upload'}
-            onClick={() => setMode('upload')}
-          />
+          {offers('ivf') && (
+            <TabBtn
+              label="IVF"
+              icon={<DocumentIcon size={15} />}
+              active={mode === 'ivf'}
+              onClick={() => setMode('ivf')}
+            />
+          )}
+          {offers('type') && (
+            <TabBtn
+              label="Type"
+              icon={<KeyboardIcon size={15} />}
+              active={mode === 'type'}
+              onClick={() => setMode('type')}
+            />
+          )}
+          {offers('voice') && (
+            <TabBtn
+              label="Record"
+              icon={<MicIcon size={15} />}
+              active={mode === 'voice'}
+              onClick={() => setMode('voice')}
+            />
+          )}
+          {offers('handwrite') && (
+            <TabBtn
+              label="Handwrite"
+              icon={<PenIcon size={15} />}
+              active={mode === 'handwrite'}
+              onClick={() => setMode('handwrite')}
+            />
+          )}
+          {offers('upload') && (
+            <TabBtn
+              label={prescriptions.length > 0 ? `Upload (${prescriptions.length})` : 'Upload'}
+              icon={<UploadIcon size={15} />}
+              active={mode === 'upload'}
+              onClick={() => setMode('upload')}
+            />
+          )}
         </div>
       </div>
 
       {patientChip}
+
+      {mode === 'ivf' && (
+        <IvfCaseSheetEditor
+          appointmentId={appointmentId}
+          canEdit={canEdit}
+          disabled={!!disabled}
+          patientName={patientName}
+          patientAge={patientAge}
+        />
+      )}
 
       {mode === 'handwrite' && (
         <>

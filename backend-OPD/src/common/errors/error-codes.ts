@@ -46,6 +46,12 @@ export enum ErrorCode {
   /** The doctor already has a template under this name. */
   TEMPLATE_NAME_TAKEN = 'TEMPLATE_NAME_TAKEN',
 
+  // IVF case-sheet
+  /** The IVF case-sheet is offered only to IVF & Fertility doctors. */
+  CASE_SHEET_NOT_AVAILABLE = 'CASE_SHEET_NOT_AVAILABLE',
+  /** A case-sheet with nothing filled in — nothing goes to a patient empty. */
+  CASE_SHEET_EMPTY = 'CASE_SHEET_EMPTY',
+
   // Depended-on services. All of these are "come back in a moment", never
   // "something went wrong": the request was fine, something we call was not.
   /** The payment gateway could not be reached, or answered nonsense. */
@@ -178,6 +184,15 @@ export const ERROR_CATALOG: Record<
   [ErrorCode.TEMPLATE_NAME_TAKEN]: {
     status: HttpStatus.CONFLICT,
     message: 'You already have a template with this name. Please pick another.',
+  },
+  [ErrorCode.CASE_SHEET_NOT_AVAILABLE]: {
+    status: HttpStatus.FORBIDDEN,
+    message:
+      'The IVF prescription is available only for IVF & Fertility doctors.',
+  },
+  [ErrorCode.CASE_SHEET_EMPTY]: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Fill in the prescription before issuing it.',
   },
   [ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE]: {
     status: HttpStatus.SERVICE_UNAVAILABLE,

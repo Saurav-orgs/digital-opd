@@ -31,6 +31,8 @@ import { Subscription } from './subscription.model';
 import { Plan } from './plan.model';
 import { PaymentEvent } from './payment-event.model';
 import { Invoice } from './invoice.model';
+import { IvfCaseSheet } from './ivf-case-sheet.model';
+import { IvfCaseSheetTemplate } from './ivf-case-sheet-template.model';
 
 export const models = [
   Role,
@@ -65,6 +67,8 @@ export const models = [
   Plan,
   PaymentEvent,
   Invoice,
+  IvfCaseSheet,
+  IvfCaseSheetTemplate,
 ];
 
 export {
@@ -97,4 +101,6 @@ export {
   Plan,
   PaymentEvent,
   Invoice,
+  IvfCaseSheet,
+  IvfCaseSheetTemplate,
 };

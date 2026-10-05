@@ -6281,3 +6281,177 @@ tr.family-head td {
   }
 }
 
+
+/* ── IVF prescription form ──────────────────────────────────── */
+.ivf-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ivf-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ivf-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ivf-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-tint);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.ivf-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: var(--surface);
+}
+.ivf-section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 6px;
+}
+.ivf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+.ivf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ivf-field > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.ivf-field-wide {
+  grid-column: 1 / -1;
+  margin-bottom: 10px;
+}
+.ivf-field textarea.input {
+  resize: vertical;
+}
+
+/* Investigation table (test · date · report) */
+.ivf-inv {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.ivf-inv-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) 1fr 1.6fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ivf-inv-row:last-child {
+  border-bottom: 0;
+}
+.ivf-inv-head {
+  background: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ivf-inv-label {
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ivf-inv .input {
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+/* Semen analysis grid */
+.ivf-semen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: auto;
+}
+.ivf-semen-row {
+  display: grid;
+  grid-template-columns: 24px 1.4fr repeat(6, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 620px;
+}
+.ivf-semen-head {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.ivf-semen-n {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ivf-semen .input {
+  padding: 5px 7px;
+  font-size: 13px;
+}
+
+/* Action bar */
+.ivf-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+}
+
+/* Template list */
+.ivf-template-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ivf-template-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+@media (max-width: 640px) {
+  .ivf-inv-row {
+    grid-template-columns: minmax(90px, 1.2fr) 1fr 1.3fr;
+  }
+}

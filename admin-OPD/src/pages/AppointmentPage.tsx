@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog, Loading, Modal } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
+import { isIvfDoctor } from '../lib/ivfCaseSheet';
 import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
 import { flushDraft } from '../lib/draftFlush';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
@@ -822,7 +823,13 @@ export default function AppointmentPage() {
         )}
         </aside>
 
-        {/* Prescription: record, type, handwrite or upload. */}
+        {/*
+          The prescription panel. For an IVF & Fertility doctor the IVF form is
+          one of its tabs (beside Handwrite and Upload) rather than a card of
+          its own: it is that doctor's prescription, not a second document, and
+          a second `.visit-main` sibling would land in the same grid cell and
+          draw on top of this one.
+        */}
         {a && !finishedWithoutRx && (
           <div className="card visit-main">
             <PrescriptionTabs
@@ -831,6 +838,13 @@ export default function AppointmentPage() {
               disabled={closed}
               flushRef={flushRef}
               onRecorderBusy={setRecorderBusy}
+              modes={
+                isIvfDoctor(a.doctor?.specialization)
+                  ? ['ivf', 'handwrite', 'upload']
+                  : undefined
+              }
+              patientName={a.patient_name}
+              patientAge={a.patient_age}
               patientChip={<RxPatient appointment={a} />}
               footer={
                 canAct ? (
