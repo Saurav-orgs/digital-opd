@@ -66,7 +66,7 @@ export function MyPlanCard() {
       )}
 
       <p className="my-plan-link">
-        <Link to="/billing">View invoices and past plans</Link>
+        <Link to="/subscription">View invoices and past plans</Link>
       </p>
     </div>
   );

@@ -16,6 +16,9 @@ import { Notification } from './notification.model';
 import { ConsultationSession } from './consultation-session.model';
 import { EPrescription } from './e-prescription.model';
 import { EPrescriptionMedicine } from './e-prescription-medicine.model';
+import { PrescriptionTemplate } from './prescription-template.model';
+import { PrescriptionTemplateMedicine } from './prescription-template-medicine.model';
+import { PrescriptionTemplateUsage } from './prescription-template-usage.model';
 import { MedicineCatalog } from './medicine-catalog.model';
 import { AiTrainingSample } from './ai-training-sample.model';
 import { AiUsageEvent } from './ai-usage-event.model';
@@ -47,6 +50,9 @@ export const models = [
   ConsultationSession,
   EPrescription,
   EPrescriptionMedicine,
+  PrescriptionTemplate,
+  PrescriptionTemplateMedicine,
+  PrescriptionTemplateUsage,
   MedicineCatalog,
   AiTrainingSample,
   AppSetting,
@@ -80,6 +86,9 @@ export {
   ConsultationSession,
   EPrescription,
   EPrescriptionMedicine,
+  PrescriptionTemplate,
+  PrescriptionTemplateMedicine,
+  PrescriptionTemplateUsage,
   MedicineCatalog,
   AiTrainingSample,
   AiUsageEvent,

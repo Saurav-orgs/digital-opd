@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { schedulesApi } from '../api/endpoints';
 import type { ScheduleEntry } from '../api/types';
@@ -26,7 +25,6 @@ const hhmm = (t: string) => t.slice(0, 5);
  * open for.
  */
 export default function DoctorSchedule() {
-  const navigate = useNavigate();
   const { can, user, isDoctor } = useAuth();
   const toast = useToast();
   const canEdit = can('opd_schedules', 'update');
@@ -86,13 +84,14 @@ export default function DoctorSchedule() {
     <>
       <div className="page-head">
         <div>
-          <h1>My schedule</h1>
+          <h1>My time slots</h1>
           <span className="muted">
             Add multiple sessions to one day for split OPD (e.g. morning &amp; evening).
           </span>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => navigate('/profile')}>Back</button>
+          {/* No Back: this is a menu item in its own right now, not a screen
+              reached from the profile form. */}
           {canEdit && (
             <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save schedule'}

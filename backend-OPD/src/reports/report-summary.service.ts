@@ -595,10 +595,86 @@ export class ReportSummaryService implements OnApplicationBootstrap {
     );
   }
 
-  /** Doctor-triggered rebuild of one visit's combined report summary. */
-  async retryConsolidation(appointmentId: string): Promise<Appointment> {
-    await this.consolidateForAppointment(appointmentId);
-    return (await this.appointmentModel.findByPk(appointmentId))!;
+  /**
+   * Generate this visit's AI summary — the doctor pressing "Generate summary
+   * with AI" (or "Regenerate") on the consultation.
+   *
+   * Uploads no longer queue a summary of their own, so this is the single entry
+   * point for the whole visit: summarise every report that is not already done,
+   * and let each per-report completion fold itself into the combined picture
+   * (`runOne` calls `consolidateForAppointment` when it finishes). When every
+   * report is already summarised — the "Regenerate" case — there is nothing to
+   * summarise, so the combined picture is simply rebuilt from what is there.
+   *
+   * Earlier this only consolidated the reports already marked `ready`. With
+   * generation now manual that meant a freshly uploaded (and therefore `idle`)
+   * report had no way to be summarised at all: the button rebuilt a combined
+   * summary from zero ready reports and cleared it, so nothing ever appeared.
+   */
+  async generateForAppointment(appointmentId: string): Promise<Appointment> {
+    const current = async () =>
+      (await this.appointmentModel.findByPk(appointmentId))!;
+    if (!this.enabled) return current();
+
+    const reports = await this.reportModel.findAll({
+      where: { appointment_id: appointmentId },
+      order: [['created_at', 'ASC']],
+    });
+
+    // Already-ready reports are left alone; one already in the lane must not be
+    // queued twice (see `enqueueReport`). What's left is what this run creates.
+    const toRun = reports.filter(
+      (r) =>
+        r.ai_summary_status !== AiJobStatus.READY && !this.inFlight.has(r.id),
+    );
+
+    // Nothing to summarise — every report is ready (a "Regenerate"), or the
+    // only outstanding ones are already running. Rebuild the combined picture
+    // from what's there; for a regenerate this re-asks the model.
+    if (toRun.length === 0) {
+      await this.consolidateForAppointment(appointmentId);
+      return current();
+    }
+
+    // Mark the work up-front, before the response returns: the jobs run one at
+    // a time, so without this a queued report would read `idle` until its turn
+    // and the doctor, seeing no change, would think the button did nothing.
+    await this.reportModel.update(
+      { ai_summary_status: AiJobStatus.PENDING, ai_summary_error: null } as any,
+      { where: { id: toRun.map((r) => r.id) } },
+    );
+    // The combined card follows the same cue, so it shows "working" rather than
+    // falling back to offering the button again while its inputs are generated.
+    await this.appointmentModel.update(
+      { reports_summary_status: AiJobStatus.PROCESSING, reports_summary_error: null } as any,
+      { where: { id: appointmentId } },
+    );
+
+    for (const report of toRun) {
+      // Not awaited: the model takes tens of seconds and the UI polls for the
+      // result. The file is fetched inside the job so the request returns at
+      // once rather than waiting on N downloads from storage.
+      void this.enqueueReport(report.id, async () => {
+        try {
+          const file = await this.downloadAsUpload(report);
+          await this.runOne(report.id, file);
+        } catch (err) {
+          // The stored file could not be read. Record it on the row so the
+          // doctor sees a reason and a Retry, not a report stuck summarising.
+          await this.reportModel.update(
+            {
+              ai_summary_status: AiJobStatus.FAILED,
+              ai_summary_error:
+                (err as Error).message || 'Could not read the report file.',
+            } as any,
+            { where: { id: report.id } },
+          );
+          await this.consolidateForAppointment(appointmentId);
+        }
+      });
+    }
+
+    return current();
   }
 
   // ── internals ──────────────────────────────────────────────
@@ -648,6 +724,15 @@ export class ReportSummaryService implements OnApplicationBootstrap {
         { where: { id: reportId } },
       );
       this.logger.warn(`Could not summarise report ${reportId}: ${message}`);
+      // Reconcile the visit's combined summary, exactly as the success path
+      // does. Without this a visit-level generate that put the combined status
+      // on "processing" would be stranded there — this report is no longer
+      // coming, so the card must settle on the reports that did succeed, or
+      // clear when none did, rather than poll "Combining…" for ever.
+      const failed = await this.reportModel.findByPk(reportId);
+      if (failed?.appointment_id) {
+        await this.consolidateForAppointment(failed.appointment_id);
+      }
     }
   }
 

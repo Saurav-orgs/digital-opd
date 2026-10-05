@@ -5,8 +5,7 @@ import { blockedNumbersApi } from '../api/endpoints';
 import type { BlockedNumber } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { ConfirmDialog, Empty, Loading } from '../components/ui';
-import { SearchIcon } from '../components/icons';
+import { ConfirmDialog, Empty, Loading, SearchField } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
 
@@ -32,6 +31,18 @@ function namesOf(b: BlockedNumber) {
  * out everywhere.
  */
 export default function BlockedNumbersPage() {
+  return <BlockedNumbers />;
+}
+
+/**
+ * The blocked list, as a page or inside a modal.
+ *
+ * The design opens this from the Patients header rather than from a menu
+ * item, so the same body has to work in a dialog — which has its own title
+ * and its own way out. `embedded` drops the page heading and the back link;
+ * nothing else differs, because it is the same screen either way.
+ */
+export function BlockedNumbers({ embedded }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
@@ -91,15 +102,27 @@ export default function BlockedNumbersPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Blocked Patients</h1>
-          <p className="muted">
-            These patients cannot book online with your clinic. They can still be
-            added as walk-ins at the front desk.
-          </p>
+      {embedded ? (
+        <p className="muted" style={{ margin: '0 0 12px', fontSize: 12.5 }}>
+          These patients cannot book online with your clinic. They can still be
+          added as walk-ins at the front desk.
+        </p>
+      ) : (
+        <div className="page-head">
+          <div>
+            {/* Reached from Patients rather than from a menu item, so the
+                route form needs its own way back. */}
+            <Link to="/patients" className="btn btn-sm btn-ghost" style={{ marginBottom: 6 }}>
+              ← Patients
+            </Link>
+            <h1>Blocked numbers</h1>
+            <p className="muted">
+              These patients cannot book online with your clinic. They can still
+              be added as walk-ins at the front desk.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {canEdit && (
         <div className="card" style={{ marginBottom: 16, maxWidth: 560 }}>
@@ -143,18 +166,12 @@ export default function BlockedNumbersPage() {
 
       <div className="list-panel">
         <div className="list-panel-head">
-          <div className="dash-search">
-            <span className="dash-search-icon" aria-hidden>
-              <SearchIcon size={17} />
-            </span>
-            <input
-              className="input"
-              type="search"
-              placeholder="Search blocked patients by name, number or ID…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search blocked patients by name, number or ID…"
+            label="Search blocked numbers"
+          />
         </div>
 
         {!data?.length ? (

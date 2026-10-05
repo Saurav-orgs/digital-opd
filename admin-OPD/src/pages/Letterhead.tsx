@@ -26,7 +26,39 @@ import { LEGACY_RATIO } from '../lib/letterhead';
  * the doctor row: they print only when there is no header image, so they
  * belong beside the image they stand in for.
  */
-export default function LetterheadPage() {
+/** `embedded` renders this as a Settings pane — see `Profile`. */
+/**
+ * The clinic address as one line, from whichever parts are filled in.
+ *
+ * A doctor who has never opened this form has everything in line 1 and the
+ * rest null; one who has filled the wizard in has six parts. Joining whatever
+ * is non-null prints both correctly, which is why the old free-text column
+ * was never re-parsed.
+ */
+function joinAddress(f: {
+  clinic_address: string;
+  clinic_address_line2: string;
+  clinic_city: string;
+  clinic_pincode: string;
+  clinic_state: string;
+  clinic_country: string;
+}): string {
+  return [
+    f.clinic_address,
+    f.clinic_address_line2,
+    [f.clinic_city, f.clinic_pincode].filter(Boolean).join(' '),
+    f.clinic_state,
+    // India is the default and prints as noise on an Indian letterhead.
+    f.clinic_country && f.clinic_country.trim().toLowerCase() !== 'india'
+      ? f.clinic_country
+      : '',
+  ]
+    .map((p) => (p ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
+export default function LetterheadPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isDoctor, can } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -40,12 +72,25 @@ export default function LetterheadPage() {
     enabled: isDoctor,
   });
 
-  const [form, setForm] = useState({ clinic_address: '', clinic_phone: '' });
+  const [form, setForm] = useState({
+    clinic_address: '',
+    clinic_address_line2: '',
+    clinic_city: '',
+    clinic_pincode: '',
+    clinic_state: '',
+    clinic_country: 'India',
+    clinic_phone: '',
+  });
 
   useEffect(() => {
     if (meQ.data) {
       setForm({
         clinic_address: meQ.data.clinic_address ?? '',
+        clinic_address_line2: meQ.data.clinic_address_line2 ?? '',
+        clinic_city: meQ.data.clinic_city ?? '',
+        clinic_pincode: meQ.data.clinic_pincode ?? '',
+        clinic_state: meQ.data.clinic_state ?? '',
+        clinic_country: meQ.data.clinic_country ?? 'India',
         clinic_phone: meQ.data.clinic_phone ?? '',
       });
     }
@@ -55,6 +100,11 @@ export default function LetterheadPage() {
     mutationFn: () =>
       doctorsApi.updateMe({
         clinic_address: form.clinic_address || undefined,
+        clinic_address_line2: form.clinic_address_line2 || undefined,
+        clinic_city: form.clinic_city || undefined,
+        clinic_pincode: form.clinic_pincode || undefined,
+        clinic_state: form.clinic_state || undefined,
+        clinic_country: form.clinic_country || undefined,
         clinic_phone: form.clinic_phone || undefined,
       }),
     onSuccess: () => {
@@ -93,11 +143,13 @@ export default function LetterheadPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>Letterhead</h1>
+          {!embedded && <h1>Letterhead</h1>}
           <span className="muted">This is what appears at the top of every prescription you issue.</span>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => navigate('/profile')}>My profile</button>
+          {!embedded && (
+            <button className="btn" onClick={() => navigate('/my-settings')}>My profile</button>
+          )}
           {canEdit && (
             <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save'}
@@ -162,16 +214,81 @@ export default function LetterheadPage() {
           )}
 
           <div className="card-title" style={{ marginTop: 4 }}>Details</div>
-          <Field label="Address">
-            <textarea
+          {/*
+            The address is six fields now, matching onboarding. It was one
+            textarea holding the whole thing, which is still what a doctor who
+            has never opened this form has in line 1 — nothing was re-parsed,
+            because splitting a free-text Indian address with a regex gets it
+            wrong often enough to print the wrong thing on a letterhead.
+          */}
+          <Field label="Address line 1">
+            <input
               className="input"
-              rows={2}
               disabled={!canEdit}
-              placeholder="2nd Floor, MG Road, Bengaluru 560001"
+              placeholder="2nd Floor, MG Road"
               value={form.clinic_address}
               onChange={(e) => setForm({ ...form, clinic_address: e.target.value })}
             />
           </Field>
+          <Field label="Address line 2">
+            <input
+              className="input"
+              disabled={!canEdit}
+              placeholder="Near Trinity Metro"
+              value={form.clinic_address_line2}
+              onChange={(e) => setForm({ ...form, clinic_address_line2: e.target.value })}
+            />
+          </Field>
+          <div className="form-row-2">
+            <Field label="City">
+              <input
+                className="input"
+                disabled={!canEdit}
+                placeholder="Bengaluru"
+                value={form.clinic_city}
+                onChange={(e) => setForm({ ...form, clinic_city: e.target.value })}
+              />
+            </Field>
+            <Field
+              label="PIN code"
+              error={
+                form.clinic_pincode && !/^\d{6}$/.test(form.clinic_pincode)
+                  ? 'A PIN code is 6 digits.'
+                  : undefined
+              }
+            >
+              <input
+                className="input"
+                inputMode="numeric"
+                maxLength={6}
+                disabled={!canEdit}
+                placeholder="560001"
+                value={form.clinic_pincode}
+                onChange={(e) =>
+                  setForm({ ...form, clinic_pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })
+                }
+              />
+            </Field>
+          </div>
+          <div className="form-row-2">
+            <Field label="State">
+              <input
+                className="input"
+                disabled={!canEdit}
+                placeholder="Karnataka"
+                value={form.clinic_state}
+                onChange={(e) => setForm({ ...form, clinic_state: e.target.value })}
+              />
+            </Field>
+            <Field label="Country">
+              <input
+                className="input"
+                disabled={!canEdit}
+                value={form.clinic_country}
+                onChange={(e) => setForm({ ...form, clinic_country: e.target.value })}
+              />
+            </Field>
+          </div>
           <Field label="Phone">
             <input
               className="input"
@@ -200,7 +317,7 @@ export default function LetterheadPage() {
               doctorName={doctorName}
               qualifications={me.qualifications || 'M.B.B.S.'}
               specialization={me.specialization || me.clinic_name || ''}
-              address={form.clinic_address || 'Address'}
+              address={joinAddress(form) || 'Address'}
               phone={form.clinic_phone}
             />
           </div>

@@ -67,6 +67,53 @@ export class RegisterDoctorDto {
   @MaxLength(300)
   clinic_address?: string;
 
+  /* ── The address, as the onboarding wizard asks for it ──────
+     `clinic_address` above is line 1. It still carries a whole free-text
+     address for anyone registering through an older client, which is why
+     nothing here is required. */
+  @ApiPropertyOptional({ example: 'Near Trinity Metro' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  clinic_address_line2?: string;
+
+  @ApiPropertyOptional({ example: 'Bengaluru' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_city?: string;
+
+  @ApiPropertyOptional({ example: '560001' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Please enter a 6-digit PIN code.' })
+  clinic_pincode?: string;
+
+  @ApiPropertyOptional({ example: 'Karnataka' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_state?: string;
+
+  @ApiPropertyOptional({ example: 'India' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_country?: string;
+
+  /** The council a registration number belongs to — see the doctor model. */
+  @ApiPropertyOptional({ example: 'Karnataka Medical Council' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  medical_council?: string;
+
+  @ApiPropertyOptional({ example: '+91 80 4123 4567' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  clinic_phone?: string;
+
   @ApiPropertyOptional({ example: 'Sunrise Family Clinic' })
   @IsOptional()
   @IsString()

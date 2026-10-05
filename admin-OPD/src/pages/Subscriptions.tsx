@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
-import { ConfirmDialog, Empty, Field, Loading, Modal } from '../components/ui';
+import { ConfirmDialog, Empty, Field, FloatingCta, Loading, Modal } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { daysLeft, inr, shortDate as date } from '../lib/money';
 import type { Subscription, SubscriptionStatus } from '../api/types';
@@ -115,9 +115,11 @@ export default function SubscriptionsPage() {
     <div>
       <div className="page-head">
         <h2>Subscriptions</h2>
-        <button className="btn btn-primary" onClick={() => setGranting(true)}>
-          Grant a plan
-        </button>
+        <FloatingCta>
+          <button className="btn btn-primary" onClick={() => setGranting(true)}>
+            Grant a plan
+          </button>
+        </FloatingCta>
       </div>
 
       {s && (

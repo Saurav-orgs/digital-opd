@@ -4,8 +4,9 @@ import { rolesApi } from '../api/endpoints';
 import type { Role } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { ActionMenuDropdown, Empty, Field, Loading, Modal } from '../components/ui';
+import { ActionMenuDropdown, Empty, Field, FloatingCta, Loading, Modal } from '../components/ui';
 import {
+  applyToggle,
   PermissionMatrix,
   useDefaultGrants,
   usePermissionRows,
@@ -33,7 +34,9 @@ export default function Roles() {
       <div className="page-head">
         <h1>Roles &amp; permissions</h1>
         {can('roles', 'create') && (
-          <button className="btn btn-primary" onClick={() => setEditing('new')}>+ Add role</button>
+          <FloatingCta>
+            <button className="btn btn-primary" onClick={() => setEditing('new')}>+ Add role</button>
+          </FloatingCta>
         )}
       </div>
 
@@ -172,13 +175,9 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
   // A new role starts with the defaults; an existing one opens with what it holds.
   useDefaultGrants(rows, !role, setSelected);
 
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // The grid's three columns are not independent — see `applyToggle`.
+  const toggle = (id: string, action: string) =>
+    setSelected((prev) => applyToggle(rows, prev, id, action));
 
   const save = useMutation({
     mutationFn: () => {

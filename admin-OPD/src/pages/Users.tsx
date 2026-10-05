@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  applyToggle,
   PermissionMatrix,
   useDefaultGrants,
   usePermissionRows,
@@ -12,7 +13,7 @@ import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { ActionMenuDropdown, Badge, Empty, Field, Loading, Modal, PasswordInput } from '../components/ui';
+import { ActionMenuDropdown, Badge, Empty, Field, FloatingCta, Loading, Modal, PasswordInput } from '../components/ui';
 
 /** The title the doctor gave them; nothing for a role the server named itself. */
 function roleTitle(u: User): string | null {
@@ -52,7 +53,9 @@ export default function Users() {
       <div className="page-head">
         <h1>My Team</h1>
         {can('users', 'create') && (
-          <button className="btn btn-primary" onClick={() => setEditing('new')}>+ Add team member</button>
+          <FloatingCta>
+            <button className="btn btn-primary" onClick={() => setEditing('new')}>+ Add team member</button>
+          </FloatingCta>
         )}
       </div>
 
@@ -241,13 +244,9 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
     new Set(user?.role?.permissions?.map((p) => p.id) ?? []),
   );
   useDefaultGrants(rows, !user, setSelected);
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // The grid's three columns are not independent — see `applyToggle`.
+  const toggle = (id: string, action: string) =>
+    setSelected((prev) => applyToggle(rows, prev, id, action));
 
   const save = useMutation({
     mutationFn: () => {

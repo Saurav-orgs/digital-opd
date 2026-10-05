@@ -14,6 +14,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PatientProfilesService } from './patient-profiles.service';
 import {
   PatientDetailsDto,
+  StaffCreatePatientDto,
+  StaffUpdatePatientDto,
   UpdatePatientProfileDto,
 } from './dto/patient-profile.dto';
 import { Public } from '../common/decorators/public.decorator';
@@ -64,6 +66,56 @@ export class StaffPatientProfilesController {
     // — the platform super admin — has no such list rather than everyone's.
     if (!user.doctorId) return [];
     return this.service.listForDoctor(user.doctorId, search);
+  }
+
+  /**
+   * The whole record: conditions, long-term medicines, every report and every
+   * visit. One request rather than the per-visit fetches the consultation's
+   * "previous visits" card makes, because this screen shows all of them.
+   */
+  @Get(':profileId/overview')
+  @ApiOperation({ summary: "One patient's full history, aggregated" })
+  @Permissions({
+    module: PermissionModule.PATIENTS,
+    action: PermissionAction.READ,
+  })
+  overview(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.overview(profileId, user);
+  }
+
+  @Post()
+  @ApiOperation({
+    summary:
+      'Register a patient from the clinic desk, without booking an appointment.',
+  })
+  @Permissions({
+    module: PermissionModule.PATIENTS,
+    action: PermissionAction.CREATE,
+  })
+  async create(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: StaffCreatePatientDto,
+  ) {
+    if (!user.doctorId) throw new AppException(ErrorCode.FORBIDDEN);
+    return this.service.createForDoctor(user.doctorId, dto);
+  }
+
+  @Patch(':profileId')
+  @ApiOperation({ summary: "Edit one of this clinic's patients" })
+  @Permissions({
+    module: PermissionModule.PATIENTS,
+    action: PermissionAction.UPDATE,
+  })
+  async update(
+    @CurrentUser() user: AuthUser,
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Body() dto: StaffUpdatePatientDto,
+  ) {
+    if (!user.doctorId) throw new AppException(ErrorCode.FORBIDDEN);
+    return this.service.updateForDoctor(user.doctorId, profileId, dto);
   }
 
   @Get('for-doctor/:doctorId')

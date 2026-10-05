@@ -35,6 +35,9 @@ import type {
   CheckoutSession,
   OrderStatus,
   Renewal,
+  PatientOverview,
+  PrescriptionTemplate,
+  TemplateInput,
 } from './types';
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -460,6 +463,39 @@ export const consultationApi = {
   },
 };
 
+/**
+ * Prescription templates. Guarded by the `appointments` permission module on
+ * the server — anyone who can write a prescription can use a template.
+ */
+export const templatesApi = {
+  list: (params: { scope?: 'builtin' | 'mine'; category?: string; q?: string } = {}) =>
+    api.get<PrescriptionTemplate[]>('/prescription-templates', { params }).then((r) => r.data),
+
+  categories: () =>
+    api.get<string[]>('/prescription-templates/categories').then((r) => r.data),
+
+  create: (body: TemplateInput) =>
+    api.post<PrescriptionTemplate>('/prescription-templates', body).then((r) => r.data),
+
+  /**
+   * Editing a built-in does not change the shared row — the server writes this
+   * clinic's own overriding copy and returns that, so the id in the response
+   * may differ from the one sent.
+   */
+  update: (id: string, body: Partial<TemplateInput>) =>
+    api.patch<PrescriptionTemplate>(`/prescription-templates/${id}`, body).then((r) => r.data),
+
+  /** Own templates only; on an edited built-in this restores the original. */
+  remove: (id: string) =>
+    api.delete<{ ok: boolean }>(`/prescription-templates/${id}`).then((r) => r.data),
+
+  /** Fills the visit's draft and returns it in the shape `prescription` returns. */
+  apply: (id: string, appointmentId: string) =>
+    api
+      .post<EPrescription>(`/prescription-templates/${id}/apply/${appointmentId}`)
+      .then((r) => r.data),
+};
+
 export const medicinesApi = {
   search: (q: string) =>
     api.get<MedicineCatalogEntry[]>('/medicines', { params: { q } }).then((r) => r.data),
@@ -541,6 +577,12 @@ export const reportsApi = {
 
 // ── Patients on a mobile number ──────────────────────────────
 export const patientProfilesApi = {
+  /** The whole record, aggregated — see PatientOverview. */
+  overview: (profileId: string) =>
+    api
+      .get<PatientOverview>(`/patient-profiles/${profileId}/overview`)
+      .then((r) => r.data),
+
   byMobile: (mobile: string) =>
     api
       .get<PatientProfile[]>('/patient-profiles/by-mobile', { params: { mobile } })
@@ -556,7 +598,33 @@ export const patientProfilesApi = {
     api
       .get<ClinicPatient[]>(`/patient-profiles/for-doctor/${doctorId}`, { params: { search } })
       .then((r) => r.data),
+  /**
+   * Register a patient from the clinic desk, without an appointment. The number
+   * is the account; the server creates it if new and enforces the 5-per-number
+   * cap. The duplicate warning is a client-side courtesy — see `byMobile`.
+   */
+  create: (body: StaffPatientInput) =>
+    api.post<ClinicPatient>('/patient-profiles', body).then((r) => r.data),
+  /** Edit one of this clinic's patients, including the clinical summary. */
+  update: (id: string, body: Partial<StaffPatientInput>) =>
+    api.patch<ClinicPatient>(`/patient-profiles/${id}`, body).then((r) => r.data),
 };
+
+/** What the desk's new-patient / edit form sends. Mobile is omitted on edit. */
+export interface StaffPatientInput {
+  mobile: string;
+  name: string;
+  gender?: string;
+  dob?: string;
+  relation?: string;
+  address_line?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  blood_group?: string;
+  conditions?: string[];
+  long_term_medicines?: string[];
+}
 
 // ── Blocked numbers ──────────────────────────────────────────
 // A clinic's own defence against nuisance bookings. Scoped per doctor: the

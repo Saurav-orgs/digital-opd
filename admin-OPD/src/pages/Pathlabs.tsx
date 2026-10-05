@@ -4,7 +4,7 @@ import { pathlabsApi } from '../api/endpoints';
 import type { User } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { Badge, Empty, Field, Loading, Modal, PasswordInput } from '../components/ui';
+import { Badge, Empty, Field, FloatingCta, Loading, Modal, PasswordInput } from '../components/ui';
 
 /** Pathlab login accounts — reports:create + reports:read only (see Reports page). */
 export default function Pathlabs() {
@@ -32,9 +32,11 @@ export default function Pathlabs() {
       <div className="page-head">
         <h1>Pathlabs</h1>
         {can('pathlabs', 'create') && (
-          <button className="btn btn-primary" onClick={() => setEditing('new')}>
-            + Add pathlab
-          </button>
+          <FloatingCta>
+            <button className="btn btn-primary" onClick={() => setEditing('new')}>
+              + Add pathlab
+            </button>
+          </FloatingCta>
         )}
       </div>
 

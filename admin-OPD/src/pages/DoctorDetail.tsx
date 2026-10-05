@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { doctorsApi, patientProfilesApi } from '../api/endpoints';
 import type { ClinicPatient } from '../api/types';
-import { Badge, Empty, InfoRow, Loading } from '../components/ui';
+import { Badge, Empty, InfoRow, Loading, SearchField } from '../components/ui';
 import { useToast } from '../components/Toast';
-import { PhoneIcon, SearchIcon } from '../components/icons';
+import { PhoneIcon } from '../components/icons';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { avatarTone, initials } from '../lib/avatar';
 import { ageOf, prettyDate, shortGender } from '../lib/patientFormat';
@@ -187,18 +187,12 @@ function DoctorPatients({ doctorId }: { doctorId: string }) {
   return (
     <div className="list-panel">
       <div className="list-panel-head row" style={{ justifyContent: 'space-between', gap: 12 }}>
-        <div className="dash-search" style={{ flex: 1 }}>
-          <span className="dash-search-icon" aria-hidden>
-            <SearchIcon size={17} />
-          </span>
-          <input
-            className="input"
-            type="search"
-            placeholder="Search by name, mobile number or patient ID…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </div>
+        <SearchField
+          value={searchInput}
+          onChange={setSearchInput}
+          placeholder="Search by name, mobile number or patient ID…"
+          label="Search patients"
+        />
         {data && (
           <span className="muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
             {rows.length} {search ? 'matching' : 'registered'}

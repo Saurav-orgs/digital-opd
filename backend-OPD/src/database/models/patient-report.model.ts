@@ -79,10 +79,14 @@ export class PatientReport extends Model<PatientReport> {
   @Column({ type: DataType.JSONB, allowNull: true })
   ai_summary: ReportAiSummary | null;
 
+  /**
+   * `idle` until the doctor asks for a summary — generation is no longer
+   * automatic on upload, so a new report is summarisable rather than queued.
+   */
   @Column({
     type: DataType.STRING,
     allowNull: false,
-    defaultValue: AiJobStatus.PENDING,
+    defaultValue: AiJobStatus.IDLE,
   })
   ai_summary_status: AiJobStatus;
 

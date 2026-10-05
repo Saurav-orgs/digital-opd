@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, consultationApi } from '../api/endpoints';
 import type { PrescriptionImage } from '../api/types';
@@ -56,10 +56,26 @@ export function PrescriptionTabs({
   disabled,
   flushRef,
   onRecorderBusy,
+  footer,
+  patientChip,
 }: {
   appointmentId: string;
   canEdit: boolean;
   disabled?: boolean;
+  /**
+   * Preview and Issue, pinned under whichever mode is showing.
+   *
+   * Here rather than inside `PrescriptionEditor` because a handwritten or
+   * uploaded prescription is issued the same way, and that editor renders in
+   * only two of the four modes.
+   */
+  footer?: ReactNode;
+  /**
+   * Who the prescription is for, between the mode tabs and the form — the
+   * place the design puts it, and the only patient detail on screen while
+   * the doctor is writing.
+   */
+  patientChip?: ReactNode;
   /** The recorder's own busy state (mic open, audio uploading), for the page's CTA. */
   onRecorderBusy?: (busy: boolean) => void;
   /*
@@ -149,35 +165,44 @@ export function PrescriptionTabs({
 
   return (
     <div>
-      {/* Four equal tiles in the design's own order — record first, because
-          dictating is what a doctor reaches for while the patient is still in
-          the chair, and upload last because it is the fallback. */}
-      <div className="rx-tabs">
-        <TabBtn
-          label="Record"
-          icon={<MicIcon size={18} />}
-          active={mode === 'voice'}
-          onClick={() => setMode('voice')}
-        />
-        <TabBtn
-          label="Type"
-          icon={<KeyboardIcon size={18} />}
-          active={mode === 'type'}
-          onClick={() => setMode('type')}
-        />
-        <TabBtn
-          label="Handwrite"
-          icon={<PenIcon size={18} />}
-          active={mode === 'handwrite'}
-          onClick={() => setMode('handwrite')}
-        />
-        <TabBtn
-          label={prescriptions.length > 0 ? `Upload (${prescriptions.length})` : 'Upload'}
-          icon={<UploadIcon size={18} />}
-          active={mode === 'upload'}
-          onClick={() => setMode('upload')}
-        />
+      {/*
+        The card's own header: the title, with the four modes as a segmented
+        control beside it. There was no header at all, and the modes were four
+        large stacked tiles across the full width — which read as the page's
+        primary navigation rather than as a choice of how to write this one
+        prescription. Order is the design's: Type, Record, Handwrite, Upload.
+      */}
+      <div className="rx-head">
+        <h3>Prescription</h3>
+        <div className="rx-modes">
+          <TabBtn
+            label="Type"
+            icon={<KeyboardIcon size={15} />}
+            active={mode === 'type'}
+            onClick={() => setMode('type')}
+          />
+          <TabBtn
+            label="Record"
+            icon={<MicIcon size={15} />}
+            active={mode === 'voice'}
+            onClick={() => setMode('voice')}
+          />
+          <TabBtn
+            label="Handwrite"
+            icon={<PenIcon size={15} />}
+            active={mode === 'handwrite'}
+            onClick={() => setMode('handwrite')}
+          />
+          <TabBtn
+            label={prescriptions.length > 0 ? `Upload (${prescriptions.length})` : 'Upload'}
+            icon={<UploadIcon size={15} />}
+            active={mode === 'upload'}
+            onClick={() => setMode('upload')}
+          />
+        </div>
       </div>
+
+      {patientChip}
 
       {mode === 'handwrite' && (
         <>
@@ -218,6 +243,7 @@ export function PrescriptionTabs({
                 appointmentId={appointmentId}
                 canEdit={canEdit}
                 flushRef={flushRef}
+                footerExtras={footer}
               />
             </>
           )}
@@ -226,7 +252,13 @@ export function PrescriptionTabs({
 
       {mode === 'type' && (
         <>
-          <PrescriptionEditor appointmentId={appointmentId} canEdit={canEdit} flushRef={flushRef} />
+          <PrescriptionEditor
+            appointmentId={appointmentId}
+            canEdit={canEdit}
+            flushRef={flushRef}
+            showTemplates
+            footerExtras={footer}
+          />
         </>
       )}
 
@@ -358,6 +390,19 @@ export function PrescriptionTabs({
               onClose={() => setCameraOpen(false)}
             />
           )}
+        </div>
+      )}
+
+      {/*
+        Handwrite and Upload have no editor to carry the footer, so they get
+        their own. In Type and Record it is handed to the editor instead, so
+        Clear, Save as template and Draft saved sit on the same line as
+        Preview and Issue — one row, as the design has it.
+      */}
+      {footer && (mode === 'handwrite' || mode === 'upload') && (
+        <div className="vfoot">
+          <div className="vfoot-grow" />
+          {footer}
         </div>
       )}
     </div>

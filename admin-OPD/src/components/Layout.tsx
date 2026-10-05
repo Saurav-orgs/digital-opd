@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { NAV, type NavIconName } from '../lib/nav';
+import {
+  NAV,
+  NAV_SECTION_LABEL,
+  type NavIconName,
+  type NavItem,
+  type NavSection,
+} from '../lib/nav';
 import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
 import { useCollapsible } from '../lib/collapsePreference';
 import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
 import { TOPBAR_SLOT_ID } from './TopbarPortal';
+import { Clock3, Settings, Zap } from 'lucide-react';
 import {
-  AccountIcon,
   BlockIcon,
   CalendarIcon,
   WalletIcon,
@@ -15,7 +21,6 @@ import {
   ChevronIcon,
   DocumentIcon,
   FlaskIcon,
-  GearIcon,
   HospitalIcon,
   PeopleIcon,
   ShieldIcon,
@@ -24,12 +29,20 @@ import {
 
 const NAV_ICON: Record<NavIconName, (props: { size?: string | number }) => JSX.Element> = {
   calendar: CalendarIcon,
+  // First of the lucide glyphs. CLAUDE.md puts new icons here rather than in
+  // `icons.tsx`, which is frozen pending the standards-plan icon migration;
+  // the redesign needs roughly twenty more, so this is where they land.
+  clock: (props) => <Clock3 size={props.size} strokeWidth={1.9} />,
+  // A bolt, as the design draws it — the same glyph the template menu
+  // uses for a built-in.
+  template: (props) => <Zap size={props.size} strokeWidth={1.9} />,
   people: PeopleIcon,
   block: BlockIcon,
   users: UserCogIcon,
   roles: ShieldIcon,
   hospital: HospitalIcon,
-  settings: GearIcon,
+  // The design's gear, from lucide like the rest of the new glyphs.
+  settings: (props) => <Settings size={props.size} strokeWidth={1.9} />,
   wallet: WalletIcon,
   receipt: ReceiptIcon,
   flask: FlaskIcon,
@@ -63,13 +76,32 @@ export default function Layout() {
   const items = NAV.filter(
     (n) =>
       !n.hidden &&
-      can(n.module, 'read') &&
+      // A self-service screen is about whoever is signed in, so being a doctor
+      // is the permission — see `NavItem.selfService`.
+      (n.selfService ? isDoctor : can(n.module, 'read')) &&
       (!n.superAdminOnly || isSuperAdmin) &&
       (!n.doctorOnly || !isSuperAdmin) &&
       // Staff the doctor added are `admin` accounts inside the tenant; what
       // the clinic pays for is not theirs to see.
       (!n.ownerOnly || user?.type === 'doctor'),
   );
+
+  /*
+    Grouped for the doctor, flat for the super admin.
+
+    The clinic menu splits into "Main menu" and "Practice" with Settings
+    pinned at the foot; the platform menu is six items and a heading over it
+    would be louder than the list. `ungrouped` is therefore not an "other"
+    bucket — it is the whole super-admin menu.
+  */
+  const ungrouped = items.filter((n) => !n.section);
+  const grouped = (Object.keys(NAV_SECTION_LABEL) as NavSection[])
+    .map((section) => ({
+      section,
+      label: NAV_SECTION_LABEL[section],
+      items: items.filter((n) => n.section === section),
+    }))
+    .filter((g) => g.items.length > 0);
 
   // On a phone the drawer is either open or off-canvas; "collapsed" is a
   // rail-only idea and would otherwise hide the labels inside the drawer.
@@ -105,38 +137,30 @@ export default function Layout() {
         </Link>
 
         <nav className="sidebar-items">
-          {items.map((n) => {
-            const Icon = NAV_ICON[n.icon];
-            return (
-              <NavLink
-                key={n.path}
-                to={n.path}
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                title={expanded ? undefined : n.label}
-              >
-                <Icon size={19} />
-                <span className="nav-label">{n.label}</span>
-              </NavLink>
-            );
-          })}
-          {isDoctor && (
-            // Lit for the profile and everything under it — schedule and the
-            // letterhead, which is reached from the profile rather than from
-            // its own menu item.
-            <NavLink
-              to="/profile"
-              className={() =>
-                `nav-item ${location.pathname.startsWith('/profile') ? 'active' : ''}`
-              }
-              title={expanded ? undefined : 'My profile'}
-            >
-              <AccountIcon size={19} />
-              <span className="nav-label">My profile</span>
-            </NavLink>
-          )}
+          {ungrouped.map((n) => (
+            <NavItemLink key={n.path} item={n} expanded={expanded} />
+          ))}
+          {grouped.map((g) => (
+            <Fragment key={g.section}>
+              {/* The foot group is pushed down rather than headed: Settings
+                  belongs at the bottom edge, not under a title. */}
+              {g.section === 'bottom' && <div className="spacer" />}
+              {g.label && expanded && <div className="nav-heading">{g.label}</div>}
+              {g.items.map((n) => (
+                <NavItemLink
+                  key={n.path}
+                  item={n}
+                  expanded={expanded}
+                  bottom={g.section === 'bottom'}
+                />
+              ))}
+            </Fragment>
+          ))}
         </nav>
 
-        <div className="spacer" />
+        {/* Only when nothing was pinned to the foot — otherwise the group
+            above brought its own. */}
+        {!grouped.some((g) => g.section === 'bottom') && <div className="spacer" />}
         <button
           className="btn btn-logout"
           title={expanded ? undefined : 'Sign out'}
@@ -177,5 +201,39 @@ export default function Layout() {
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * One sidebar row.
+ *
+ * Lit for the item's own path and for anything nested under it, so Settings
+ * stays lit while a tab is open and Appointments stays lit inside a
+ * consultation. `NavLink`'s own `end`-less matching would light `/` for
+ * everything, which is why the check is written out.
+ */
+function NavItemLink({
+  item,
+  expanded,
+  bottom,
+}: {
+  item: NavItem;
+  expanded: boolean;
+  /** The foot group — Settings — which the design draws as a card. */
+  bottom?: boolean;
+}) {
+  const location = useLocation();
+  const Icon = NAV_ICON[item.icon];
+  const active =
+    location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+  return (
+    <NavLink
+      to={item.path}
+      className={`nav-item ${active ? 'active' : ''} ${bottom ? 'is-bottom' : ''}`}
+      title={expanded ? undefined : item.label}
+    >
+      <Icon size={19} />
+      <span className="nav-label">{item.label}</span>
+    </NavLink>
   );
 }

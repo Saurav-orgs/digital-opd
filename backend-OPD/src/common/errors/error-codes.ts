@@ -37,6 +37,15 @@ export enum ErrorCode {
   PATIENT_NOT_FOUND = 'PATIENT_NOT_FOUND',
   PATIENT_EXISTS = 'PATIENT_EXISTS',
 
+  // Prescription templates
+  /**
+   * A template with neither a medicine nor advice. The rule spans two tables,
+   * so no CHECK constraint can hold it and the service says so instead.
+   */
+  TEMPLATE_EMPTY = 'TEMPLATE_EMPTY',
+  /** The doctor already has a template under this name. */
+  TEMPLATE_NAME_TAKEN = 'TEMPLATE_NAME_TAKEN',
+
   // Depended-on services. All of these are "come back in a moment", never
   // "something went wrong": the request was fine, something we call was not.
   /** The payment gateway could not be reached, or answered nonsense. */
@@ -160,6 +169,15 @@ export const ERROR_CATALOG: Record<
   [ErrorCode.PATIENT_EXISTS]: {
     status: HttpStatus.CONFLICT,
     message: 'An account with this mobile number already exists. Please login instead.',
+  },
+  [ErrorCode.TEMPLATE_EMPTY]: {
+    status: HttpStatus.BAD_REQUEST,
+    message:
+      'Add at least one medicine, or some advice, before saving this template.',
+  },
+  [ErrorCode.TEMPLATE_NAME_TAKEN]: {
+    status: HttpStatus.CONFLICT,
+    message: 'You already have a template with this name. Please pick another.',
   },
   [ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE]: {
     status: HttpStatus.SERVICE_UNAVAILABLE,

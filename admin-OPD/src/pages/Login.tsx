@@ -178,10 +178,15 @@ export default function Login() {
               >
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
-
-              <div className="muted" style={{ marginTop: 16, fontSize: 13, textAlign: 'center' }}>
-                New here? <Link to="/register">Register your practice</Link>
-              </div>
+              {/*
+                No "Register your practice" here. A practice is opened on the
+                landing site (plan → sign-up → payment) or set up by the
+                platform admin; a doctor who has paid signs in with the email
+                and password they chose and is routed into profile setup if the
+                clinic is not yet complete. Self-serve registration from the
+                login screen would create an unpaid account that the server
+                refuses anyway.
+              */}
             </form>
           </>
         )}

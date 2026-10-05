@@ -56,6 +56,13 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.STRING, allowNull: true })
   license_number: string | null;
 
+  /**
+   * The council a registration number belongs to. Each state council numbers
+   * independently, so the number alone does not identify a doctor.
+   */
+  @Column({ type: DataType.STRING(120), allowNull: true })
+  medical_council: string | null;
+
   /** S3 key of the practice licence / registration certificate. */
   @Column({ type: DataType.STRING, allowNull: true })
   license_file_key: string | null;
@@ -103,8 +110,31 @@ export class Doctor extends Model<Doctor> {
   @Column({ type: DataType.FLOAT, allowNull: true })
   letterhead_header_ratio: number | null;
 
+  /**
+   * Line 1 of the clinic address.
+   *
+   * It was the whole address as free text, and for every doctor who has not
+   * opened the new onboarding form it still is — nothing was re-parsed, so a
+   * long single line stays a long single line. The letterhead joins whichever
+   * of these parts are non-null, so both shapes print.
+   */
   @Column({ type: DataType.TEXT, allowNull: true })
   clinic_address: string | null;
+
+  @Column({ type: DataType.STRING(255), allowNull: true })
+  clinic_address_line2: string | null;
+
+  @Column({ type: DataType.STRING(80), allowNull: true })
+  clinic_city: string | null;
+
+  @Column({ type: DataType.STRING(10), allowNull: true })
+  clinic_pincode: string | null;
+
+  @Column({ type: DataType.STRING(80), allowNull: true })
+  clinic_state: string | null;
+
+  @Column({ type: DataType.STRING(80), allowNull: true, defaultValue: 'India' })
+  clinic_country: string | null;
 
   @Column({ type: DataType.STRING, allowNull: true })
   clinic_phone: string | null;
