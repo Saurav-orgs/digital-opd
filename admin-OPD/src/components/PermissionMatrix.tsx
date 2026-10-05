@@ -10,7 +10,25 @@ import {
 } from '../lib/nav';
 import { Loading } from './ui';
 
-const ACTIONS = ['create', 'read', 'update', 'delete'] as const;
+/**
+ * Three columns, not four.
+ *
+ * The grid rendered `create · read · update · delete`, which is the API's
+ * vocabulary rather than the doctor's. The design asks three questions — can
+ * this person *see* it, *add* to it, *change* it — and leaves deletion out
+ * entirely, because deleting a patient or a role is the account owner's to do
+ * and not something to hand around on a checkbox grid.
+ *
+ * `delete` is not rendered and never newly granted. A role that already holds
+ * it keeps it: the editor resubmits the ids it is holding, so an existing
+ * grant survives an edit it is not shown in — the same rule `nav.ts` records
+ * for modules hidden from this grid.
+ */
+const COLUMNS = [
+  { action: 'read', label: 'View' },
+  { action: 'create', label: 'Create' },
+  { action: 'update', label: 'Edit' },
+] as const;
 
 type ModuleRow = [string, Record<string, Permission>];
 
@@ -73,6 +91,50 @@ export function useDefaultGrants(
   }, [rows, seeded, setSelected]);
 }
 
+/**
+ * Apply a tick, keeping the module's three boxes coherent.
+ *
+ * Create and Edit imply View: a role that may add a patient but not see the
+ * list holds a permission that does nothing, and the grid should not let the
+ * doctor build one by accident. So ticking Create or Edit turns View on too,
+ * and clearing View clears all three.
+ *
+ * `delete` is never touched here. It has no column, and whatever a role
+ * already holds rides along untouched in `selected`.
+ */
+export function applyToggle(
+  rows: ModuleRow[],
+  selected: Set<string>,
+  id: string,
+  action: string,
+): Set<string> {
+  const next = new Set(selected);
+  const module = rows.find(([, actions]) =>
+    Object.values(actions).some((p) => p.id === id),
+  );
+  const actions = module?.[1] ?? {};
+  const idOf = (a: string) => actions[a]?.id;
+  const turningOn = !next.has(id);
+
+  if (turningOn) {
+    next.add(id);
+    if (action === 'create' || action === 'update') {
+      const read = idOf('read');
+      if (read) next.add(read);
+    }
+    return next;
+  }
+
+  next.delete(id);
+  if (action === 'read') {
+    for (const a of ['create', 'update']) {
+      const other = idOf(a);
+      if (other) next.delete(other);
+    }
+  }
+  return next;
+}
+
 /** The checkbox grid: one row per module, one column per action. */
 export function PermissionMatrix({
   rows,
@@ -83,16 +145,17 @@ export function PermissionMatrix({
   rows: ModuleRow[];
   loading: boolean;
   selected: Set<string>;
-  onToggle: (id: string) => void;
+  /** `action` lets the caller apply the View-implied-by-Create/Edit rule. */
+  onToggle: (id: string, action: string) => void;
 }) {
   if (loading) return <Loading />;
   return (
     <div className="matrix-scroll">
       <div className="checkbox-grid">
         <div />
-        {ACTIONS.map((a) => (
-          <div key={a} className="muted" style={{ textAlign: 'center', fontSize: 12 }}>
-            {a}
+        {COLUMNS.map((c) => (
+          <div key={c.action} className="muted" style={{ textAlign: 'center', fontSize: 12 }}>
+            {c.label}
           </div>
         ))}
         {rows.map(([module, actions]) => (
@@ -118,22 +181,31 @@ function MatrixRow({
   module: string;
   actions: Record<string, Permission>;
   selected: Set<string>;
-  toggle: (id: string) => void;
+  toggle: (id: string, action: string) => void;
 }) {
   return (
     <>
       <div className="mod">
         {MODULE_LABEL[module as PermModule] ?? module.replace('_', ' ')}
       </div>
-      {ACTIONS.map((a) => {
-        const perm = actions[a];
+      {COLUMNS.map((c) => {
+        const perm = actions[c.action];
+        const checked = !!perm && selected.has(perm.id);
         return (
-          <div key={a} style={{ textAlign: 'center' }}>
+          <div key={c.action} style={{ textAlign: 'center' }}>
             {perm ? (
               <input
                 type="checkbox"
-                checked={selected.has(perm.id)}
-                onChange={() => toggle(perm.id)}
+                aria-label={`${c.label} ${MODULE_LABEL[module as PermModule] ?? module}`}
+                checked={checked}
+                /*
+                 * Create and Edit imply View. Someone who can add a patient
+                 * but cannot see the list has a permission that does nothing,
+                 * and the grid should not let the doctor build one by
+                 * accident — so ticking either turns View on with it, and
+                 * untickng View turns both off.
+                 */
+                onChange={() => toggle(perm.id, c.action)}
               />
             ) : (
               <span className="muted">—</span>

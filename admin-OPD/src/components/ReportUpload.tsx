@@ -41,7 +41,10 @@ export function ReportUpload({
       reportsApi.uploadForAppointment(appointmentId, title.trim() || 'Report', file),
     onSuccess: () => {
       onUploaded();
-      toast.success('Report added', 'Summarising it in the background…');
+      // No summary is queued on upload any more — the doctor asks for it with
+      // "Generate summary with AI" on the visit. Promising a background summary
+      // here was the message that made its absence read as a bug.
+      toast.success('Report added', 'Use “Generate summary with AI” to summarise it.');
       close();
     },
     onError: (e) => toast.error(e),

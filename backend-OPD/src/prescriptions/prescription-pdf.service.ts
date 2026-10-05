@@ -7,16 +7,28 @@ import { Doctor } from '../database/models/doctor.model';
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { StorageService } from '../uploads/storage.service';
-import { HEADER_MIN_RATIO } from '../uploads/letterhead-image';
 import { DoctorsService } from '../doctors/doctors.service';
 import { PrescriptionMode } from '../common/enums';
+import {
+  COLOR,
+  CONTENT_W,
+  EnvClinic,
+  FOOTER_TOP,
+  HEADER_TOP,
+  MARGIN,
+  PAGE,
+  continuationPage,
+  doctorHeader,
+  fetchHeaderImage,
+  formatReadableDate,
+  formatWithCrossPrefix,
+  headerHeight,
+  headerRule,
+  imageHeader,
+  pageFurniture,
+  patientInfo,
+} from './prescription-pdf.layout';
 
-/** Layout constants for an A4 prescription. */
-const PAGE = { width: 595.28, height: 841.89 };
-const MARGIN = 44;
-const CONTENT_W = PAGE.width - MARGIN * 2;
-/** Where the per-page footer (separator, disclaimer, bottom bar) begins. */
-const FOOTER_TOP = PAGE.height - 75;
 /**
  * The "book your next visit" QR block is pinned to the bottom of the last
  * page, directly above the footer, rather than flowing after the body. This
@@ -43,80 +55,6 @@ interface Frame {
 function frameFor(print: boolean): Frame {
   const rebookTop = FOOTER_TOP - REBOOK_H - (print ? PRINT_FOOTER_LIFT : 0);
   return { rebookTop, bodyBottom: rebookTop - 12 };
-}
-/** Where the body resumes on a continuation page. */
-const CONTINUATION_Y = 56;
-/**
- * The box a doctor-uploaded header is drawn into: the full content width,
- * with the height that keeps the image's own proportions — a pad top dense
- * with clinic timings is as tall as it needs to be, a slim one takes less.
- * `HEADER_MIN_RATIO` caps it (a third of the width, ≈ 6 cm); the upload
- * refuses anything taller, so `fit` never has to shrink a header.
- */
-const HEADER_TOP = 40;
-const HEADER_MAX_H = CONTENT_W / HEADER_MIN_RATIO;
-/**
- * Headers uploaded before their shape was measured have no ratio on the
- * doctor and print in the box they always did.
- */
-const LEGACY_HEADER_H = 90;
-function headerHeight(doctor: Doctor): number {
-  const ratio = doctor.letterhead_header_ratio;
-  if (!ratio || ratio <= 0) return LEGACY_HEADER_H;
-  return Math.min(CONTENT_W / ratio, HEADER_MAX_H);
-}
-const COLOR = {
-  accent: '#1B6EF3', // vibrant royal blue accent bar
-  ink: '#111827',    // deep dark text / headers
-  text: '#374151',   // primary body text
-  muted: '#6B7280',  // secondary / instruction text
-  faint: '#9CA3AF',  // faint lines / borders
-  line: '#E5E7EB',   // light divider line
-  darkIcon: '#0F172A', // myFollowup icon background
-  cyanWave: '#38BDF8', // myFollowup wave color
-};
-
-/**
- * Formats a DATEONLY string (YYYY-MM-DD) into a human readable date (e.g. 17 August 2026).
- */
-function formatReadableDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  try {
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      const date = new Date(Date.UTC(year, month, day));
-      return date.toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        timeZone: 'UTC',
-      });
-    }
-    const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-    }
-  } catch (_) {}
-  return dateStr;
-}
-
-/**
- * Formats a prefix "X " cleanly without duplicating "X " or "x ".
- */
-function formatWithCrossPrefix(val: string | null | undefined): string {
-  if (!val || !val.trim()) return '';
-  const trimmed = val.trim();
-  if (/^[xX]\s+/i.test(trimmed)) {
-    return trimmed;
-  }
-  return `X ${trimmed}`;
 }
 
 @Injectable()
@@ -170,15 +108,17 @@ export class PrescriptionPdfService {
       // issued copy. Sized from the stored ratio — the image is not fetched.
       y = HEADER_TOP + headerHeight(doctor) + 12;
     } else {
-      const headerImage = letterhead ? await this.fetchHeaderImage(doctor) : null;
+      const headerImage = letterhead
+        ? await fetchHeaderImage(this.storage, doctor, this.logger)
+        : null;
       y = headerImage
-        ? this.imageHeader(doc, headerImage, headerHeight(doctor))
-        : this.doctorHeader(doc, doctor, letterhead);
+        ? imageHeader(doc, headerImage, headerHeight(doctor), this.logger)
+        : doctorHeader(doc, doctor, this.envClinic(), letterhead);
     }
-    y = this.headerRule(doc, y, letterhead);
+    y = headerRule(doc, y, letterhead);
 
     // Render patient name & date row
-    y = this.patientInfo(doc, appointment, y);
+    y = patientInfo(doc, appointment, y);
 
     if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
       const drawing = await this.fetchHandwriting(prescription);
@@ -196,188 +136,22 @@ export class PrescriptionPdfService {
 
     // Render footer & furniture on all pages — not on the print copy, whose
     // pad carries its own.
-    if (letterhead) this.pageFurniture(doc);
+    if (letterhead) pageFurniture(doc);
 
     doc.end();
     return done;
   }
 
-  // ── Accent Line ────────────────────────────────────────────
-  private accentBar(doc: PDFKit.PDFDocument, y: number): void {
-    doc.save().rect(MARGIN, y, CONTENT_W, 4.5).fill(COLOR.accent).restore();
-  }
-
-  /** The bar under the doctor's details on the first page. */
-  private headerRule(doc: PDFKit.PDFDocument, y: number, paint = true): number {
-    if (paint) this.accentBar(doc, y);
-    return y + 4.5 + 22;
-  }
-
-  /**
-   * A continuation page: no letterhead to rule under, so the bar sits at the
-   * top to keep the page framed the same way as the first.
-   */
-  private continuationPage(doc: PDFKit.PDFDocument): number {
-    doc.addPage();
-    this.accentBar(doc, 36);
-    return CONTINUATION_Y;
-  }
-
-  // ── Uploaded Header ────────────────────────────────────────
-  /**
-   * The doctor's own header image across the content width, `height` tall
-   * (see `headerHeight`). `fit` only matters for a legacy header whose box
-   * was not sized to it; a measured one fills the box exactly.
-   */
-  private imageHeader(doc: PDFKit.PDFDocument, image: Buffer, height: number): number {
-    try {
-      doc.image(image, MARGIN, HEADER_TOP, {
-        fit: [CONTENT_W, height],
-        valign: 'center',
-      });
-    } catch (err) {
-      this.logger.warn(`Could not embed the letterhead header: ${(err as Error).message}`);
-    }
-    return HEADER_TOP + height + 12;
-  }
-
-  /**
-   * Best-effort: a missing or unreadable image falls back to the composed
-   * header rather than failing the prescription.
-   */
-  private async fetchHeaderImage(doctor: Doctor): Promise<Buffer | null> {
-    if (!doctor.letterhead_header_key) return null;
-    try {
-      return await this.storage.download(doctor.letterhead_header_key);
-    } catch (err) {
-      this.logger.warn(`Could not fetch the letterhead header: ${(err as Error).message}`);
-      return null;
-    }
-  }
-
-  // ── Doctor Header ──────────────────────────────────────────
-  /**
-   * With `paint` off the header is laid out but not drawn, so the page below
-   * it sits exactly where it would with the header present.
-   */
-  private doctorHeader(
-    doc: PDFKit.PDFDocument,
-    doctor: Doctor,
-    paint = true,
-  ): number {
-    const envClinic = this.config.get<{
-      name: string;
-      address: string;
-      phone: string;
-      email: string;
-    }>('clinic') || { name: '', address: '', phone: '', email: '' };
-
-    const topY = 44;
-    const halfW = (CONTENT_W - 20) / 2;
-
-    // Draws, or only measures: either way `doc.y` ends up where the text does.
-    const text = (str: string, x: number, y: number, o: PDFKit.Mixins.TextOptions) => {
-      if (paint) {
-        doc.text(str, x, y, o);
-      } else {
-        doc.y = y + doc.heightOfString(str, o);
+  /** The clinic fallbacks the composed header reads when the doctor set none. */
+  private envClinic(): EnvClinic {
+    return (
+      this.config.get<EnvClinic>('clinic') || {
+        name: '',
+        address: '',
+        phone: '',
+        email: '',
       }
-    };
-
-    // Doctor Name on Left
-    let docName = doctor.name || 'Doctor';
-    if (!docName.toLowerCase().startsWith('dr.') && !docName.toLowerCase().startsWith('dr ')) {
-      docName = `Dr. ${docName}`;
-    }
-
-    doc.fillColor(COLOR.ink).font('Helvetica-Bold').fontSize(15.5);
-    text(docName, MARGIN, topY, { width: halfW });
-
-    let leftY = doc.y + 3;
-
-    // Qualifications
-    if (doctor.qualifications?.trim()) {
-      doc.font('Helvetica').fontSize(10).fillColor(COLOR.text);
-      text(doctor.qualifications.trim(), MARGIN, leftY, { width: halfW });
-      leftY = doc.y + 2;
-    }
-
-    // Specialization / Subtitle
-    const spec = doctor.specialization || doctor.clinic_name;
-    if (spec?.trim()) {
-      doc.font('Helvetica').fontSize(9.5).fillColor(COLOR.muted);
-      text(spec.trim(), MARGIN, leftY, { width: halfW });
-      leftY = doc.y;
-    }
-
-    // Right Column: Address / Clinic contact
-    const address = doctor.clinic_address || envClinic.address || doctor.clinic_name || 'Address';
-    const contactLines = [address, doctor.clinic_phone || envClinic.phone]
-      .filter(Boolean)
-      .join('\n');
-
-    const rightX = MARGIN + halfW + 20;
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR.ink);
-    text(contactLines, rightX, topY, {
-      width: halfW,
-      align: 'right',
-      lineGap: 2,
-    });
-
-    const rightY = doc.y;
-    return Math.max(leftY, rightY) + 14;
-  }
-
-  // ── Patient Info & Date ────────────────────────────────────
-  private patientInfo(
-    doc: PDFKit.PDFDocument,
-    appt: Appointment,
-    y: number,
-  ): number {
-    const halfW = (CONTENT_W - 20) / 2;
-
-    // Left Column: Patient Name & details
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(13.5)
-      .fillColor(COLOR.ink)
-      .text('Patient Name', MARGIN, y, { width: halfW });
-
-    const patientY = doc.y + 3;
-
-    const details: string[] = [];
-    if (appt.patient_age != null) {
-      details.push(`${appt.patient_age} yrs`);
-    }
-    if (appt.patient_gender) {
-      const g = appt.patient_gender.trim();
-      const gInitial = g.charAt(0).toUpperCase();
-      details.push(gInitial === 'M' ? 'M' : gInitial === 'F' ? 'F' : g);
-    }
-
-    const patientDisplay = details.length > 0
-      ? `${appt.patient_name} (${details.join(', ')})`
-      : appt.patient_name;
-
-    doc
-      .font('Helvetica')
-      .fontSize(11)
-      .fillColor(COLOR.text)
-      .text(patientDisplay, MARGIN, patientY, { width: halfW });
-
-    // Right Column: Formatted Date
-    const formattedDate = formatReadableDate(appt.appointment_date);
-    const rightX = MARGIN + halfW + 20;
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(11)
-      .fillColor(COLOR.ink)
-      .text(formattedDate, rightX, patientY, {
-        width: halfW,
-        align: 'right',
-      });
-
-    return Math.max(doc.y, patientY + 16) + 24;
+    );
   }
 
   // ── Diagnosis ──────────────────────────────────────────────
@@ -478,7 +252,7 @@ export class PrescriptionPdfService {
 
     meds.forEach((m, idx) => {
       // Check for page overflow before rendering row
-      if (y > frame.bodyBottom - 40) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 40) y = continuationPage(doc);
 
       const medicineName = [m.medicine_name, m.strength].filter(Boolean).join(' ');
       const title = `${idx + 1}. ${medicineName.toUpperCase()}`;
@@ -564,7 +338,7 @@ export class PrescriptionPdfService {
     // it apart from the medicine rows above.
     if (p.advice?.trim()) {
       y += 10;
-      if (y > frame.bodyBottom - 60) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 60) y = continuationPage(doc);
       doc
         .font('Helvetica-Bold')
         .fontSize(12)
@@ -580,7 +354,7 @@ export class PrescriptionPdfService {
 
     // Follow-up Date
     if (p.follow_up_date) {
-      if (y > frame.bodyBottom - 24) y = this.continuationPage(doc);
+      if (y > frame.bodyBottom - 24) y = continuationPage(doc);
       const formattedFollowUp = formatReadableDate(p.follow_up_date);
       doc
         .font('Helvetica-Bold')
@@ -665,7 +439,7 @@ export class PrescriptionPdfService {
     // Pinned to the foot of the page, above the footer furniture. A new page
     // is started only if the body genuinely ran into that space; `pageFurniture`
     // runs after this and covers whichever page we end on.
-    if (y > frame.bodyBottom) this.continuationPage(doc);
+    if (y > frame.bodyBottom) continuationPage(doc);
     y = frame.rebookTop;
 
     const qrSize = 64;
@@ -729,38 +503,4 @@ export class PrescriptionPdfService {
     }
   }
 
-  // ── Per-page Furniture (Footer, Separator, Disclaimer, Bottom Accent) ─────
-  private pageFurniture(doc: PDFKit.PDFDocument): void {
-    const range = doc.bufferedPageRange();
-    for (let i = range.start; i < range.start + range.count; i++) {
-      doc.switchToPage(i);
-
-      // 1. Separator thin line
-      const divY = FOOTER_TOP;
-      doc
-        .save()
-        .moveTo(MARGIN, divY)
-        .lineTo(PAGE.width - MARGIN, divY)
-        .lineWidth(0.5)
-        .strokeColor(COLOR.line)
-        .stroke()
-        .restore();
-
-      // 2. Digitally signed prescription disclaimer
-      const disclaimerY = PAGE.height - 60;
-      doc
-        .font('Helvetica-Oblique')
-        .fontSize(9)
-        .fillColor(COLOR.muted)
-        .text(
-          '*This is a digitally signed prescription and does not require signature.*',
-          MARGIN,
-          disclaimerY,
-          { width: CONTENT_W, align: 'center' },
-        );
-
-      // 3. Bottom blue accent line
-      this.accentBar(doc, PAGE.height - 40);
-    }
-  }
 }

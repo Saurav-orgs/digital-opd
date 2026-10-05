@@ -7,13 +7,15 @@ import Dashboard from './pages/Dashboard';
 import DoctorSchedule from './pages/DoctorSchedule';
 import Users from './pages/Users';
 import Roles from './pages/Roles';
-import Profile from './pages/Profile';
 import Pathlabs from './pages/Pathlabs';
 import Reports from './pages/Reports';
 import AppointmentPage from './pages/AppointmentPage';
 import PatientHistoryPage from './pages/PatientHistoryPage';
 import DoctorsPage from './pages/Doctors';
 import SettingsPage from './pages/Settings';
+import MySettingsPage from './pages/MySettings';
+import TemplatesPage from './pages/Templates';
+import DoctorSetupPage from './pages/DoctorSetup';
 import PlansPage from './pages/Plans';
 import SubscriptionsPage from './pages/Subscriptions';
 import PaymentLogPage from './pages/PaymentLog';
@@ -22,7 +24,6 @@ import BlockedNumbersPage from './pages/BlockedNumbers';
 import PatientsPage from './pages/Patients';
 import PatientDetailPage from './pages/PatientDetail';
 import DoctorRegisterPage from './pages/DoctorRegister';
-import LetterheadPage from './pages/Letterhead';
 import DoctorDetailPage from './pages/DoctorDetail';
 import ForgotPassword from './pages/ForgotPassword';
 import ChangePasswordPage from './pages/ChangePassword';
@@ -49,7 +50,9 @@ function SetupRoute() {
   if (!user) return <Navigate to="/login" replace />;
   if (mustChangePassword) return <Navigate to="/change-password" replace />;
   if (!needsSetup) return <Navigate to="/" replace />;
-  return <DoctorRegisterPage mode="setup" />;
+  // The wizard is its own component now — see DoctorSetup.tsx for why it is
+  // not a fourth stage inside the public registration form.
+  return <DoctorSetupPage />;
 }
 
 /** The forced password change. Only reachable while the flag is set. */
@@ -66,7 +69,7 @@ function Home() {
   const { can, isDoctor, isSuperAdmin } = useAuth();
   if (isSuperAdmin) return <Navigate to="/doctors" replace />;
   if (can('appointments', 'read')) return <Navigate to="/dashboard" replace />;
-  if (isDoctor) return <Navigate to="/profile" replace />;
+  if (isDoctor) return <Navigate to="/my-settings" replace />;
   if (can('reports', 'read')) return <Navigate to="/reports" replace />;
   return <Navigate to="/dashboard" replace />;
 }
@@ -95,9 +98,23 @@ export default function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/users" element={<Users />} />
         <Route path="/roles" element={<Roles />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/profile/schedule" element={<DoctorSchedule />} />
-        <Route path="/profile/letterhead" element={<LetterheadPage />} />
+        {/*
+          The doctor's own settings. `/profile` and `/profile/letterhead` were
+          two separate screens; they are tabs now. The old paths redirect
+          rather than 404, because they are in browser histories, in the
+          onboarding emails and in at least one support reply.
+        */}
+        <Route path="/my-settings" element={<MySettingsPage />} />
+        <Route path="/my-settings/:tab" element={<MySettingsPage />} />
+        <Route path="/profile" element={<Navigate to="/my-settings" replace />} />
+        <Route
+          path="/profile/letterhead"
+          element={<Navigate to="/my-settings/letterhead" replace />}
+        />
+        {/* Consulting hours, promoted out from under the profile form. */}
+        <Route path="/time-slots" element={<DoctorSchedule />} />
+        <Route path="/templates" element={<TemplatesPage />} />
+        <Route path="/profile/schedule" element={<Navigate to="/time-slots" replace />} />
         <Route path="/appointments/:id" element={<AppointmentPage />} />
         <Route path="/appointments/:id/history" element={<PatientHistoryPage />} />
         <Route path="/doctors" element={<DoctorsPage />} />
@@ -106,7 +123,9 @@ export default function App() {
         <Route path="/plans" element={<PlansPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/payment-log" element={<PaymentLogPage />} />
-        <Route path="/billing" element={<BillingPage />} />
+        {/* Named for what the doctor came to do. */}
+        <Route path="/subscription" element={<BillingPage />} />
+        <Route path="/billing" element={<Navigate to="/subscription" replace />} />
         <Route path="/blocked-numbers" element={<BlockedNumbersPage />} />
         <Route path="/patients" element={<PatientsPage />} />
         <Route path="/patients/:profileId" element={<PatientDetailPage />} />

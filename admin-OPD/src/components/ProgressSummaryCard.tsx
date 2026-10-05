@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { reportsApi } from '../api/endpoints';
 import { useToast } from '../components/Toast';
 import { useCollapsible } from '../lib/collapsePreference';
+import { AiDisclaimer } from './AiDisclaimer';
 import { CollapseToggle } from './CollapseToggle';
 import { SparkleIcon } from './icons';
 import type {
@@ -50,13 +51,15 @@ export function ProgressSummaryCard({
     mutationFn: () => reportsApi.retryProgress(appointmentId),
     onSuccess: () => {
       onChanged();
-      toast.success('Rebuilding the comparison…');
+      toast.success('Comparing against the previous visit…');
     },
     onError: (e) => toast.error(e),
   });
 
   // status null = no earlier visit to compare against (a first visit).
   if (!status) return null;
+
+  const idle = status === 'idle';
 
   return (
     <div className="ai-box">
@@ -109,7 +112,7 @@ export function ProgressSummaryCard({
               disabled={retry.isPending}
               onClick={() => retry.mutate()}
             >
-              {retry.isPending ? 'Refreshing…' : 'Refresh'}
+              {retry.isPending ? 'Regenerating…' : 'Regenerate'}
             </button>
           </div>
         )}
@@ -118,7 +121,20 @@ export function ProgressSummaryCard({
       {collapsed ? null : (
         <>
 
-      {status === 'processing' || status === 'pending' ? (
+      {idle ? (
+        <div className="ai-idle">
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            No comparison with the previous visit yet.
+          </span>
+          <button
+            className="btn btn-sm"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate()}
+          >
+            {retry.isPending ? 'Generating…' : 'Compare with AI'}
+          </button>
+        </div>
+      ) : status === 'processing' || status === 'pending' ? (
         <span className="muted" style={{ fontSize: 12.5 }}>
           Comparing against the previous visit…
         </span>
@@ -150,7 +166,10 @@ export function ProgressSummaryCard({
           onCancel={() => setEditing(false)}
         />
       ) : (
-        <ProgressBody summary={summary} />
+        <>
+          <ProgressBody summary={summary} />
+          <AiDisclaimer />
+        </>
       )}
         </>
       )}

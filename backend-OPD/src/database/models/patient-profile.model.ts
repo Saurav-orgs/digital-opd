@@ -67,6 +67,33 @@ export class PatientProfile extends Model<PatientProfile> {
   @Column({ type: DataType.STRING(6), allowNull: true })
   pincode: string | null;
 
+  // ── Clinical summary the clinic keeps by hand ──────────────
+  // What the profile screen's "Clinical summary" card shows and the new-patient
+  // form captures. Distinct from the conditions the overview endpoint *derives*
+  // from issued prescriptions: that is a read of what was diagnosed, this is
+  // what a human recorded. JSONB arrays of plain strings — the shape the UI
+  // holds them in, written and read whole.
+
+  @Column({ type: DataType.STRING(8), allowNull: true })
+  blood_group: string | null;
+
+  @Column({ type: DataType.JSONB, allowNull: false, defaultValue: [] })
+  conditions: string[];
+
+  @Column({ type: DataType.JSONB, allowNull: false, defaultValue: [] })
+  long_term_medicines: string[];
+
+  /**
+   * The clinic that registered this profile from its own desk, if any.
+   *
+   * The clinic patient list is otherwise scoped by appointment — you are a
+   * clinic's patient because you were seen there. A patient the desk registers
+   * has not been seen yet, so this is what keeps them on the list until their
+   * first visit. Null for a profile created by public booking or the app.
+   */
+  @Column({ type: DataType.UUID, allowNull: true })
+  registered_by_doctor_id: string | null;
+
   /** Set instead of deleting once the patient has a completed OPD. */
   @Column({ type: DataType.DATE, allowNull: true })
   archived_at: Date | null;

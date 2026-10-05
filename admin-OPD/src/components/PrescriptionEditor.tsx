@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { consultationApi, medicinesApi } from '../api/endpoints';
 import type { EPrescription, PrescriptionMedicine } from '../api/types';
@@ -9,20 +9,19 @@ import { TrashIcon } from './icons';
 import { PrintPrescriptionButton, WhatsAppPrescriptionButton } from './PrescriptionPreview';
 import { ApiError } from '../api/client';
 import { shareFile } from '../lib/shareFile';
-import { formatDuration, parseDuration } from '../lib/duration';
-import {
-  buildMedicineIndex,
-  checkMedicine,
-  emptyIndex,
-  suggestNames,
-  type MedicineIndex,
-} from '../lib/medicineCheck';
+import { formatDuration } from '../lib/duration';
+import { MedicineHead, MedicineRow } from './MedicineRow';
+import { TemplatePicker } from './TemplatePicker';
+import { TemplateEditor } from './TemplateEditor';
+import { templatesApi } from '../api/endpoints';
+import type { PrescriptionTemplate } from '../api/types';
+import { matchesExisting, worthSaving } from '../lib/templateSignature';
+import { buildMedicineIndex, emptyIndex, type MedicineIndex } from '../lib/medicineCheck';
 import {
   errorsFromApiDetails,
   hasErrors,
   noErrors,
   validatePrescription,
-  type MedicineField,
   type PrescriptionErrors,
 } from '../lib/prescriptionValidation';
 
@@ -72,31 +71,8 @@ function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
 }
 
 /*
- * A doctor writes "Dolo 650mg", not a name in one box and a strength in
- * another. The stored shape keeps the two apart — the prescription PDF, the
- * medicine catalogue and the AI draft all read `strength` on its own — so the
- * single field is presentation only: joined for display, split again on every
- * keystroke.
+ * See `lib/medicineName.ts` — shared with the template editor.
  */
-
-/** A trailing dose: a number and a unit, plus anything after it ("weekly"). */
-const DOSE_SUFFIX = /\s+(\d+(?:\.\d+)?\s*(?:(?:mcg|mg|g|ml|iu|units?)\b|%).*)$/i;
-
-function joinMedicine(name: string, strength?: string | null): string {
-  return [name, strength].map((p) => (p ?? '').trim()).filter(Boolean).join(' ');
-}
-
-function splitMedicine(value: string): { medicine_name: string; strength: string } {
-  const match = DOSE_SUFFIX.exec(value);
-  // No recognisable dose yet — mid-typing "Dolo 65" is all name, and becomes
-  // name + strength the moment the unit lands. What is displayed never changes
-  // under the doctor either way, because display is the two joined back up.
-  if (!match) return { medicine_name: value, strength: '' };
-  return {
-    medicine_name: value.slice(0, match.index).trim(),
-    strength: match[1].trim(),
-  };
-}
 
 /*
  * A row in the editor is a medicine plus a key of its own. The server's id
@@ -158,11 +134,21 @@ export function PrescriptionEditor({
   appointmentId,
   canEdit,
   flushRef,
+  showTemplates,
+  footerExtras,
 }: {
   appointmentId: string;
   canEdit: boolean;
   /** Lets the Preview step save these fields before it renders. */
   flushRef?: DraftFlushRef;
+  /**
+   * Offer templates. Type mode only: in Record mode the doctor is dictating,
+   * and a menu that replaces what they just said is in the way rather than to
+   * hand.
+   */
+  showTemplates?: boolean;
+  /** The visit's own actions — Preview and Issue — placed in this footer. */
+  footerExtras?: ReactNode;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -538,6 +524,75 @@ export function PrescriptionEditor({
   };
 
   const data = prescriptionQ.data;
+  /* ── Templates ──────────────────────────────────────────────
+     Applying replaces the draft server-side and hands back the prescription
+     in the shape this query already holds, so the result is adopted directly
+     instead of being refetched — a refetch would race the autosave and could
+     land the old draft back on top of the template. */
+  const [pendingTemplate, setPendingTemplate] = useState<PrescriptionTemplate | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+
+  const templatesQ = useQuery({
+    queryKey: ['templates'],
+    queryFn: () => templatesApi.list(),
+    staleTime: 60 * 1000,
+    enabled: !!showTemplates,
+  });
+  const categoriesQ = useQuery({
+    queryKey: ['template-categories'],
+    queryFn: () => templatesApi.categories(),
+    staleTime: 60 * 1000,
+    enabled: !!showTemplates,
+  });
+
+  const applyTemplate = useMutation({
+    mutationFn: (t: PrescriptionTemplate) => {
+      // Nothing half-typed should be saved on top of what is about to replace
+      // it, and the server write must not race a queued autosave.
+      cancelPendingAutosave();
+      return templatesApi.apply(t.id, appointmentId);
+    },
+    onSuccess: (next, t) => {
+      qc.setQueryData(['prescription', appointmentId], next);
+      adoptedRef.current = fingerprint(next);
+      setDirty(false);
+      setErrors(noErrors());
+      setForm({
+        diagnosis: next.diagnosis ?? '',
+        previous_history: next.previous_history ?? '',
+        advice: next.advice ?? '',
+        follow_up_date: next.follow_up_date ?? '',
+      });
+      if (next.previous_history?.trim()) setHistoryOpen(true);
+      setRows(withKeys(next.medicines));
+      setApplied(t.name);
+      setPendingTemplate(null);
+      qc.invalidateQueries({ queryKey: ['templates'] });
+    },
+    onError: (e) => {
+      setPendingTemplate(null);
+      toast.error(e instanceof ApiError ? e : 'Could not apply the template.');
+    },
+  });
+
+  /**
+   * Picking a template when the draft already has medicines asks first. The
+   * prototype has no guard here; on a phone an accidental tap on a menu row
+   * would wipe a prescription that had just been written.
+   */
+  const pickTemplate = (t: PrescriptionTemplate) => {
+    const written = latestRef.current.rows.some((r) => r.medicine_name.trim());
+    if (written) setPendingTemplate(t);
+    else applyTemplate.mutate(t);
+  };
+
+  /** Something here, and nothing saved that already says it. */
+  const canSaveAsTemplate =
+    !!showTemplates &&
+    worthSaving(rows, form.advice) &&
+    !matchesExisting(rows, form.advice, templatesQ.data ?? []);
+
   const issued = data?.status === 'issued';
 
   if (prescriptionQ.isLoading) {
@@ -702,6 +757,22 @@ export function PrescriptionEditor({
         )
       )}
 
+      {showTemplates && canEdit && (
+        <div className="rx-tpl-bar">
+          <TemplatePicker disabled={applyTemplate.isPending} onPick={pickTemplate} />
+          {/*
+            Inline rather than a toast: the thing to check is the frequency of
+            each medicine, and that is on this screen. A toast that says so and
+            then disappears asks the doctor to remember it instead.
+          */}
+          {applied && (
+            <span className="rx-tpl-applied" role="status">
+              <b>{applied}</b> applied — check the frequency of each medicine
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="rx-section-title">Diagnosis</div>
       <Field label="" error={errors.header.diagnosis}>
         <input
@@ -717,48 +788,51 @@ export function PrescriptionEditor({
         />
       </Field>
 
-      <div className="rx-section-title">Medicines</div>
+      {/* The design puts Add medicine on the heading line, not under the
+          rows: it is the section's own action, and at the bottom it moved
+          down the page as the list grew. */}
+      <div className="rx-lbl-row">
+        <span className="rx-section-title">Medicines</span>
+        {canEdit && (
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => {
+              markDirty();
+              setRows((prev) => [...prev, blankRow()]);
+            }}
+          >
+            + Add medicine
+          </button>
+        )}
+      </div>
+
+      {rows.length > 0 && <MedicineHead />}
       {rows.length === 0 && (
         <span className="muted" style={{ fontSize: 13 }}>
           No medicines yet.
         </span>
       )}
 
-      <div className="stack" style={{ gap: 8 }}>
-        {rows.map((row, i) => (
-          <MedicineRow
-            key={row._key}
-            listId={`meds-${row._key}`}
-            total={rows.length}
-            row={row}
-            errors={errors.rows[i]}
-            medicineIndex={medicineIndex}
-            canEdit={canEdit}
-            onChange={(patch) => patchRow(i, patch)}
-            onRemove={() => {
-              markDirty();
-              setRows((prev) => {
-                const next = prev.filter((_, idx) => idx !== i);
-                return next.length > 0 ? next : [blankRow()];
-              });
-              // Row indexes shift, so old messages would point at the wrong row.
-              setErrors(noErrors());
-            }}
-          />
-        ))}
-      </div>
-
-      {canEdit && (
-        <button
-          className="add-med-btn"
-          onClick={() => {
+      {rows.map((row, i) => (
+        <MedicineRow
+          key={row._key}
+          listId={`meds-${row._key}`}
+          row={row}
+          errors={errors.rows[i]}
+          medicineIndex={medicineIndex}
+          canEdit={canEdit}
+          onChange={(patch) => patchRow(i, patch)}
+          onRemove={() => {
             markDirty();
-            setRows((prev) => [...prev, blankRow()]);
+            setRows((prev) => {
+              const next = prev.filter((_, idx) => idx !== i);
+              return next.length > 0 ? next : [blankRow()];
+            });
+            // Row indexes shift, so old messages would point at the wrong row.
+            setErrors(noErrors());
           }}
-        >
-          + Add medicine
-        </button>
-      )}
+        />
+      ))}
 
       <div className="rx-section-title">Advice</div>
       <Field label="" error={errors.header.advice}>
@@ -777,7 +851,14 @@ export function PrescriptionEditor({
       </Field>
 
       {canEdit && (
-        <div className="row rx-actions" style={{ marginTop: 12 }}>
+        /*
+          One row, as the design has it: Clear · Save as template · Draft
+          saved ···· Preview · Issue. Preview and Issue are the page's, handed
+          down as `footerExtras` — they act on the visit rather than on this
+          form, and the same two have to appear under the handwriting pad and
+          the upload pane, where this editor does not render.
+        */
+        <div className="vfoot">
           {/*
             Starting over. A dictated draft that came out wrong is the common
             case — clearing three sections one field at a time is worse than
@@ -791,13 +872,27 @@ export function PrescriptionEditor({
             Clear all
           </button>
           {/*
+            Offered only when this prescription says something no template
+            already says. Signing on medicines *and* advice matters: the
+            prototype signs on medicine names alone, so every advice-only
+            prescription signs identically to every other and the button
+            vanishes on exactly the ones this feature was asked for.
+          */}
+          {showTemplates && canSaveAsTemplate && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => setSaveAsTemplate(true)}
+            >
+              Save as template
+            </button>
+          )}
+          {/*
             The draft saves itself; this says so. The button stays for the
             doctor who wants to see it happen, and as the retry when a save
             fails.
           */}
           <span
             className={`muted rx-save-state ${saveState === 'error' ? 'is-error' : ''}`}
-            style={{ marginLeft: 'auto', fontSize: 12 }}
             aria-live="polite"
           >
             {saveState === 'saving'
@@ -810,27 +905,23 @@ export function PrescriptionEditor({
                     ? 'Saved'
                     : ''}
           </span>
-          <button
-            className="btn btn-sm"
-            disabled={saveState === 'saving' || !dirty}
-            onClick={() => {
-              cancelPendingAutosave();
-              if (check('save')) void saveNow('manual');
-            }}
-          >
-            {saveState === 'saving' ? 'Saving…' : 'Save draft'}
-          </button>
-          {/*
-            Preview and Issue used to sit here. They belong to the page now:
-            the consultation runs Reports → Prescription → Preview, and issuing
-            is the last thing that happens on the last step. Two places to
-            issue from meant a doctor could send a prescription to a patient
-            without ever having looked at the page it renders as.
-
-            The issue-level checks moved with it. They still run — the server
-            refuses an unissuable draft with the same wording — so nothing is
-            lost by not repeating them here.
-          */}
+          {/* Only when there is something to retry. The draft saves itself,
+              and a permanently-present Save button beside five other controls
+              was the widest thing in a row the design keeps to one line. */}
+          {(dirty || saveState === 'error') && (
+            <button
+              className="btn btn-sm rx-save-now"
+              disabled={saveState === 'saving'}
+              onClick={() => {
+                cancelPendingAutosave();
+                if (check('save')) void saveNow('manual');
+              }}
+            >
+              {saveState === 'saving' ? 'Saving…' : 'Save now'}
+            </button>
+          )}
+          <div className="vfoot-grow" />
+          {footerExtras}
         </div>
       )}
 
@@ -845,245 +936,49 @@ export function PrescriptionEditor({
           onCancel={() => setConfirmClear(false)}
         />
       )}
-    </div>
-  );
-}
 
-function MedicineRow({
-  row,
-  listId,
-  total,
-  errors,
-  medicineIndex,
-  canEdit,
-  onChange,
-  onRemove,
-}: {
-  row: PrescriptionMedicine;
-  /**
-   * Stable for the life of the row. The datalist used to be keyed on the
-   * medicine name, so it was a different element after every keystroke and
-   * the browser closed the suggestions as fast as it opened them.
-   */
-  listId: string;
-  total: number;
-  errors?: Partial<Record<MedicineField, string>>;
-  medicineIndex: MedicineIndex;
-  canEdit: boolean;
-  onChange: (patch: Partial<PrescriptionMedicine>) => void;
-  onRemove: () => void;
-}) {
-  /*
-   * Autocomplete comes from the catalogue the editor already holds, not from a
-   * request per keystroke. The old version fired one search per row on mount
-   * and another on every character typed, which on a four-medicine draft was
-   * enough on its own to trip the API's rate limit.
-   */
-  const [query, setQuery] = useState(row.medicine_name ?? '');
-
-  /*
-   * The field's text is the row's own while it is being typed. The stored
-   * shape is name + strength, joined for display — and joining trims, so a
-   * controlled input showing the join would lose the space the doctor just
-   * typed after "Dolo" and turn the next keystroke into "Dolo6". The text is
-   * only rewritten from the fields when they change underneath it: an AI
-   * draft landing, a "did you mean" pick, Clear all.
-   */
-  const [nameText, setNameText] = useState(joinMedicine(row.medicine_name, row.strength));
-  useEffect(() => {
-    const held = joinMedicine(row.medicine_name, row.strength);
-    if (held !== nameText.trim().replace(/\s+/g, ' ')) setNameText(held);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.medicine_name, row.strength]);
-
-  const suggestions = useMemo(
-    () => (query.length >= 2 ? suggestNames(query, medicineIndex) : []),
-    [query, medicineIndex],
-  );
-
-  const fromAi = row.source === 'ai';
-
-  /*
-   * Dictation does not fail by producing gibberish — it produces a real word
-   * that sounds right ("Mounjaro" heard as "Munger"), which reads as perfectly
-   * plausible in a list of medicines. So the name is checked against what this
-   * clinic actually prescribes before it can be issued.
-   *
-   * A name the doctor typed themselves is only questioned when something in
-   * the catalogue sounds exactly like it. Nagging them for prescribing
-   * something new would be wrong — and would train them to ignore the warning
-   * that matters.
-   */
-  const check = checkMedicine(row.medicine_name, medicineIndex);
-  const showWarning = !check.known && (fromAi || check.suggestions.length > 0);
-
-  // The design folds the per-medicine remark away behind a link; it opens on
-  // its own when the row already carries one.
-  const [remarkOpen, setRemarkOpen] = useState(!!row.instructions?.trim());
-
-  /*
-   * Duration is typed as words — "5 days", "2 weeks" — and stored as days.
-   * The text is the row's own while it is being typed; it is only rewritten
-   * from the number when the number changes underneath it (an AI draft
-   * landing, Clear all), never as the parsed echo of what was just typed.
-   */
-  const [durationText, setDurationText] = useState(formatDuration(row.duration_days));
-  useEffect(() => {
-    const typed = parseDuration(durationText);
-    const held = row.duration_days ?? null;
-    if (Number.isNaN(typed) && Number.isNaN(held)) return;
-    if (typed !== held) setDurationText(formatDuration(held));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.duration_days]);
-  const durationUnreadable = !!durationText.trim() && Number.isNaN(parseDuration(durationText));
-
-  return (
-    <div className={`med-row ${fromAi ? 'from-ai' : ''}`}>
-      {canEdit && (
-        <button
-          type="button"
-          className="med-remove"
-          onClick={onRemove}
-          title={total > 1 ? 'Remove medicine' : 'Clear medicine'}
-          aria-label={total > 1 ? 'Remove medicine' : 'Clear medicine'}
-        >
-          ×
-        </button>
-      )}
-
-      {fromAi && <span className="med-ai-tag">AI suggested</span>}
-
-      <div className="med-row-fields">
-        <Field
-          className="med-name"
-          label="Medicine"
-          error={errors?.medicine_name ?? errors?.strength}
-        >
-          <input
-            className="input"
-            list={listId}
-            placeholder="e.g. Paracetamol 650mg"
-            disabled={!canEdit}
-            value={nameText}
-            onChange={(e) => {
-              setNameText(e.target.value);
-              const parsed = splitMedicine(e.target.value);
-              onChange(parsed);
-              // Suggestions are matched on the name, so the dose must not be
-              // part of the query.
-              setQuery(parsed.medicine_name);
-            }}
-          />
-          <datalist id={listId}>
-            {suggestions.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </Field>
-
-        <Field className="med-freq" label="Freq." error={errors?.dosage}>
-          <input
-            className="input"
-            disabled={!canEdit}
-            placeholder="1-0-1"
-            value={row.dosage ?? ''}
-            onChange={(e) => onChange({ dosage: e.target.value })}
-          />
-        </Field>
-
-        <Field
-          className="med-days"
-          label="Duration"
-          error={
-            errors?.duration_days ??
-            (durationUnreadable ? 'Try "5 days" or "2 weeks"' : undefined)
-          }
-        >
-          <input
-            className="input"
-            type="text"
-            autoComplete="off"
-            placeholder="5 days"
-            disabled={!canEdit}
-            value={durationText}
-            onChange={(e) => {
-              setDurationText(e.target.value);
-              // NaN marks text that is not a duration; validation refuses it.
-              onChange({ duration_days: parseDuration(e.target.value) });
-            }}
-            onBlur={() => {
-              // "2 wk" → "2 weeks", the way it will print.
-              const n = parseDuration(durationText);
-              if (n != null && !Number.isNaN(n)) setDurationText(formatDuration(n));
-            }}
-          />
-        </Field>
-      </div>
-
-      {/*
-        Dictation does not fail by producing gibberish — it produces a real
-        word that sounds right ("Mounjaro" heard as "Munger"), which reads as
-        perfectly plausible in a list of medicines. The warning sits under the
-        row rather than inside the name field, where the design has no room.
-      */}
-      {showWarning && (
-        <div className="med-warning">
-          {check.suggestions.length > 0 ? (
+      {/* The overwrite guard the prototype does not have. */}
+      {pendingTemplate && (
+        <ConfirmDialog
+          title="Replace this prescription?"
+          message={
             <>
-              <span>Sounds like a medicine you prescribe — did you mean:</span>
-              {check.suggestions.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  className="med-suggest"
-                  disabled={!canEdit}
-                  onClick={() => {
-                    onChange({ medicine_name: name });
-                    setQuery(name);
-                  }}
-                >
-                  {name}
-                </button>
-              ))}
+              <b>{pendingTemplate.name}</b> replaces the medicines and advice
+              already written here. The diagnosis you typed is kept.
             </>
-          ) : (
-            <span>Not in your medicine list — check the spelling before issuing.</span>
-          )}
-        </div>
+          }
+          confirmLabel="Apply template"
+          cancelLabel="Keep what I wrote"
+          busy={applyTemplate.isPending}
+          onConfirm={() => applyTemplate.mutate(pendingTemplate)}
+          onCancel={() => setPendingTemplate(null)}
+        />
       )}
 
-      {remarkOpen ? (
-        <div className="med-remark-field">
-          <input
-            className="input med-remark-input"
-            placeholder="Remark for this medicine"
-            disabled={!canEdit}
-            autoFocus
-            value={row.instructions ?? ''}
-            onChange={(e) => onChange({ instructions: e.target.value })}
-          />
-          <button
-            type="button"
-            className="med-remark-toggle"
-            onClick={() => {
-              setRemarkOpen(false);
-              onChange({ instructions: '' });
-            }}
-          >
-            − Remove remark
-          </button>
-        </div>
-      ) : (
-        canEdit && (
-          <button
-            type="button"
-            className="med-remark-toggle"
-            onClick={() => setRemarkOpen(true)}
-          >
-            + Add remark
-          </button>
-        )
+      {saveAsTemplate && (
+        <TemplateEditor
+          template={null}
+          categories={categoriesQ.data ?? []}
+          prefill={{
+            // The diagnosis is the doctor's own words for what this treats,
+            // which is the name they would have typed anyway.
+            name: form.diagnosis.trim() || undefined,
+            advice: form.advice.trim() || undefined,
+            medicines: rows
+              .filter((r) => r.medicine_name.trim())
+              .map((r) => ({
+                medicine_name: r.medicine_name.trim(),
+                strength: r.strength ?? undefined,
+                form: r.form ?? undefined,
+                dosage: r.dosage ?? '',
+                duration_days: r.duration_days ?? undefined,
+                instructions: r.instructions ?? undefined,
+              })),
+          }}
+          onClose={() => setSaveAsTemplate(false)}
+        />
       )}
     </div>
   );
 }
+

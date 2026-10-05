@@ -49,14 +49,28 @@ function describe(p: PatientProfile): string {
  * the patient can log in with this number afterwards and find the visit, its
  * reports and its prescription waiting.
  */
-export function WalkInModal({ doctorId, onClose }: { doctorId: string; onClose: () => void }) {
+export function WalkInModal({
+  doctorId,
+  initialMobile,
+  onClose,
+}: {
+  doctorId: string;
+  /**
+   * Opened from a patient's row or profile, prefilled with their number so the
+   * desk lands straight on the family picker rather than retyping a number it
+   * already knows.
+   */
+  initialMobile?: string;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
 
-  const [step, setStep] = useState<Step>('phone');
-  const [mobile, setMobile] = useState('');
+  const prefill = /^[6-9]\d{9}$/.test(initialMobile ?? '') ? initialMobile! : '';
+  const [step, setStep] = useState<Step>(prefill ? 'patients' : 'phone');
+  const [mobile, setMobile] = useState(prefill);
   // The number actually looked up — not the box, which may have moved on.
-  const [lookedUp, setLookedUp] = useState('');
+  const [lookedUp, setLookedUp] = useState(prefill);
   // '' = a new patient. Never a name lookup: an identical name on the same
   // number is a different person unless the front desk picks their card.
   const [profileId, setProfileId] = useState('');

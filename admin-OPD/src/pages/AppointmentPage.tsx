@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -7,32 +7,32 @@ import {
   consultationApi,
   reportsApi,
 } from '../api/endpoints';
-import type { ConsultationSession, EPrescription, PatientReport, Slot } from '../api/types';
+import type { Appointment, ConsultationSession, EPrescription, PatientReport, Slot } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog, Loading, Modal } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
-import { PrescriptionPreviewPanel } from '../components/PrescriptionPreview';
+import { isIvfDoctor } from '../lib/ivfCaseSheet';
+import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
 import { flushDraft } from '../lib/draftFlush';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
 import { CombinedSummaryDetail } from '../components/CombinedSummaryDetail';
 import { CollapseToggle } from '../components/CollapseToggle';
 import { ReportUpload } from '../components/ReportUpload';
 import { FlashNotice } from '../components/FlashNotice';
-import { printBlob } from '../lib/printBlob';
 import { downloadFile } from '../lib/shareFile';
 import { useCollapsible } from '../lib/collapsePreference';
 import { appointmentRefetchInterval, hasTrajectory } from '../lib/summaryPolling';
 import { avatarTone, initials } from '../lib/avatar';
+import { ReportViewerModal, SummaryModal } from '../components/ReportViewer';
+import { Eye, History } from 'lucide-react';
+import { formatDuration } from '../lib/duration';
 import {
   CheckCircleIcon,
   DownloadIcon,
-  PhoneIcon,
-  PrinterIcon,
   SparkleIcon,
   TrashIcon,
-  EyeIcon,
 } from '../components/icons';
 
 /** "09:00" → "9:00 AM". Left alone if it is not an HH:mm string. */
@@ -52,40 +52,259 @@ function prettyDate(date: string | undefined) {
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** The consultation, in the order it is worked through. */
-const VISIT_STEPS = ['Reports', 'Prescription', 'Preview'] as const;
-type VisitStep = 1 | 2 | 3;
-
 /*
- * Where the doctor was, per visit.
+ * The consultation used to be a three-step wizard — Reports, Prescription,
+ * Preview — with Preview locked until the draft had been saved and the step
+ * remembered per visit in localStorage.
  *
- * On a phone the page does not survive a trip to another app: take a call,
- * share the prescription on WhatsApp, come back, and Chrome has thrown the
- * tab away and reloads it from scratch — on step 1. The step, and whether
- * Preview has been earned, are kept per appointment so the reload lands
- * where the doctor left. Storage can be absent or throw; then the visit
- * simply starts at Reports as it always did.
+ * All of it is gone. The design puts the whole visit on one screen: reports
+ * and previous visits on the left, the prescription on the right, and Preview
+ * as a modal that is always reachable. The "Preview is earned by saving" rule
+ * went with it, on the client's instruction — it was stopping a doctor looking
+ * at a document that was sitting right there, and the thing it guarded against
+ * (issuing a blank letterhead) is caught by the empty-prescription check on
+ * Issue instead.
+ *
+ * The per-visit step key is not migrated: there is no step to restore, and a
+ * stale entry does nothing.
  */
-const STEP_KEY = 'opd_admin_visit_step:';
 
-function readVisitState(appointmentId: string): { step: VisitStep; savedOnce: boolean } | null {
-  try {
-    const raw = localStorage.getItem(STEP_KEY + appointmentId);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as { step?: number; savedOnce?: boolean };
-    const step = v.step === 2 || v.step === 3 ? v.step : 1;
-    return { step, savedOnce: v.savedOnce === true };
-  } catch {
-    return null;
-  }
+/**
+ * Who this prescription is for, at the top of the panel it is being written
+ * in — not in a card of its own down the page.
+ *
+ * It replaces the full patient card that used to head the left column. The
+ * design is explicit about this: while writing, the only thing the doctor
+ * needs on screen is who they are writing for. Everything else that card
+ * carried — reschedule, cancel, the address and the reason for the visit —
+ * moved to the overflow menu and the details disclosure, where it is one tap
+ * away rather than occupying the column the reports need.
+ *
+ * Sticky at phone width, where the panel scrolls a long way under it.
+ */
+/**
+ * The visit's own header card: who, when, and how often they have been.
+ *
+ * Removed in an earlier pass on the reading that the prescription panel's chip
+ * made it redundant. The design has both, and they answer different questions:
+ * this one is about the appointment — the time, the date, which visit this is —
+ * while the chip is about who the prescription on screen is for.
+ */
+function VisitHeaderCard({
+  appointment: a,
+  visitNumber,
+  lastSeen,
+}: {
+  appointment: Appointment;
+  /** Which visit this is for this patient, 1 for a first. */
+  visitNumber: number;
+  /** The previous visit's date, when there is one. */
+  lastSeen: string | null;
+}) {
+  const meta = [
+    a.patient_gender ? a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1) : null,
+    a.patient_age != null ? `${a.patient_age} yrs` : null,
+    a.patient_mobile,
+    a.description?.trim() || null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="visit-header">
+      <span className={`appt-avatar lg ${avatarTone(a.patient_name)}`} aria-hidden>
+        {initials(a.patient_name)}
+      </span>
+      <div className="vh-who">
+        <h1>{a.patient_name}</h1>
+        <p>{meta}</p>
+      </div>
+      <div className="vh-when">
+        <strong className={a.status === 'rejected' ? 'cancelled' : ''}>
+          {a.status === 'rejected' ? 'Cancelled' : prettyTime(a.start_time)}
+        </strong>
+        <span>{prettyDate(a.appointment_date)}</span>
+      </div>
+      {/* "Visit 2 · last seen Thu, 24 Sept" — the one number that changes how
+          a doctor reads everything else on the screen. */}
+      <span className="vh-visit-chip">
+        {visitNumber === 1
+          ? 'First visit'
+          : `Visit ${visitNumber}${lastSeen ? ` · last seen ${prettyDate(lastSeen)}` : ''}`}
+      </span>
+    </div>
+  );
 }
 
-function writeVisitState(appointmentId: string, state: { step: VisitStep; savedOnce: boolean }) {
-  try {
-    localStorage.setItem(STEP_KEY + appointmentId, JSON.stringify(state));
-  } catch {
-    // A position that cannot be remembered still applies for the session.
-  }
+function RxPatient({ appointment: a }: { appointment: Appointment }) {
+  const genderAge = [
+    a.patient_gender ? a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1) : null,
+    a.patient_age != null ? `${a.patient_age} yrs` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="rx-patient">
+      <span className={`appt-avatar ${avatarTone(a.patient_name)}`} aria-hidden>
+        {initials(a.patient_name)}
+      </span>
+      <div className="rxp-who">
+        <b>{a.patient_name}</b>
+        <span>
+          {[genderAge, a.patient_mobile].filter(Boolean).join(' · ')}
+        </span>
+      </div>
+      {a.status === 'rejected' && (
+        <div className="rxp-cond">
+          <span className="chip-warn">Cancelled</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The visit's pinned actions: Preview the document, then issue it.
+ *
+ * Built from flex `order`, not from source order. On a phone the design puts
+ * `Issue to patient` full width on its own line with Preview beneath it, and
+ * on desktop they sit together at the right-hand end — the same three
+ * elements in two different arrangements, which source order cannot give.
+ */
+function VisitFooter({
+  onPreview,
+  onIssue,
+  issuing,
+  alreadyIssued,
+  blocked,
+  blockedReason,
+}: {
+  onPreview: () => void;
+  onIssue: () => void;
+  issuing: boolean;
+  alreadyIssued: boolean;
+  /** A recording is still becoming a draft; issuing now would miss it. */
+  blocked: boolean;
+  blockedReason: string;
+}) {
+  return (
+    <div className="vfoot">
+      <button className="btn vfoot-preview" onClick={onPreview}>
+        <Eye size={16} />
+        Preview
+      </button>
+      {alreadyIssued ? (
+        <span className="vfoot-issued">Issued to the patient</span>
+      ) : (
+        <button
+          className="btn btn-primary vfoot-issue"
+          onClick={onIssue}
+          disabled={issuing || blocked}
+          title={blocked ? blockedReason : undefined}
+        >
+          {issuing ? 'Issuing…' : 'Issue to patient'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What happened last time, beside the prescription rather than under it.
+ *
+ * This card was removed from the bottom of the consultation in an earlier
+ * round, and rightly: it is reference, not work, and sitting below the
+ * prescription meant scrolling past the task to reach it. In two columns that
+ * objection goes away — it is next to the task, where a doctor checks what
+ * they prescribed last time before writing today's.
+ *
+ * Three visits, then a link. The full history is its own page and stays so.
+ */
+function PreviousVisits({ appointment }: { appointment: Appointment }) {
+  const navigate = useNavigate();
+  const profileId = appointment.patient_profile_id;
+
+  const historyQ = useQuery({
+    queryKey: ['appointment-history', profileId, appointment.id],
+    queryFn: () => appointmentsApi.history(profileId!, appointment.id),
+    enabled: !!profileId,
+    staleTime: 60 * 1000,
+  });
+
+  // A first visit has no card at all rather than an empty one saying so —
+  // the left column is reference, and reference nobody has is just noise.
+  if (!profileId || !historyQ.data?.length) return null;
+
+  const visits = historyQ.data.slice(0, 3);
+
+  const total = historyQ.data.length;
+
+  return (
+    <div className="card visit-history">
+      <div className="rx-lbl-row">
+        <span className="section-label">Previous visits</span>
+        <span className="vh-count">
+          {total} visit{total === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <ul className="vh-list">
+        {visits.map((v) => {
+          const rx = v.e_prescription;
+          return (
+            <li key={v.id}>
+              <button
+                type="button"
+                className="vh-item"
+                onClick={() => navigate(`/appointments/${v.id}`)}
+              >
+                <span className="vh-h">
+                  <b>{prettyDate(v.appointment_date)}</b>
+                  {v.description?.trim() && <span>{v.description.trim()}</span>}
+                </span>
+                <span className="vh-dx">
+                  {rx?.diagnosis?.trim() || 'No diagnosis recorded'}
+                </span>
+                {/*
+                  What was prescribed, not just what it was called. This is the
+                  question the card is open for — "what did I give them last
+                  time" — and a diagnosis alone does not answer it.
+                */}
+                {rx?.medicines?.length ? (
+                  <span className="vh-meds">
+                    {rx.medicines.slice(0, 3).map((m, i) => (
+                      <span key={i}>
+                        {[
+                          [m.medicine_name, m.strength].filter(Boolean).join(' '),
+                          m.dosage,
+                          formatDuration(m.duration_days),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    ))}
+                    {rx.medicines.length > 3 && (
+                      <span>+{rx.medicines.length - 3} more</span>
+                    )}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <button
+        type="button"
+        className="btn btn-sm vh-all"
+        onClick={() => navigate(`/appointments/${appointment.id}/history`)}
+      >
+        <History size={15} />
+        {total > visits.length ? `View all ${total} visits` : 'View full history'}
+      </button>
+    </div>
+  );
 }
 
 export default function AppointmentPage() {
@@ -95,6 +314,15 @@ export default function AppointmentPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const canUpdate = can('appointments', 'update');
+  /*
+   * Filing a report is gated on `reports`, not on `appointments`, since the
+   * upload moved inside the visit — the server flipped the same way. Keeping
+   * the button on `appointments:update` would offer a desk an upload the API
+   * then refuses, which reads as a broken screen rather than as a permission
+   * they do not have. `DELETE /reports/:id` has always been `reports:create`,
+   * so the bin follows the same flag.
+   */
+  const canFileReports = can('reports', 'create');
 
   const { data: a, isLoading } = useQuery({
     queryKey: ['appointment', id],
@@ -105,34 +333,23 @@ export default function AppointmentPage() {
     refetchInterval: appointmentRefetchInterval,
   });
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+
   /*
-   * Which of the three steps is showing. Reports first: it is what the doctor
-   * reads before they write anything.
+   * How many times this patient has been. The header card leads with it, and
+   * `PreviousVisits` in the left column reads the same query — one request,
+   * two readers.
    */
-  const [step, setStep] = useState<VisitStep>(() => (id && readVisitState(id)?.step) || 1);
-  const [previewNonce, setPreviewNonce] = useState(0);
+  const historyQ = useQuery({
+    queryKey: ['appointment-history', a?.patient_profile_id, id],
+    queryFn: () => appointmentsApi.history(a!.patient_profile_id!, id),
+    enabled: !!a?.patient_profile_id,
+    staleTime: 60 * 1000,
+  });
+  const pastVisits = historyQ.data?.length ?? 0;
   const [optsOpen, setOptsOpen] = useState(false);
   const flushRef = useRef<(() => Promise<void>) | null>(null);
-
-  /*
-   * Preview is reached by saving, not by clicking.
-   *
-   * The client asked for the later steps to be earned: the doctor presses
-   * "Save prescription", the draft goes to the server, and only then does the
-   * document that would be issued become something to look at. Once unlocked
-   * it stays unlocked — going back to fix a dosage should not re-lock the page
-   * you were just on.
-   */
-  const [savedOnce, setSavedOnce] = useState(() => (id ? readVisitState(id)?.savedOnce : false) ?? false);
-
-  // Re-render the document each time the Preview step is opened.
-  useEffect(() => {
-    if (step === 3) setPreviewNonce((n) => n + 1);
-  }, [step]);
-
-  useEffect(() => {
-    if (id) writeVisitState(id, { step, savedOnce });
-  }, [id, step, savedOnce]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['appointment', id] });
@@ -280,6 +497,20 @@ export default function AppointmentPage() {
     },
   });
 
+  const issue = useMutation({
+    mutationFn: () => consultationApi.issuePrescription(id!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['prescription', id] });
+      invalidate();
+      setPreviewOpen(false);
+      toast.success(
+        `Prescription issued to ${a?.patient_name ?? 'the patient'}`,
+        'It is now in their myDigitalOPD account.',
+      );
+    },
+    onError: (e) => toast.error(e),
+  });
+
   if (isLoading || !id) {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
@@ -288,69 +519,63 @@ export default function AppointmentPage() {
     );
   }
 
-  const genderAge = [
-    a?.patient_gender ? a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1) : null,
-    a?.patient_age != null ? `${a.patient_age} yrs` : null,
-  ].filter(Boolean).join(' · ');
-
   const closed = !a || a.status === 'rejected';
   const canAct = !!a && canUpdate && !closed;
 
-  // Preview is earned by saving — unless the prescription is already issued,
-  // in which case there is nothing left to save and the document exists.
-  const previewUnlocked = savedOnce || alreadyIssued;
-
-  const goStep = (n: VisitStep) => {
-    if (n === 3 && !previewUnlocked) return;
-    setStep(n);
+  /**
+   * Pushes whatever mode is showing to the server, then reports whether there
+   * is anything on the prescription.
+   *
+   * The order matters and always has: the cached draft is whatever the server
+   * last saw, and what the doctor has just typed has not reached it yet, so
+   * checking first refuses a prescription that is sitting on screen.
+   */
+  const flushAndRead = async (): Promise<EPrescription | undefined> => {
+    // Nothing to push on a frozen prescription — saving one is refused
+    // server-side, and there is nothing unsaved to push anyway.
+    if (!alreadyIssued) await flushDraft(flushRef);
+    try {
+      const draft = await consultationApi.prescription(id!);
+      qc.setQueryData(['prescription', id], draft);
+      return draft;
+    } catch {
+      // A draft that cannot be read is not a reason to block the doctor; the
+      // request that follows surfaces the real failure.
+      return undefined;
+    }
   };
 
-  const onCta = async () => {
-    if (step === 1) {
-      setStep(2);
-      return;
-    }
-
-    // Nothing to save on a frozen prescription; go straight to the document.
-    if (alreadyIssued) {
-      setStep(3);
-      return;
-    }
-
-    /*
-     * Step 2: save whatever mode is showing, *then* decide whether there is
-     * anything to preview.
-     *
-     * The order matters. The cached draft is whatever the server last saw, and
-     * what the doctor has just typed has not reached it yet — checking first
-     * would refuse a prescription that is sitting right there on screen.
-     */
+  const openPreview = async () => {
     try {
-      await flushDraft(flushRef);
+      await flushAndRead();
     } catch (e) {
       // The mode could not save — a duration it could not read, a request
       // that failed. It has marked the field; the toast names it.
       toast.error(e);
       return;
     }
+    setPreviewOpen(true);
+  };
+
+  /**
+   * Issue, or — when there is nothing written — offer to finish without one.
+   *
+   * An empty prescription is a real outcome the client asked for explicitly,
+   * so this asks rather than refuses.
+   */
+  const onIssue = async () => {
     let draft: EPrescription | undefined;
     try {
-      draft = await consultationApi.prescription(id);
-      qc.setQueryData(['prescription', id], draft);
-    } catch {
-      // A draft that cannot be read is not a reason to block the doctor; the
-      // preview request that follows will surface the real failure.
+      draft = await flushAndRead();
+    } catch (e) {
+      toast.error(e);
+      return;
     }
-
     if (!hasContent(draft)) {
-      // Not an error: an empty prescription is a real outcome, so this asks
-      // rather than refuses.
       setConfirmingNoRx(true);
       return;
     }
-
-    setSavedOnce(true);
-    setStep(3);
+    issue.mutate();
   };
 
   const finishWithoutPrescription = () => {
@@ -387,6 +612,53 @@ export default function AppointmentPage() {
                 <>
                   <div className="opts-backdrop" onClick={() => setOptsOpen(false)} />
                   <div className="opts-menu" role="menu">
+                    {/*
+                      The actions that used to sit as buttons under the patient
+                      card. The design's card is a slim chip inside the
+                      prescription panel with no room for them, and they are
+                      things a doctor does occasionally rather than while
+                      writing — which is what an overflow menu is for.
+                    */}
+                    {/*
+                      Where the rest of the record lives now. The design's
+                      left column is reference about the *visit* — previous
+                      visits and this visit's reports — and carries no patient
+                      card, so the patient's own details (ID, address, the
+                      reason they booked) are one tap away on their profile
+                      rather than a disclosure taking space in that column.
+                    */}
+                    {a.patient_profile_id && (
+                      <button
+                        className="opts-item"
+                        role="menuitem"
+                        onClick={() => {
+                          setOptsOpen(false);
+                          navigate(`/patients/${a.patient_profile_id}`);
+                        }}
+                      >
+                        Open patient profile
+                      </button>
+                    )}
+                    <button
+                      className="opts-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setOptsOpen(false);
+                        navigate(`/appointments/${id}/history`);
+                      }}
+                    >
+                      Patient history
+                    </button>
+                    <button
+                      className="opts-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setOptsOpen(false);
+                        setRescheduling(true);
+                      }}
+                    >
+                      Reschedule
+                    </button>
                     {/* Plain, not red: a no-show records what happened, it
                         does not act against the patient the way blocking or
                         cancelling does — the client wanted it in black. */}
@@ -401,6 +673,17 @@ export default function AppointmentPage() {
                       }}
                     >
                       Mark as no-show
+                    </button>
+                    <button
+                      className="opts-item danger"
+                      role="menuitem"
+                      disabled={consult.isPending || a.consultation_status === 'rejected'}
+                      onClick={() => {
+                        setOptsOpen(false);
+                        setConfirmingCancel(true);
+                      }}
+                    >
+                      Cancel appointment
                     </button>
                     <button
                       className="opts-item danger"
@@ -426,132 +709,45 @@ export default function AppointmentPage() {
         top of a row in the list: same avatar, same colour, so opening a visit
         is continuous with the list you opened it from.
       */}
-      <div className="visit-patient-col">
-      {a && (
-        <div className="patient-card">
-          <div className="pc-row">
-            <span className={`appt-avatar ${avatarTone(a.patient_name)}`} aria-hidden>
-              {initials(a.patient_name)}
-            </span>
-            <div className="pc-info">
-              <h1 className="pc-name">{a.patient_name}</h1>
-              <div className="pc-meta">
-                {genderAge}
-                {genderAge && a.patient_mobile ? ' · ' : ''}
-                {a.patient_mobile && (
-                  <>
-                    <PhoneIcon />
-                    <span className="pc-mobile">{a.patient_mobile}</span>
-                  </>
-                )}
-              </div>
-            </div>
-            <div className="pc-time">
-              <div className={`pc-time-val ${a.status === 'rejected' ? 'cancelled' : ''}`}>
-                {a.status === 'rejected' ? 'Cancelled' : prettyTime(a.start_time)}
-              </div>
-              <div className="pc-time-date">{prettyDate(a.appointment_date)}</div>
-            </div>
-          </div>
-
-          {canAct && (
-            <div className="patient-actions">
-              <button
-                className="pa-btn history"
-                onClick={() => navigate(`/appointments/${id}/history`)}
-              >
-                Patient history
-              </button>
-              <button
-                className="pa-btn cancel"
-                disabled={consult.isPending || a.consultation_status === 'rejected'}
-                onClick={() => setConfirmingCancel(true)}
-              >
-                Cancel
-              </button>
-              <button className="pa-btn reschedule" onClick={() => setRescheduling(true)}>
-                Reschedule
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/*
-        The design's card carries only name, age and number. The rest of the
-        record — the patient's ID on this account, where they live, what they
-        came in for — is still needed occasionally and would be a regression to
-        drop, so it folds away here instead of taking a card of its own.
+        ── The visit, on one screen ──────────────────────────
+        Reference on the left — what this patient has been through — and the
+        work on the right. The stepper is gone: reading a report and writing
+        the prescription are the same task, and paging between them meant the
+        doctor could not see the report they were prescribing against.
       */}
       {a && (
-        <details className="patient-more">
-          <summary>Patient details</summary>
-          <div className="patient-more-grid">
-            {a.patientProfile && (
-              <Field
-                label="Patient ID"
-                value={`${a.patientProfile.patient_code}${
-                  a.patientProfile.relation ? ` · ${a.patientProfile.relation}` : ''
-                }`}
-              />
-            )}
-            {a.doctor?.name && <Field label="Doctor" value={a.doctor.name} />}
-            {a.patient_address && (
-              <Field
-                wide
-                label="Address"
-                value={[a.patient_address, a.patient_city, a.patient_state, a.patient_pincode]
-                  .filter(Boolean)
-                  .join(', ')}
-              />
-            )}
-            {a.description && <Field wide label="Reason" value={a.description} />}
-          </div>
-        </details>
+        <VisitHeaderCard
+          appointment={a}
+          visitNumber={pastVisits + 1}
+          lastSeen={historyQ.data?.[0]?.appointment_date ?? null}
+        />
       )}
-      </div>
 
-      {/*
-        ── The consultation as three steps ───────────────────
-        Reports, then the prescription, then the document you are about to
-        issue. Preview is locked until the prescription has been saved — the
-        client's call, and it stops a doctor previewing a blank letterhead and
-        issuing it.
-      */}
-      <ol className="steps2" aria-label="Consultation progress">
-        {VISIT_STEPS.map((label, i) => {
-          const n = (i + 1) as VisitStep;
-          const locked = n === 3 && !previewUnlocked;
-          return (
-            <Fragment key={label}>
-              {i > 0 && <li className={`step2-track ${step > i ? 'done' : ''}`} aria-hidden />}
-              <li className="step2-item">
+      <div className={`visit-cols ${finishedWithoutRx ? 'is-finished' : ''}`}>
+        <aside className="visit-aside">
+          {a && !finishedWithoutRx && <PreviousVisits appointment={a} />}
+
+          {/* This visit's reports — the patient's uploads and the clinic's. */}
+          {a && !finishedWithoutRx && (
+          <div className="card">
+            <div className="rx-lbl-row">
+              <span className="section-label">
+                Reports{a.reports.length > 0 ? ` (${a.reports.length})` : ''}
+              </span>
+              {/* The design puts Add on the heading line. It used to be a
+                  labelled uploader at the foot of the card, which moved
+                  further down the page with every report filed. */}
+              {canFileReports && (
                 <button
                   type="button"
-                  className={`step2 ${step === n ? 'active' : step > n ? 'done' : ''} ${
-                    locked ? 'locked' : ''
-                  }`}
-                  aria-current={step === n ? 'step' : undefined}
-                  disabled={locked}
-                  title={locked ? 'Save the prescription first' : undefined}
-                  onClick={() => goStep(n)}
+                  className="link-btn"
+                  aria-expanded={uploadOpen}
+                  onClick={() => setUploadOpen((v) => !v)}
                 >
-                  <span className="step2-dot" aria-hidden>{step > n ? '✓' : n}</span>
-                  <span className="step2-label">{label}</span>
+                  {uploadOpen ? '− Close' : '+ Add'}
                 </button>
-              </li>
-            </Fragment>
-          );
-        })}
-      </ol>
-
-      {/* ── The step being worked on ─────────────────────────── */}
-      <div className="visit-panel">
-        {/* This visit's reports — the patient's uploads and the clinic's. */}
-        {a && step === 1 && !finishedWithoutRx && (
-          <div className="card">
-            <div className="section-label">
-              Reports{a.reports.length > 0 ? ` (${a.reports.length})` : ''}
+              )}
             </div>
 
             {a.reports.length === 0 ? (
@@ -564,7 +760,7 @@ export default function AppointmentPage() {
                   <ReportCard
                     key={r.id}
                     report={r}
-                    canDelete={canUpdate}
+                    canDelete={canFileReports}
                     onRetried={invalidate}
                     onDeleted={invalidate}
                   />
@@ -597,7 +793,6 @@ export default function AppointmentPage() {
                     summary={a.reports_summary}
                     status={a.reports_summary_status}
                     error={a.reports_summary_error}
-                    count={a.reports_summary_count}
                     reportCount={a.reports.length}
                     reports={a.reports}
                     /* Explains why no trajectory is shown despite an earlier visit. */
@@ -615,34 +810,62 @@ export default function AppointmentPage() {
                 the report belongs to, and the doctor is already on it. It is
                 the last thing on the card — a doctor reads the reports and
                 the summary of them before reaching for another upload. */}
-            {canUpdate && (
-              <>
-                <div className="section-label">Add more reports</div>
-                <ReportUpload appointmentId={a.id} onUploaded={invalidate} />
-              </>
+            {canFileReports && uploadOpen && (
+              <ReportUpload
+                appointmentId={a.id}
+                onUploaded={() => {
+                  invalidate();
+                  setUploadOpen(false);
+                }}
+              />
             )}
           </div>
         )}
+        </aside>
 
-        {/* Prescription: record, type, handwrite or upload. */}
-        {a && step === 2 && !finishedWithoutRx && (
-          <div className="card">
+        {/*
+          The prescription panel. For an IVF & Fertility doctor the IVF form is
+          one of its tabs (beside Handwrite and Upload) rather than a card of
+          its own: it is that doctor's prescription, not a second document, and
+          a second `.visit-main` sibling would land in the same grid cell and
+          draw on top of this one.
+        */}
+        {a && !finishedWithoutRx && (
+          <div className="card visit-main">
             <PrescriptionTabs
               appointmentId={id}
               canEdit={canUpdate}
               disabled={closed}
               flushRef={flushRef}
               onRecorderBusy={setRecorderBusy}
+              modes={
+                isIvfDoctor(a.doctor?.specialization)
+                  ? ['ivf', 'handwrite', 'upload']
+                  : undefined
+              }
+              patientName={a.patient_name}
+              patientAge={a.patient_age}
+              patientChip={<RxPatient appointment={a} />}
+              footer={
+                canAct ? (
+                  <VisitFooter
+                    onPreview={openPreview}
+                    onIssue={onIssue}
+                    issuing={issue.isPending}
+                    alreadyIssued={alreadyIssued}
+                    blocked={!alreadyIssued && draftInFlight}
+                    blockedReason={
+                      recorderBusy
+                        ? 'Stop the recording first'
+                        : 'Wait for the recording to become a draft'
+                    }
+                  />
+                ) : null
+              }
             />
           </div>
         )}
 
-        {/*
-          The draft on the letterhead, as its own step.
-          `previewNonce` is bumped every time this step is opened so the
-          document is re-rendered rather than served from the last visit —
-          the prescription behind it has usually changed in between.
-        */}
         {a && finishedWithoutRx && (
           <div className="success-panel">
             <div className="success-icon" aria-hidden>
@@ -669,67 +892,22 @@ export default function AppointmentPage() {
           </div>
         )}
 
-        {a && step === 3 && !finishedWithoutRx && (
-          <PrescriptionPreviewPanel
-            appointmentId={a.id}
-            patientName={a.patient_name}
-            canIssue={canAct}
-            alreadyIssued={alreadyIssued}
-            reloadKey={previewNonce}
-            onEdit={() => setStep(2)}
-            onFinished={markComplete}
-            onBackToList={() => navigate('/dashboard')}
-            onDeleted={() => {
-              // Nothing to preview any more: back to a blank editor, and the
-              // preview step is locked again until something is saved.
-              setSavedOnce(false);
-              setStep(2);
-            }}
-            load={async () => {
-              // Whichever mode was showing gets to push its draft first —
-              // except on a frozen prescription, where saving is refused and
-              // there is nothing unsaved to push anyway.
-              if (!alreadyIssued) await flushDraft(flushRef);
-              return consultationApi.prescriptionPreview(id!);
-            }}
-          />
-        )}
       </div>
 
       {/*
-        The next action, pinned to the bottom of the screen. Step 3 is the end
-        of the sequence and carries its own actions, so the bar goes away there.
+        Preview is a modal on the current draft, not a step of its own. It was
+        the third step and locked until the prescription had been saved; the
+        client dropped both. The document is rendered from whatever is on
+        screen — `openPreview` pushes the draft first — so it is always the
+        truth rather than the last thing that happened to be saved.
       */}
-      {canAct && step < 3 && !finishedWithoutRx && (
-        <div className="visit-bottom-bar">
-          <div className="visit-bottom-inner">
-            {step === 2 && (
-              <button className="btn btn-secondary-cta" onClick={() => setStep(1)}>
-                Back to report
-              </button>
-            )}
-            <button
-              className="btn-cta"
-              onClick={onCta}
-              disabled={step === 2 && !alreadyIssued && draftInFlight}
-              title={
-                step === 2 && !alreadyIssued && draftInFlight
-                  ? 'Wait for the recording to become a draft'
-                  : undefined
-              }
-            >
-              {step === 1
-                ? 'Write prescription'
-                : alreadyIssued
-                  ? 'View prescription'
-                  : recorderBusy
-                    ? 'Recording…'
-                    : aiDrafting
-                      ? 'Drafting from recording…'
-                      : 'Save prescription'}
-            </button>
-          </div>
-        </div>
+      {previewOpen && a && (
+        <PrescriptionPreviewModal
+          onClose={() => setPreviewOpen(false)}
+          onIssue={canAct && !alreadyIssued ? onIssue : undefined}
+          issuing={issue.isPending}
+          load={() => consultationApi.prescriptionPreview(id!)}
+        />
       )}
 
       {/* ── No prescription ──────────────────────────────────── */}
@@ -891,24 +1069,6 @@ function ReportCard({
     },
   });
 
-  const print = async () => {
-    setBusy('print');
-    try {
-      const { blob } = await reportsApi.file(report.id);
-      const outcome = await printBlob(blob);
-      if (outcome === 'opened') {
-        toast.success(
-          'Report opened in a new tab',
-          'This browser would not open the print dialog itself — print it from there.',
-        );
-      }
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const download = async () => {
     setBusy('download');
     try {
@@ -921,6 +1081,9 @@ function ReportCard({
     }
   };
 
+  const [viewing, setViewing] = useState(false);
+  const [fullSummary, setFullSummary] = useState(false);
+
   const { ai_summary_status: status, ai_summary: summary } = report;
   const ready = status === 'ready' && !!summary;
   const summarising = status === 'pending' || status === 'processing';
@@ -929,18 +1092,16 @@ function ReportCard({
     <div className="report-card">
       <div className="report-top">
         <div className="report-info">
-          {/* The name opens the file, as does the View button beside it —
-              the client wanted both: the button says what it does, the
-              name is where the eye already is. */}
-          <a
+          {/* The name is the control: it opens the file over the visit
+              rather than in a browser tab the doctor has to come back from. */}
+          <button
+            type="button"
             className="report-name"
-            href={report.url}
-            target="_blank"
-            rel="noreferrer"
+            onClick={() => setViewing(true)}
             title={`Open ${report.title}`}
           >
             {report.title}
-          </a>
+          </button>
           <div className="report-date">
             {report.createdAt &&
               new Date(report.createdAt).toLocaleString(undefined, {
@@ -963,26 +1124,13 @@ function ReportCard({
             )}
           </div>
         </div>
+        {/*
+          View and Print are gone. The row is the control now — clicking the
+          report opens it — so a "View" button beside it was a second way to
+          do the same thing, and printing a report is something the doctor
+          does from the opened file or the letterhead, not from a list row.
+        */}
         <div className="report-actions">
-          <a
-            className="ra-view-btn"
-            href={report.url}
-            target="_blank"
-            rel="noreferrer"
-            title="Open the report"
-          >
-            <EyeIcon size={14} />
-            <span>View</span>
-          </a>
-          <button
-            className="ra-icon-btn"
-            onClick={print}
-            disabled={busy !== null}
-            title="Print"
-            aria-label="Print"
-          >
-            <PrinterIcon size={14} />
-          </button>
           <button
             className="ra-icon-btn"
             onClick={download}
@@ -1033,10 +1181,41 @@ function ReportCard({
         />
       )}
 
+      {viewing && (
+        <ReportViewerModal
+          title={report.title}
+          url={report.url}
+          onClose={() => setViewing(false)}
+        />
+      )}
+
+      {fullSummary && summary && (
+        <SummaryModal title={`AI summary · ${report.title}`} onClose={() => setFullSummary(false)}>
+          <SummaryBody summary={summary} />
+        </SummaryModal>
+      )}
+
       {open && (
         <div className="report-summary">
           {ready ? (
-            <SummaryBody summary={summary} />
+            /*
+              Three lines, then an ellipsis and a way in. A report summary runs
+              to a paragraph or more and four of them stacked pushed the
+              prescription off the screen entirely — which is the wrong thing
+              to lose to reference material.
+            */
+            <>
+              <div className="report-summary-clamp">
+                <SummaryBody summary={summary} />
+              </div>
+              <button
+                type="button"
+                className="link-btn report-readmore"
+                onClick={() => setFullSummary(true)}
+              >
+                Read full report
+              </button>
+            </>
           ) : status === 'processing' ? (
             <span className="muted" style={{ fontSize: 12.5 }}>Summarising…</span>
           ) : status === 'pending' ? (
@@ -1086,34 +1265,6 @@ function ReportCard({
 
 // ── Shared sub-components ────────────────────────────────────
 
-function Field({
-  label,
-  value,
-  /** Spans every column — for values long enough to wrap. */
-  wide,
-}: {
-  label: string;
-  value?: string | null;
-  wide?: boolean;
-}) {
-  if (!value) return null;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 8,
-        alignItems: 'baseline',
-        fontSize: 13,
-        lineHeight: 1.5,
-        gridColumn: wide ? '1 / -1' : undefined,
-      }}
-    >
-      <span className="muted" style={{ flex: '0 0 96px', fontSize: 12 }}>{label}</span>
-      <span style={{ fontWeight: 500, minWidth: 0, overflowWrap: 'anywhere' }}>{value}</span>
-    </div>
-  );
-}
-
 /**
  * The combined AI summary across every report on this visit.
  *
@@ -1122,13 +1273,12 @@ function Field({
  * stays compiled and ready rather than rotting behind a comment.
  */
 export function VisitReportSummary({
-  appointmentId, summary, status, error, count, reportCount, reports, noComparison, onRetried,
+  appointmentId, summary, status, error, reportCount, reports, noComparison, onRetried,
 }: {
   appointmentId: string;
   summary?: import('../api/types').ReportAiSummary | null;
   status?: import('../api/types').AiJobStatus | null;
   error?: string | null;
-  count?: number;
   reportCount: number;
   /** This visit's reports, for the multi-report breakdown below the summary. */
   reports?: import('../api/types').PatientReport[];
@@ -1138,13 +1288,48 @@ export function VisitReportSummary({
 }) {
   const toast = useToast();
   const [collapsed, toggleCollapsed] = useCollapsible('visit-summary-v2');
+  // Above the early returns below — CLAUDE.md, and the lint rule that caught
+  // it when this sat next to the branch that uses it.
+  const [fullOpen, setFullOpen] = useState(false);
   const retry = useMutation({
     mutationFn: () => reportsApi.retryVisitSummary(appointmentId),
     onSuccess: () => { onRetried(); toast.success('Combining report summaries…'); },
     onError: (e) => toast.error(e),
   });
 
-  if (reportCount < 2 && status !== 'ready') return null;
+  // One report is enough: generation is now the doctor's to ask for, and this
+  // card carries the only button that does it. Hiding it below two reports (as
+  // it was when summaries generated themselves on upload) left a single-report
+  // visit with no way to summarise anything at all.
+  if (reportCount < 1 && status !== 'ready') return null;
+
+  const idle = !status || status === 'idle';
+
+  /*
+   * Before anything is generated the card is one button and a sentence saying
+   * what it will do — no "AI summary" heading, no collapse control, because
+   * there is nothing yet to head or fold. The design draws it this way and it
+   * is also the honest shape: the doctor is being offered an action, not shown
+   * an empty result.
+   */
+  if (idle) {
+    return (
+      <div className="ai-offer">
+        <button
+          type="button"
+          className="ai-offer-btn"
+          disabled={retry.isPending}
+          onClick={() => retry.mutate()}
+        >
+          <SparkleIcon size={16} />
+          {retry.isPending ? 'Generating…' : 'Generate summary with AI'}
+        </button>
+        <p className="ai-offer-note">
+          Reads the attached reports and summarises the findings.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="ai-box">
@@ -1155,18 +1340,28 @@ export function VisitReportSummary({
           label="the combined summary"
         >
           <span className="ai-box-title">
-            <SparkleIcon size={16} />
+            <SparkleIcon size={15} />
             AI summary
-            {count ? ` · ${count} report${count > 1 ? 's' : ''}` : ''}
           </span>
         </CollapseToggle>
+        {/*
+          Regenerate and Read full share the header line with the title, as
+          the design has them. They were a full `btn` each, which at the left
+          column's 340px wrapped onto rows of their own and pushed the summary
+          itself down the card — link buttons fit.
+        */}
         {status === 'ready' && !collapsed && (
-          <button className="btn btn-sm btn-ghost" disabled={retry.isPending} onClick={() => retry.mutate()}>
-            {retry.isPending ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <span className="ai-box-actions">
+            <button className="link-btn" disabled={retry.isPending} onClick={() => retry.mutate()}>
+              {retry.isPending ? 'Regenerating…' : 'Regenerate'}
+            </button>
+            <button className="link-btn" onClick={() => setFullOpen(true)}>
+              Read full
+            </button>
+          </span>
         )}
       </div>
-      {collapsed ? null : status === 'processing' ? (
+      {collapsed ? null : status === 'pending' || status === 'processing' ? (
         <span className="muted" style={{ fontSize: 12.5 }}>Combining the report summaries…</span>
       ) : status === 'failed' ? (
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -1177,14 +1372,28 @@ export function VisitReportSummary({
         </div>
       ) : summary ? (
         <>
-          <SummaryBody summary={summary} />
+          {/*
+            Three lines, then a way in. A combined summary runs to a paragraph
+            and a column of out-of-range values; at full length it pushed the
+            prescription off the screen, which is the wrong thing to lose to
+            reference material.
+          */}
+          <div className="report-summary-clamp">
+            <SummaryBody summary={summary} />
+          </div>
           {noComparison && (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
               The previous visit shares no comparable measurement with this one,
               so there is no trend to show.
             </div>
           )}
-          {reports && <CombinedSummaryDetail reports={reports} />}
+
+          {fullOpen && (
+            <SummaryModal title="AI summary" onClose={() => setFullOpen(false)}>
+              <SummaryBody summary={summary} />
+              {reports && <CombinedSummaryDetail reports={reports} />}
+            </SummaryModal>
+          )}
         </>
       ) : (
         <span className="muted" style={{ fontSize: 12.5 }}>Waiting for report summaries…</span>

@@ -552,8 +552,18 @@ export class DoctorsService {
         profile_photo_url: uploads.photoKey,
         letterhead_header_key: uploads.headerKey,
         letterhead_header_ratio: uploads.headerRatio,
+        medical_council: dto.medical_council ?? null,
         clinic_name: dto.clinic_name ?? null,
+        clinic_phone: dto.clinic_phone ?? null,
+        // Line 1 plus the parts the onboarding wizard collects. Each is
+        // optional: an older client still posts the whole address as
+        // `clinic_address`, and the letterhead joins whatever is non-null.
         clinic_address: dto.clinic_address ?? null,
+        clinic_address_line2: dto.clinic_address_line2 ?? null,
+        clinic_city: dto.clinic_city ?? null,
+        clinic_pincode: dto.clinic_pincode ?? null,
+        clinic_state: dto.clinic_state ?? null,
+        clinic_country: dto.clinic_country ?? 'India',
         public_slug: slug,
         terms_accepted_at: new Date(),
         terms_version: dto.terms_version ?? null,

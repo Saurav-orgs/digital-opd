@@ -79,7 +79,18 @@ export interface Doctor {
   qr_code_url?: string | null;
   // Prescription letterhead (per-doctor branding)
   clinic_name: string | null;
+  /**
+   * Line 1. Carried the whole address as free text before onboarding split
+   * it, and still does for a doctor who has not opened the new form —
+   * nothing was re-parsed, so both shapes are valid.
+   */
   clinic_address: string | null;
+  clinic_address_line2?: string | null;
+  clinic_city?: string | null;
+  clinic_pincode?: string | null;
+  clinic_state?: string | null;
+  clinic_country?: string | null;
+  medical_council?: string | null;
   clinic_phone: string | null;
   clinic_logo_url: string | null;
   /** The doctor's own uploaded pad header, drawn as the PDF header when set. */
@@ -215,6 +226,12 @@ export interface PatientProfile {
   last_visit_date: string | null;
   visit_count: number;
   can_delete: boolean;
+  // ── Clinical summary the clinic keeps by hand ──────────────
+  // Kept by the desk, distinct from the conditions derived from prescriptions
+  // in PatientOverview. Present on the clinic list and the profile.
+  blood_group?: string | null;
+  conditions?: string[];
+  long_term_medicines?: string[];
 }
 
 /**
@@ -262,7 +279,11 @@ export interface DashboardSummary {
   appointments: Appointment[];
 }
 
-export type AiJobStatus = 'pending' | 'processing' | 'ready' | 'failed';
+/**
+ * `idle` = summarisable, but nobody has asked. Generation is triggered by the
+ * doctor now, so a report with no summary is not necessarily queued for one.
+ */
+export type AiJobStatus = 'idle' | 'pending' | 'processing' | 'ready' | 'failed';
 
 export interface ReportAiSummary {
   report_type: string;
@@ -344,6 +365,102 @@ export interface EPrescription {
   pdf_url: string | null;
   handwriting_image_url: string | null;
   medicines: PrescriptionMedicine[];
+}
+
+/** One medicine line on a template. Mirrors `PrescriptionMedicine`. */
+export interface TemplateMedicine {
+  medicine_name: string;
+  strength?: string | null;
+  form?: string | null;
+  dosage: string;
+  duration_days?: number | null;
+  /**
+   * The course as the doctor wrote it. A template may say "Continue", which
+   * has no number to store — see the migration's note.
+   */
+  duration_text?: string | null;
+  instructions?: string | null;
+}
+
+/**
+ * A saved prescription the doctor applies to a visit.
+ *
+ * `is_builtin` covers both a shipped template and this clinic's edit of one,
+ * so an edited built-in stays on the Pre-added tab instead of jumping to My
+ * templates. `overrides_builtin` tells the two apart, which is what makes
+ * "revert to the original" offerable.
+ */
+export interface PrescriptionTemplate {
+  id: string;
+  category: string;
+  name: string;
+  advice: string | null;
+  follow_up_days: number | null;
+  is_builtin: boolean;
+  overrides_builtin: boolean;
+  usage_count: number;
+  medicines: TemplateMedicine[];
+}
+
+export interface TemplateInput {
+  category: string;
+  name: string;
+  advice?: string;
+  follow_up_days?: number;
+  medicines?: TemplateMedicine[];
+}
+
+/** One patient's whole record, aggregated across every visit. */
+export interface PatientOverview {
+  profile: {
+    id: string;
+    patient_code: string;
+    name: string;
+    gender: string | null;
+    dob: string | null;
+    age: number | null;
+    relation: string | null;
+    mobile?: string | null;
+    registered_at?: string | null;
+    /** The clinical summary the clinic keeps by hand — see ClinicPatient. */
+    blood_group?: string | null;
+    recorded_conditions?: string[];
+    recorded_long_term_medicines?: string[];
+  };
+  visit_count: number;
+  first_visit: string | null;
+  last_visit: string | null;
+  /** Diagnoses seen more than once, or written at the most recent visit. */
+  conditions: { label: string; visits: number; firstSeen: string; lastSeen: string }[];
+  /** Prescribed across several visits, or for a month or more at a stretch. */
+  long_term_medicines: OverviewMedicine[];
+  most_prescribed: OverviewMedicine[];
+  reports: {
+    id: string;
+    title: string;
+    url: string | null;
+    created_at: string;
+    visit_date: string | null;
+  }[];
+  visits: {
+    id: string;
+    date: string;
+    start_time: string;
+    consultation_status: string;
+    status: string;
+    reason: string | null;
+    diagnosis: string | null;
+    advice: string | null;
+    medicines: PrescriptionMedicine[];
+  }[];
+}
+
+export interface OverviewMedicine {
+  label: string;
+  strength: string | null;
+  visits: number;
+  lastPrescribed: string;
+  longestDays: number | null;
 }
 
 export interface MedicineCatalogEntry {
@@ -561,4 +678,87 @@ export interface DoctorInviteResult {
   /** Mailed to the doctor; shown once here in case the mail does not arrive. */
   tempPassword: string;
   plan: { name: string; endsAt: string } | null;
+}
+
+// ── IVF case sheet ───────────────────────────────────────────
+
+/** One investigation's date + result. */
+export interface IvfInvestigationValue {
+  date?: string;
+  report?: string;
+}
+
+/** One semen-analysis attempt. */
+export interface IvfSemenRow {
+  datePlace?: string;
+  vol?: string;
+  count?: string;
+  motility?: string;
+  morphology?: string;
+  pc?: string;
+  fructose?: string;
+}
+
+/**
+ * The whole IVF case-sheet body. Every field is optional — the sheet fills in
+ * over the visit. Mirrors the server's `IvfCaseSheetData`; the server is the
+ * authority and drops anything it does not recognise.
+ */
+export interface IvfCaseSheetData {
+  wife?: { name?: string; age?: string; occupation?: string };
+  husband?: { name?: string; age?: string; occupation?: string };
+  vitals?: { weight?: string; height?: string; bmi?: string; bp?: string; date?: string };
+
+  marriedSinceYrs?: string;
+  durationOfInfertility?: string;
+  menstrualCycle?: string;
+  lmp?: string;
+  obstetricHistory?: string;
+  medicalHistory?: { dm?: string; ht?: string; thyroid?: string; tb?: string; others?: string };
+  coitalDifficulty?: string;
+  contraception?: string;
+  surgicalHistory?: string;
+  familyHistory?: string;
+  drugAllergy?: string;
+  ovulationInduction?: string;
+  previousIUI?: string;
+  stimulation?: string;
+  previousIVFDetails?: string;
+  hsg?: { date?: string; uterus?: string; tubes?: string };
+  laparoscopy?: { date?: string; notes?: string };
+  hysteroscopy?: { date?: string; notes?: string };
+  clinicalExam?: { thyroid?: string; galactorrhoea?: string; hirsutism?: string; psppv?: string };
+  partnerHistory?: { medical?: string; surgical?: string };
+  smoking?: string;
+  substanceAbuse?: string;
+
+  femaleBloodGroup?: string;
+  femaleInvestigations?: Record<string, IvfInvestigationValue>;
+  thrombophilias?: string;
+  karyotypeWife?: string;
+  papSmear?: string;
+  hpv?: string;
+  semenAnalysis?: IvfSemenRow[];
+  maleBloodGroup?: string;
+  maleInvestigations?: Record<string, IvfInvestigationValue>;
+  usgPelvis?: { date?: string; notes?: string };
+  afc?: { rt?: string; lt?: string };
+
+  diagnosisAndPlan?: string;
+}
+
+/** The case-sheet for one visit, as the editor reads it. */
+export interface IvfCaseSheet {
+  id: string;
+  appointment_id: string;
+  status: 'draft' | 'issued';
+  data: IvfCaseSheetData;
+  issued_at: string | null;
+}
+
+/** A doctor's saved case-sheet, reusable as a starting point. */
+export interface IvfCaseSheetTemplate {
+  id: string;
+  name: string;
+  data: IvfCaseSheetData;
 }

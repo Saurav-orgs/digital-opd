@@ -71,9 +71,24 @@ export class ReportsController {
   @ApiOperation({
     summary: "Clinic uploads a report against a specific visit",
   })
-  // Gated on appointments:update, not reports:create — this is part of running
-  // the consultation, and it is reached from the appointment screen.
-  @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
+  /*
+   * Gated on `reports:create`.
+   *
+   * This used to be `appointments:update`, deliberately: filing a report was
+   * part of running the consultation, and the `reports` module gated a
+   * separate Upload reports screen that a clinic might not even use. The
+   * redesign moves filing *into* the appointment and takes that screen out of
+   * the menu, so `reports` now gates the thing the doctor actually sees, and
+   * a clinic that wants its desk to book visits but not attach documents can
+   * finally express that.
+   *
+   * The flip shipped with a data migration
+   * (`20261001000001-reports-permission-for-consultation`) granting
+   * `reports:create` + `reports:read` to every role already holding
+   * `appointments:update` — without it, a role built with appointment access
+   * but no reports module would have lost the upload button overnight.
+   */
+  @Permissions({ module: PermissionModule.REPORTS, action: PermissionAction.CREATE })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -164,11 +179,12 @@ export class ReportsController {
 
   @Post('appointment/:appointmentId/summary/retry')
   @ApiOperation({
-    summary: "Rebuild the combined summary of a visit's reports",
+    summary:
+      "Generate (or rebuild) the AI summary of a visit's reports — summarises any report not yet done, then combines them",
   })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
-  retryConsolidation(@Param('appointmentId', ParseUUIDPipe) appointmentId: string) {
-    return this.summaries.retryConsolidation(appointmentId);
+  generateVisitSummary(@Param('appointmentId', ParseUUIDPipe) appointmentId: string) {
+    return this.summaries.generateForAppointment(appointmentId);
   }
 
   @Get(':id/file')

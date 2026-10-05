@@ -5,6 +5,8 @@ import { PatientProfile } from '../database/models/patient-profile.model';
 import { Appointment } from '../database/models/appointment.model';
 import { PatientReport } from '../database/models/patient-report.model';
 import { Notification } from '../database/models/notification.model';
+import { EPrescription } from '../database/models/e-prescription.model';
+import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { UploadsModule } from '../uploads/uploads.module';
 import { PatientAuthGuard } from '../patient-auth/patient-auth.guard';
 import { PatientProfilesService } from './patient-profiles.service';
@@ -28,6 +30,10 @@ import {
       Appointment,
       PatientReport,
       Notification,
+      // Read by the full-history aggregate: a patient's conditions and
+      // long-term medicines are derived from their issued prescriptions.
+      EPrescription,
+      EPrescriptionMedicine,
     ]),
     UploadsModule,
   ],

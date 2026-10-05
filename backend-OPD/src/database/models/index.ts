@@ -16,6 +16,9 @@ import { Notification } from './notification.model';
 import { ConsultationSession } from './consultation-session.model';
 import { EPrescription } from './e-prescription.model';
 import { EPrescriptionMedicine } from './e-prescription-medicine.model';
+import { PrescriptionTemplate } from './prescription-template.model';
+import { PrescriptionTemplateMedicine } from './prescription-template-medicine.model';
+import { PrescriptionTemplateUsage } from './prescription-template-usage.model';
 import { MedicineCatalog } from './medicine-catalog.model';
 import { AiTrainingSample } from './ai-training-sample.model';
 import { AiUsageEvent } from './ai-usage-event.model';
@@ -28,6 +31,8 @@ import { Subscription } from './subscription.model';
 import { Plan } from './plan.model';
 import { PaymentEvent } from './payment-event.model';
 import { Invoice } from './invoice.model';
+import { IvfCaseSheet } from './ivf-case-sheet.model';
+import { IvfCaseSheetTemplate } from './ivf-case-sheet-template.model';
 
 export const models = [
   Role,
@@ -47,6 +52,9 @@ export const models = [
   ConsultationSession,
   EPrescription,
   EPrescriptionMedicine,
+  PrescriptionTemplate,
+  PrescriptionTemplateMedicine,
+  PrescriptionTemplateUsage,
   MedicineCatalog,
   AiTrainingSample,
   AppSetting,
@@ -59,6 +67,8 @@ export const models = [
   Plan,
   PaymentEvent,
   Invoice,
+  IvfCaseSheet,
+  IvfCaseSheetTemplate,
 ];
 
 export {
@@ -80,6 +90,9 @@ export {
   ConsultationSession,
   EPrescription,
   EPrescriptionMedicine,
+  PrescriptionTemplate,
+  PrescriptionTemplateMedicine,
+  PrescriptionTemplateUsage,
   MedicineCatalog,
   AiTrainingSample,
   AiUsageEvent,
@@ -88,4 +101,6 @@ export {
   Plan,
   PaymentEvent,
   Invoice,
+  IvfCaseSheet,
+  IvfCaseSheetTemplate,
 };

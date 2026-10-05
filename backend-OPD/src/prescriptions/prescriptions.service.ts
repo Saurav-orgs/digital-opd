@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import { randomBytes } from 'crypto';
 import { Op } from 'sequelize';
+import { Sequelize } from 'sequelize-typescript';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { ConsultationSession } from '../database/models/consultation-session.model';
@@ -19,6 +20,7 @@ import { ActivityAction } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import {
+  ConsultationStatus,
   MedicineSource,
   NotificationType,
   PrescriptionMode,
@@ -61,6 +63,7 @@ export class PrescriptionsService {
     private readonly notifications: NotificationsService,
     private readonly activity: ActivityLogService,
     private readonly config: ConfigService,
+    private readonly sequelize: Sequelize,
   ) {}
 
   /** The appointment's prescription, creating an empty draft on first open. */
@@ -179,12 +182,42 @@ export class PrescriptionsService {
       `prescriptions/${appointment.doctor_id}`,
     );
 
-    // 2. Freeze it.
-    await prescription.update({
-      status: PrescriptionStatus.ISSUED,
-      issued_at: new Date(),
-      pdf_key: key,
-    } as any);
+    // 2. Freeze it, and close the visit out with it.
+    //
+    //    Issuing never used to touch `consultation_status` — only
+    //    `appointments.service.ts setConsultation` did — so a doctor who issued
+    //    the prescription and moved on left the appointment sitting at
+    //    `pending`. It is the same visit: handing the patient their
+    //    prescription is what finishing one means.
+    //
+    //    `rejected` and `no_show` are left alone. Both are deliberate
+    //    statements about a visit that did not happen the normal way, and
+    //    neither should be overwritten by a late reprint.
+    //
+    //    One transaction, because "issued but still pending" is precisely the
+    //    state this exists to stop happening — a half-applied write would
+    //    recreate the bug it fixes.
+    const closesVisit =
+      appointment.consultation_status === ConsultationStatus.PENDING ||
+      appointment.consultation_status === ConsultationStatus.ON_HOLD;
+    const previousStatus = appointment.consultation_status;
+
+    await this.sequelize.transaction(async (t) => {
+      await prescription.update(
+        {
+          status: PrescriptionStatus.ISSUED,
+          issued_at: new Date(),
+          pdf_key: key,
+        } as any,
+        { transaction: t },
+      );
+      if (closesVisit) {
+        await appointment.update(
+          { consultation_status: ConsultationStatus.DONE } as any,
+          { transaction: t },
+        );
+      }
+    });
 
     // 3. Grow the tenant's medicine vocabulary from what was actually issued.
     //    Best-effort: the prescription is already frozen by this point, so a
@@ -237,6 +270,27 @@ export class PrescriptionsService {
         medicines: medicines.map((m) => m.medicine_name),
       },
     });
+
+    // Recorded separately from the issue above, and in the same words
+    // `setConsultation` uses, so that "who marked this visit done, and when"
+    // has one answer in the log whether a human pressed the button or issuing
+    // did it. Without this the status moved with nothing accounting for it.
+    if (closesVisit) {
+      this.activity.recordForUser(user, {
+        action: ActivityAction.APPOINTMENT_CONSULTATION_SET,
+        summary:
+          `Marked ${appointment.patient_name}'s visit on ` +
+          `${appointment.appointment_date} as done (prescription issued).`,
+        entity_type: 'appointment',
+        entity_id: appointment.id,
+        doctor_id: appointment.doctor_id,
+        metadata: {
+          from: previousStatus,
+          to: ConsultationStatus.DONE,
+          via: 'prescription_issue',
+        },
+      });
+    }
 
     return this.toView(await this.reload(prescription.id));
   }

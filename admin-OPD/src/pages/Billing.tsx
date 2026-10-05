@@ -37,6 +37,41 @@ export default function BillingPage() {
     qc.invalidateQueries({ queryKey: ['billing'] });
   });
 
+  /**
+   * Every invoice as one CSV, built in the browser from the rows on screen.
+   *
+   * Amounts go in unformatted — `1180.00`, not `₹1,180.00` — because a
+   * spreadsheet has to add them up, and a rupee sign turns the column into
+   * text. Quoted properly: a plan name can contain a comma.
+   */
+  function exportInvoicesCsv() {
+    const cell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [
+      ['Invoice', 'Issued', 'Plan', 'Months', 'Period start', 'Period end', 'Base', 'GST', 'Total', 'Currency'],
+      ...invoices.map((inv) => [
+        inv.invoiceNo,
+        inv.issuedAt,
+        inv.planName,
+        inv.months,
+        inv.periodStart,
+        inv.periodEnd,
+        inv.baseAmount,
+        inv.gstAmount,
+        inv.totalAmount,
+        inv.currency ?? 'INR',
+      ]),
+    ]
+      .map((r) => r.map(cell).join(','))
+      .join('\r\n');
+
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function download(inv: Invoice) {
     setDownloading(inv.id);
     try {
@@ -64,7 +99,7 @@ export default function BillingPage() {
   return (
     <div>
       <div className="page-head">
-        <h2>Billing</h2>
+        <h2>Subscription</h2>
       </div>
 
       {orderId && (
@@ -150,7 +185,20 @@ export default function BillingPage() {
       <RenewPlanCard />
 
       <div className="card">
-        <div className="card-title">Invoices</div>
+        <div className="rx-lbl-row">
+          <span className="card-title" style={{ margin: 0 }}>Invoices</span>
+          {/*
+            The whole list as a spreadsheet, next to the per-invoice PDFs.
+            An accountant wants the year in one file; downloading twelve PDFs
+            to type their totals into a sheet is the thing this replaces. The
+            PDFs stay — they are the documents, this is the summary.
+          */}
+          {invoices.length > 0 && (
+            <button className="btn btn-sm" onClick={exportInvoicesCsv}>
+              Export CSV
+            </button>
+          )}
+        </div>
         {invoicesQ.isLoading ? (
           <Spinner />
         ) : invoices.length === 0 ? (

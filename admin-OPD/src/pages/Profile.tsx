@@ -15,7 +15,13 @@ import { ShareQrButton } from '../components/BookingQr';
  * to be the bottom half of this screen; it has its own page (and menu item)
  * now — see `pages/Letterhead.tsx`.
  */
-export default function Profile() {
+/**
+ * `embedded` renders this as a pane inside Settings rather than as a screen of
+ * its own: the tab bar above it is already saying where you are, so the <h1>
+ * and the cross-links to the other tabs would both be repeating it. The Save
+ * button stays — it belongs to the form, not to the page.
+ */
+export default function Profile({ embedded = false }: { embedded?: boolean } = {}) {
   const { isDoctor, can } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -95,20 +101,22 @@ export default function Profile() {
     <>
       <div className="page-head">
         <div>
-          <h1>My profile</h1>
+          {!embedded && <h1>My profile</h1>}
           {!canEdit && <span className="muted">Read-only — your role doesn’t grant profile editing.</span>}
         </div>
         <div className="row">
-          {canSchedule && (
-            <button className="btn" onClick={() => navigate('/profile/schedule')}>
-              Schedule
+          {!embedded && canSchedule && (
+            <button className="btn" onClick={() => navigate('/time-slots')}>
+              My time slots
             </button>
           )}
-          {/* The letterhead has its own screen and menu item now; this is the
-              shortcut for a doctor who came here looking for it. */}
-          <button className="btn" onClick={() => navigate('/profile/letterhead')}>
-            Letterhead
-          </button>
+          {!embedded && (
+            // Outside Settings this is the shortcut for a doctor who came here
+            // looking for the letterhead. Inside it, the tab above says it.
+            <button className="btn" onClick={() => navigate('/my-settings/letterhead')}>
+              Letterhead
+            </button>
+          )}
           {canEdit && (
             <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim()}>
               {save.isPending ? 'Saving…' : 'Save'}

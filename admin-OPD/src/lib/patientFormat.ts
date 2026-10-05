@@ -18,6 +18,18 @@ export function ageOf(p: ClinicPatient): string {
 }
 
 /** "Female" → "F", "Male" → "M"; anything else as written. */
+/**
+ * Gender as a full capitalised word — "Female", not "female" or "F".
+ *
+ * The column stores it lowercase; every screen that shows it to a doctor
+ * capitalises, so the rule lives here rather than inline at each call site.
+ */
+export function prettyGender(g: string | null | undefined): string {
+  const v = (g ?? '').trim();
+  if (!v) return '';
+  return v[0].toUpperCase() + v.slice(1).toLowerCase();
+}
+
 export function shortGender(g: string | null | undefined) {
   const v = (g ?? '').trim();
   if (!v) return '';

@@ -53,9 +53,17 @@ export class ReportsService {
       dto.patient_profile_id,
     );
 
-    // Summarising takes tens of seconds — let the upload return now and fill the
-    // summary in behind it.
-    void this.summaries.summarizeInBackground(report.id, file);
+    /*
+     * No summary is started here. Generation is the doctor's to ask for —
+     * they press "Generate summary with AI" on the visit, which calls the
+     * retry endpoints that already existed for this work.
+     *
+     * It used to fire on every upload. That spent a model call on every
+     * report whether or not anyone ever read the summary, including on the
+     * reports a patient uploads speculatively between visits, and it is the
+     * single largest line in the per-appointment AI cost. The report lands at
+     * `idle`; nothing is queued until it is asked for.
+     */
 
     this.activity.recordForUser(user, {
       action: ActivityAction.REPORT_UPLOADED,
@@ -109,9 +117,17 @@ export class ReportsService {
       appointment_id: appointment.id,
     } as any);
 
-    // The doctor sees this report during the visit, so the summary matters most
-    // here — but it still must not block the patient's upload.
-    void this.summaries.summarizeInBackground(report.id, file);
+    /*
+     * No summary is started here. Generation is the doctor's to ask for —
+     * they press "Generate summary with AI" on the visit, which calls the
+     * retry endpoints that already existed for this work.
+     *
+     * It used to fire on every upload. That spent a model call on every
+     * report whether or not anyone ever read the summary, including on the
+     * reports a patient uploads speculatively between visits, and it is the
+     * single largest line in the per-appointment AI cost. The report lands at
+     * `idle`; nothing is queued until it is asked for.
+     */
 
     return report;
   }
@@ -174,7 +190,17 @@ export class ReportsService {
       appointment.patient_profile_id,
     );
 
-    void this.summaries.summarizeInBackground(report.id, file);
+    /*
+     * No summary is started here. Generation is the doctor's to ask for —
+     * they press "Generate summary with AI" on the visit, which calls the
+     * retry endpoints that already existed for this work.
+     *
+     * It used to fire on every upload. That spent a model call on every
+     * report whether or not anyone ever read the summary, including on the
+     * reports a patient uploads speculatively between visits, and it is the
+     * single largest line in the per-appointment AI cost. The report lands at
+     * `idle`; nothing is queued until it is asked for.
+     */
 
     return report;
   }
@@ -247,9 +273,16 @@ export class ReportsService {
       );
       replaced = { oldKey: report.file_key };
       report.file_key = key;
-      // The old summary describes a file that is no longer attached.
+      /*
+       * The old summary describes a file that is no longer attached, so it
+       * goes. It used to be re-queued straight away; with generation manual
+       * that would be the one place the server still spent a model call
+       * nobody asked for — and on a file the doctor may have swapped in
+       * precisely because they were not going to read a summary of it.
+       * Cleared and left `idle`: the button is there when they want it.
+       */
       report.ai_summary = null;
-      report.ai_summary_status = AiJobStatus.PENDING;
+      report.ai_summary_status = AiJobStatus.IDLE;
       report.ai_summary_error = null;
       report.ai_summarized_at = null;
     }
@@ -260,7 +293,12 @@ export class ReportsService {
       // Drop the superseded object only after the row points at the new one,
       // so a failure here can never leave the report pointing at nothing.
       await this.storage.delete(replaced.oldKey).catch(() => undefined);
-      void this.summaries.summarizeInBackground(report.id, file!);
+      // The combined summary was built from a report summary that has just
+      // been cleared, so it is rebuilt from whatever is still ready — which
+      // may be nothing, in which case it clears too.
+      if (report.appointment_id) {
+        void this.summaries.consolidateForAppointment(report.appointment_id);
+      }
     } else if (report.appointment_id) {
       // Title-only edit still changes what the combined summary is built from.
       void this.summaries.consolidateForAppointment(report.appointment_id);

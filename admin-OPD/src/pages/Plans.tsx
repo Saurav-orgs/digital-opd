@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
-import { ConfirmDialog, Field, Loading, Modal } from '../components/ui';
+import { ConfirmDialog, Field, FloatingCta, Loading, Modal } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { inr } from '../lib/money';
 import type { Plan, PlanInput } from '../api/types';
@@ -145,9 +145,11 @@ export default function PlansPage() {
     <div>
       <div className="page-head">
         <h2>Plans</h2>
-        <button className="btn btn-primary" onClick={openCreate}>
-          New plan
-        </button>
+        <FloatingCta>
+          <button className="btn btn-primary" onClick={openCreate}>
+            New plan
+          </button>
+        </FloatingCta>
       </div>
       <p className="muted page-sub">
         What doctors see on the pricing page and pay at checkout. Editing a price changes what

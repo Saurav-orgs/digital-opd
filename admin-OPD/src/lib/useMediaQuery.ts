@@ -29,16 +29,26 @@ export function useMediaQuery(query: string): boolean {
 /**
  * Breakpoints, taken from the client's design rather than chosen here.
  *
- * The design has two: at 700px the mobile drawer becomes a persistent icon
- * rail, and at 1024px the phone-shaped column becomes a real desktop layout —
- * lists turn into tables, the consultation splits into two columns.
+ * The doctor-panel prototype uses exactly four — 400 / 767 / 900 / 1180 — and
+ * these mirror them. This app had accumulated about twenty-six distinct
+ * widths, which meant a change at "the phone breakpoint" had to be made in
+ * several places and was reliably made in only some of them. Anything in a
+ * stylesheet that is not one of these four is a leftover, not a decision.
+ *
+ * The rail moved 700 → 768. It was 700 because an earlier design said so;
+ * the current one splits at 767/768, and a 68px window where the shell and
+ * the page disagreed about which layout they were in is how the consultation
+ * ended up with two columns inside a drawer.
  */
 
 /** Below this the appointment list is cards, not a table. */
-export const NARROW = '(max-width: 1023px)';
+export const NARROW = '(max-width: 899px)';
 
 /** At and above this the sidebar is a persistent rail, not a drawer. */
-export const RAIL = '(min-width: 700px)';
+export const RAIL = '(min-width: 768px)';
 
 /** At and above this the desktop layouts apply. */
-export const DESKTOP = '(min-width: 1024px)';
+export const DESKTOP = '(min-width: 900px)';
+
+/** The phone layer: cards, sheets, the floating primary action. */
+export const PHONE = '(max-width: 767px)';

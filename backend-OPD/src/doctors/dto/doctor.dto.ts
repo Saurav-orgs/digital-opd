@@ -46,10 +46,46 @@ export class DoctorProfileDto {
   @IsString()
   clinic_name?: string;
 
-  @ApiPropertyOptional({ example: '2nd Floor, MG Road, Bengaluru 560001' })
+  /**
+   * Line 1. It carried the whole address as free text before the onboarding
+   * wizard split it, and still does for every doctor who has not opened that
+   * form — nothing was re-parsed, so both shapes are valid here.
+   */
+  @ApiPropertyOptional({ example: '2nd Floor, MG Road' })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   clinic_address?: string;
+
+  @ApiPropertyOptional({ example: 'Near Trinity Metro' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  clinic_address_line2?: string;
+
+  @ApiPropertyOptional({ example: 'Bengaluru' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_city?: string;
+
+  @ApiPropertyOptional({ example: '560001' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Please enter a 6-digit PIN code.' })
+  clinic_pincode?: string;
+
+  @ApiPropertyOptional({ example: 'Karnataka' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_state?: string;
+
+  @ApiPropertyOptional({ example: 'India' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  clinic_country?: string;
 
   @ApiPropertyOptional({ example: '+91 98765 43210' })
   @IsOptional()
@@ -71,6 +107,16 @@ export class DoctorProfileDto {
   @IsString()
   @MaxLength(80)
   license_number?: string;
+
+  /**
+   * The council the registration number belongs to. Each state council
+   * numbers independently, so the number alone does not identify a doctor.
+   */
+  @ApiPropertyOptional({ example: 'Karnataka Medical Council' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  medical_council?: string;
 
   @ApiPropertyOptional({ example: '9876543210' })
   @IsOptional()

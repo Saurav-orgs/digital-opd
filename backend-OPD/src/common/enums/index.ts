@@ -66,6 +66,19 @@ export enum NotificationType {
  * Stored per-row so the UI can show progress and the reason for a failure.
  */
 export enum AiJobStatus {
+  /**
+   * Nothing generated, and nothing queued to generate it.
+   *
+   * Summaries used to start the moment a report was uploaded, so `pending`
+   * meant "queued, coming shortly" and the UI span a loader on it. The doctor
+   * triggers generation now, so there is a third thing a report can be:
+   * summarisable, but nobody has asked. Without this it would sit at
+   * `pending` forever, showing a loader for work that is never going to run.
+   *
+   * The column is a plain STRING, so adding this needs no migration — only a
+   * data migration to retire the `pending` rows that were left stranded.
+   */
+  IDLE = 'idle',
   PENDING = 'pending',
   PROCESSING = 'processing',
   READY = 'ready',
@@ -223,6 +236,10 @@ export enum ActivityAction {
   CONSULTATION_RECORDED = 'consultation.recorded',
   CONSULTATION_CANCELLED = 'consultation.cancelled',
   PRESCRIPTION_SAVED = 'prescription.saved',
+  PRESCRIPTION_TEMPLATE_SAVED = 'prescription_template.saved',
+  PRESCRIPTION_TEMPLATE_DELETED = 'prescription_template.deleted',
+  /** Which template filled a prescription — an inference otherwise. */
+  PRESCRIPTION_TEMPLATE_APPLIED = 'prescription_template.applied',
   SCHEDULE_UPDATED = 'schedule.updated',
   LEAVE_ADDED = 'schedule.leave_added',
   LEAVE_REMOVED = 'schedule.leave_removed',

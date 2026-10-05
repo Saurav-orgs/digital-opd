@@ -1,56 +1,75 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { dashboardApi, doctorsApi, appointmentsApi } from '../api/endpoints';
-import type { Appointment, ConsultationStatus, Doctor } from '../api/types';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { doctorsApi, appointmentsApi } from '../api/endpoints';
+import type { Appointment, ConsultationStatus } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { WalkInModal } from '../components/WalkInModal';
 import { TopbarPortal } from '../components/TopbarPortal';
 import { BookingQrModal } from '../components/BookingQr';
-import { Badge, Empty, Loading } from '../components/ui';
+import { Badge, ConfirmDialog, Empty, FloatingCta, Loading, SearchField } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
 import { displayStatus, isMissed } from '../lib/appointmentStatus';
 import { avatarTone, initials } from '../lib/avatar';
+import { Download } from 'lucide-react';
+import { useToast } from '../components/Toast';
+import { useAnchoredMenu } from '../lib/anchoredMenu';
 import {
-  CalendarIcon,
   CheckCircleIcon,
-  FilterIcon,
   PhoneIcon,
   PlusPersonIcon,
   QrIcon,
   ResetIcon,
-  SearchIcon,
 } from '../components/icons';
 
-type Range = 'previous' | 'today' | 'upcoming';
-/** Matches the design's popover: All is the default, not Pending. */
-type StatusFilter = 'all' | 'pending' | 'done';
-
-const STATUS_LABEL: Record<StatusFilter, string> = {
-  all: 'All',
-  pending: 'Pending',
-  done: 'Completed',
-};
-
 /**
- * On Previous, "pending" is a contradiction — the day is over, so a visit
- * still waiting is one the patient missed. Same filter, honest label.
+ * The screen is one day at a time now.
+ *
+ * It used to be three range tabs — Previous / Today / Upcoming — with a date
+ * filter popover beside them, which is two controls answering the same
+ * question and neither of them "show me Thursday". The range was a client
+ * invention anyway: the API takes a date, so a day navigator maps straight
+ * onto it.
  */
-function statusLabel(key: StatusFilter, range: Range) {
-  if (key === 'pending' && range === 'previous') return 'Missed';
-  return STATUS_LABEL[key];
+type StatusFilter = 'all' | 'done' | 'pending' | 'missed';
+
+/** Today in the clinic's own day, as YYYY-MM-DD. */
+function todayISO(): string {
+  const n = new Date();
+  return [
+    n.getFullYear(),
+    String(n.getMonth() + 1).padStart(2, '0'),
+    String(n.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+/** Calendar arithmetic on a YYYY-MM-DD string, in whole days. */
+function shiftDay(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d + days));
+  return at.toISOString().slice(0, 10);
+}
+
+function dayLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  // "Fri, 25 September". Built from the parts rather than from one
+  // `toLocaleDateString` call, because en-GB renders the weekday without the
+  // comma the design has, and the comma is what stops it reading as a single
+  // run-on phrase.
+  const weekday = at.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+  const month = at.toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
+  return `${weekday}, ${d} ${month}`;
 }
 
 export default function Dashboard() {
   const { user, isDoctor } = useAuth();
   const navigate = useNavigate();
-  const [range, setRange] = useState<Range>('today');
+  const [day, setDay] = useState<string>(todayISO);
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [date, setDate] = useState<string | undefined>(undefined);
-  // The Previous tab filters by span rather than by day — "who did I see in
-  // March" is the question there, not "who came on the 3rd".
-  const [from, setFrom] = useState<string | undefined>(undefined);
-  const [to, setTo] = useState<string | undefined>(undefined);
+  // The design folds the four figures away behind one. Opened, they are the
+  // status filter — so the toolbar's separate filter popover is gone.
+  const [statsOpen, setStatsOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState<string | undefined>(undefined);
   const [walkInOpen, setWalkInOpen] = useState(false);
@@ -60,11 +79,6 @@ export default function Dashboard() {
     const t = setTimeout(() => setSearch(searchInput.trim() || undefined), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: dashboardApi.summary,
-  });
 
   /*
    * The hero names the doctor. `/doctors/me` carries no permission guard — any
@@ -91,36 +105,98 @@ export default function Dashboard() {
   // login with a role sees the queue and works it, but does not register
   // people into it; the client was explicit about that.
   const canCreate = isDoctor;
-  const spanActive = range === 'previous' && (!!from || !!to);
-  const filtersActive = !!search || status !== 'all' || !!date || spanActive;
+  const isToday = day === todayISO();
+  const filtersActive = !!search || status !== 'all';
+
+  /*
+   * The day's appointments, fetched here rather than inside the table: the
+   * KPI figures are counts of these rows, and Export writes them. Reading
+   * them from the global summary instead would make the tiles describe a
+   * different set from the list under them.
+   */
+  const listQ = useQuery({
+    queryKey: ['appointments', { day, search }],
+    queryFn: () => appointmentsApi.list({ date: day, search }),
+  });
+  const rows = useMemo(() => listQ.data ?? [], [listQ.data]);
+
+  const counts = useMemo(
+    () => ({
+      total: rows.length,
+      done: rows.filter((a) => isDone(a.consultation_status)).length,
+      missed: rows.filter((a) => isMissed(a)).length,
+      pending: rows.filter(
+        (a) => isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a),
+      ).length,
+    }),
+    [rows],
+  );
+
+  const shown = useMemo(() => {
+    if (status === 'all') return rows;
+    if (status === 'done') return rows.filter((a) => isDone(a.consultation_status));
+    if (status === 'missed') return rows.filter((a) => isMissed(a));
+    return rows.filter(
+      (a) => isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a),
+    );
+  }, [rows, status]);
+
+  /**
+   * The day as a spreadsheet.
+   *
+   * Built in the browser from rows already on screen — the desk wants what it
+   * is looking at, and a server-side export would be a second definition of
+   * "the day" to keep in step with this one. Quoted properly: a patient's
+   * name can contain a comma, and a CSV that breaks on one is worse than none.
+   */
+  const exportCsv = () => {
+    const cell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [
+      ['Time', 'Patient', 'Mobile', 'Age', 'Gender', 'Status', 'Reports'],
+      ...shown.map((a) => [
+        a.start_time?.slice(0, 5) ?? '',
+        a.patient_name,
+        a.patient_mobile,
+        a.patient_age ?? '',
+        a.patient_gender ?? '',
+        displayStatus(a),
+        a.reports_count ?? 0,
+      ]),
+    ]
+      .map((r) => r.map(cell).join(','))
+      .join('\r\n');
+
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `appointments-${day}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const resetFilters = () => {
     setSearchInput('');
     setSearch(undefined);
     setStatus('all');
-    setDate(undefined);
-    setFrom(undefined);
-    setTo(undefined);
   };
 
-  const spanLabel = (() => {
-    if (from && to) return `${prettyShortDate(from)} – ${prettyShortDate(to)}`;
-    if (from) return `From ${prettyShortDate(from)}`;
-    if (to) return `Until ${prettyShortDate(to)}`;
-    return 'Date range';
-  })();
-
-  if (isLoading) return <Loading />;
-  if (error) return <Empty>Could not load the appointments.</Empty>;
-  if (!data) return null;
+  /*
+   * The page used to block on `dashboardApi.summary` — it fed the four stat
+   * tiles. The KPI figures are counts of the day's own rows now, so that
+   * request is gone entirely rather than left fetching for nothing: an error
+   * from it was taking down the whole screen, including a list that had
+   * loaded perfectly well beside it.
+   *
+   * The list has its own loading and empty states inside `DayTable`, so the
+   * header, the day axis and the KPI strip stay on screen while a day loads
+   * instead of the page blanking to a spinner on every arrow press.
+   */
 
   /*
    * The four tiles come out of the summary that was already being fetched:
    * "completed" is today's confirmed count less the ones still pending, and
    * "remaining" is that pending count. No new endpoint, no second request.
    */
-  const completedToday = Math.max(0, data.total - data.pending.today);
-
   const doctorName = meQ.data?.name ?? user?.name ?? '';
 
   return (
@@ -153,246 +229,180 @@ export default function Dashboard() {
         )}
       </TopbarPortal>
 
-      <DoctorHero
-        doctor={meQ.data}
-        fallbackName={user?.name ?? ''}
-        staff={
-          !isDoctor && user
-            ? { name: user.name, role: user.roleName }
-            : null
-        }
-      />
-
-      <div className="stat-row">
-        <StatTile accent="teal" icon={<CalendarIcon size={20} />} num={data.total} label="Today" />
-        <StatTile
-          accent="marigold"
-          icon={<CheckCircleIcon size={20} />}
-          num={completedToday}
-          label="Completed"
-        />
-        <StatTile
-          accent="berry"
-          icon={<HourglassIcon />}
-          num={data.pending.today}
-          label="Remaining"
-        />
-        <StatTile accent="sky" icon={<CalendarIcon size={20} />} num={data.upcoming} label="Upcoming" />
-      </div>
-
-      {/* Filters and the list read as one surface: the toolbar acts on the
-          rows directly below it, so a seam between them would be a lie. */}
-      <div className="list-panel">
-        <div className="list-panel-head">
-          <div className="dash-toolbar">
-            <div className="dash-search">
-              <span className="dash-search-icon" aria-hidden>
-                <SearchIcon size={17} />
-              </span>
-              <input
-                className="input"
-                type="search"
-                placeholder="Search by name or mobile number"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-            </div>
-
-            <div className="dash-toolbar-filters">
-              <FilterPopover
-                label={statusLabel(status, range)}
-                active={status !== 'all'}
-                icon={<FilterIcon size={16} />}
-              >
-                {(close) =>
-                  (Object.keys(STATUS_LABEL) as StatusFilter[]).map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`filter-opt ${status === key ? 'selected' : ''}`}
-                      onClick={() => {
-                        setStatus(key);
-                        close();
-                      }}
-                    >
-                      {statusLabel(key, range)}
-                    </button>
-                  ))
-                }
-              </FilterPopover>
-
-              {range === 'previous' ? (
-                <FilterPopover label={spanLabel} active={spanActive} icon={<CalendarIcon size={16} />}>
-                  {(close) => (
-                    <>
-                      <button
-                        type="button"
-                        className={`filter-opt ${!spanActive ? 'selected' : ''}`}
-                        onClick={() => {
-                          setFrom(undefined);
-                          setTo(undefined);
-                          close();
-                        }}
-                      >
-                        Any date
-                      </button>
-                      <div className="filter-date">
-                        <label className="form-label">From</label>
-                        <input
-                          className="input"
-                          type="date"
-                          value={from ?? ''}
-                          max={to}
-                          onChange={(e) => setFrom(e.target.value || undefined)}
-                          aria-label="From date"
-                        />
-                      </div>
-                      <div className="filter-date">
-                        <label className="form-label">To</label>
-                        <input
-                          className="input"
-                          type="date"
-                          value={to ?? ''}
-                          min={from}
-                          onChange={(e) => setTo(e.target.value || undefined)}
-                          aria-label="To date"
-                        />
-                      </div>
-                      <div className="filter-date">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          style={{ width: '100%', justifyContent: 'center' }}
-                          onClick={close}
-                        >
-                          Done
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </FilterPopover>
-              ) : (
-              <FilterPopover
-                label={date ? prettyShortDate(date) : 'Date'}
-                active={!!date}
-                icon={<CalendarIcon size={16} />}
-                // Today is one date already; a date picker on it can only
-                // empty the list.
-                disabled={range === 'today'}
-              >
-                {(close) => (
-                  <>
-                    <button
-                      type="button"
-                      className={`filter-opt ${!date ? 'selected' : ''}`}
-                      onClick={() => {
-                        setDate(undefined);
-                        close();
-                      }}
-                    >
-                      Any date
-                    </button>
-                    <div className="filter-date">
-                      <input
-                        className="input"
-                        type="date"
-                        value={date ?? ''}
-                        onChange={(e) => {
-                          setDate(e.target.value || undefined);
-                          close();
-                        }}
-                        aria-label="Filter by date"
-                      />
-                    </div>
-                  </>
-                )}
-              </FilterPopover>
-              )}
-
+      {/*
+        The teal DoctorHero band is gone. It named the doctor to the doctor on
+        the screen they open most, and the design spends that height on rows
+        instead; the name is in the sidebar and the top bar already.
+      */}
+      <div className="page-head">
+        <h1>Appointments</h1>
+        <div className="dash-head-actions">
+          {meQ.data?.public_slug && (
+            <button className="btn btn-sm" onClick={() => setQrOpen(true)}>
+              <QrIcon size={16} />
+              Clinic QR
+            </button>
+          )}
+          {canCreate && (
+            <FloatingCta>
               <button
-                className="reset-filters-btn"
-                onClick={resetFilters}
-                disabled={!filtersActive}
-                title="Reset filters"
-                aria-label="Reset filters"
+                className="btn btn-primary"
+                disabled={!doctorId}
+                onClick={() => setWalkInOpen(true)}
               >
-                <ResetIcon size={17} />
+                <PlusPersonIcon size={17} />
+                Walk-in
               </button>
-            </div>
-          </div>
-
-          {/* Range tabs — always one row, sized down on narrow screens. */}
-          <div className="range-tabs">
-            <TabButton
-              label="Previous"
-              active={range === 'previous'}
-              count={data.previous}
-              pending={data.pending.previous}
-              onClick={() => setRange('previous')}
-            />
-            <TabButton
-              label="Today"
-              active={range === 'today'}
-              count={data.total}
-              pending={data.pending.today}
-              onClick={() => {
-                setRange('today');
-                setDate(undefined);
-              }}
-            />
-            <TabButton
-              label="Upcoming"
-              active={range === 'upcoming'}
-              count={data.upcoming}
-              pending={data.pending.upcoming}
-              onClick={() => setRange('upcoming')}
-            />
-          </div>
+            </FloatingCta>
+          )}
         </div>
-
-        <RangeTable
-          range={range}
-          search={search}
-          date={date}
-          from={range === 'previous' ? from : undefined}
-          to={range === 'previous' ? to : undefined}
-          status={status}
-          filtersActive={filtersActive}
-          onSelect={(id) => navigate(`/appointments/${id}`)}
-        />
       </div>
 
       {/*
-        The design floats the walk-in action rather than filing it in the
-        toolbar. It is the one thing on this screen that creates something, and
-        it has to be reachable with the list scrolled to any position — the
-        front desk books a walk-in while looking at the queue, not at the top
-        of the page.
+        One figure, with the rest behind a toggle.
+        Four tiles were on screen permanently in four colours, which implied a
+        relationship between the numbers that does not exist and spent the top
+        of the page on something the doctor reads once. Opened, the four are
+        also the status filter — click one and the list narrows — which is why
+        the toolbar's separate filter popover went with them.
       */}
-      <div className="fab-row">
-        {/* The booking QR next to it: the other thing the desk is asked for
-            while looking at the queue is "how do I book next time?". */}
-        {meQ.data?.public_slug && (
+      {/* Filters and the list read as one surface: the toolbar acts on the
+          rows directly below it, so a seam between them would be a lie. */}
+      <div className="list-panel">
+        <div className="list-panel-head dash-controls">
+          {/*
+            The day axis. `‹ Today [Fri, 25 September ▾] ›` — one control for
+            the question the three range tabs and the date popover were
+            splitting between them.
+          */}
+          <div className="day-nav">
+            <button
+              type="button"
+              className="day-arrow"
+              aria-label="Previous day"
+              onClick={() => setDay((d) => shiftDay(d, -1))}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className={`day-today ${isToday ? 'is-today' : ''}`}
+              onClick={() => setDay(todayISO())}
+              disabled={isToday}
+            >
+              Today
+            </button>
+            <label className="day-pick">
+              <span>{dayLabel(day)}</span>
+              {/* The browser's own date picker rather than a popover of our
+                  own: it is the one control every phone already knows. */}
+              <input
+                type="date"
+                value={day}
+                aria-label="Pick a date"
+                onChange={(e) => e.target.value && setDay(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="day-arrow"
+              aria-label="Next day"
+              onClick={() => setDay((d) => shiftDay(d, 1))}
+            >
+              ›
+            </button>
+          </div>
+
           <button
-            className="fab-walkin fab-qr"
-            onClick={() => setQrOpen(true)}
-            title="Booking QR code"
-            aria-label="Booking QR code"
+            type="button"
+            className={`kpi kpi-total ${status === 'all' ? 'selected' : ''}`}
+            onClick={() => setStatus('all')}
           >
-            <QrIcon size={19} />
-            <span>QR</span>
+            <span className="kpi-label">Total booked</span>
+            <span className="kpi-num">{counts.total}</span>
           </button>
-        )}
-        {canCreate && (
+
+          {/* A switch: it turns a persistent view on and off, which is not
+              what a link means. The label does not change with the state —
+              the switch position already says which way it is. */}
           <button
-            className="fab-walkin"
-            disabled={!doctorId}
-            onClick={() => setWalkInOpen(true)}
+            type="button"
+            className="kpi-toggle"
+            role="switch"
+            aria-checked={statsOpen}
+            aria-expanded={statsOpen}
+            onClick={() => setStatsOpen((v) => !v)}
           >
-            <PlusPersonIcon size={19} />
-            <span>Walk In</span>
+            <span className="kpi-switch" aria-hidden />
+            Show all statistics
           </button>
+
+          <SearchField
+            value={searchInput}
+            onChange={setSearchInput}
+            placeholder="Search by name or mobile number"
+            label="Search appointments"
+          />
+
+          <button
+            className="reset-filters-btn"
+            onClick={resetFilters}
+            disabled={!filtersActive}
+            title="Reset filters"
+            aria-label="Reset filters"
+          >
+            <ResetIcon size={17} />
+          </button>
+
+          <button className="btn btn-sm dash-export" onClick={exportCsv} disabled={!rows.length}>
+            <Download size={15} />
+            Export
+          </button>
+        </div>
+
+        {/*
+          The other three figures drop in under the row rather than pushing it
+          wider. They are the status filter as well as the count — click one
+          and the list narrows — which is why the toolbar has no separate
+          filter popover.
+        */}
+        {statsOpen && (
+          <div className="kpi-drawer">
+            <button
+              type="button"
+              className={`kpi ${status === 'done' ? 'selected' : ''}`}
+              onClick={() => setStatus((v) => (v === 'done' ? 'all' : 'done'))}
+            >
+              <span className="kpi-label">Completed</span>
+              <span className="kpi-num">{counts.done}</span>
+            </button>
+            <button
+              type="button"
+              className={`kpi ${status === 'pending' ? 'selected' : ''}`}
+              onClick={() => setStatus((v) => (v === 'pending' ? 'all' : 'pending'))}
+            >
+              <span className="kpi-label">Pending</span>
+              <span className="kpi-num">{counts.pending}</span>
+            </button>
+            <button
+              type="button"
+              className={`kpi ${status === 'missed' ? 'selected' : ''}`}
+              onClick={() => setStatus((v) => (v === 'missed' ? 'all' : 'missed'))}
+            >
+              <span className="kpi-label">Missed</span>
+              <span className="kpi-num">{counts.missed}</span>
+            </button>
+          </div>
         )}
+
+        <DayTable
+          rows={shown}
+          canAct={canCreate}
+          loading={listQ.isLoading}
+          isToday={isToday}
+          filtersActive={filtersActive}
+          onSelect={(id) => navigate(`/appointments/${id}`)}
+        />
       </div>
 
       {walkInOpen && doctorId && (
@@ -402,24 +412,6 @@ export default function Dashboard() {
         <BookingQrModal doctor={meQ.data} onClose={() => setQrOpen(false)} />
       )}
     </>
-  );
-}
-
-function HourglassIcon() {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.9}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M7 3h10M7 21h10M8 3v3.5c0 2 4 3.4 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.4-4 5.5s4 3.5 4 5.5V21" />
-    </svg>
   );
 }
 
@@ -452,169 +444,6 @@ function fmtTime(t: string | null | undefined) {
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-/** Heading over a day's cards: "Yesterday", "Tomorrow", or "Wed, 2 Sept". */
-function dateGroupLabel(date: string) {
-  const d = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return date;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const offset = Math.round((d.getTime() - today.getTime()) / 86_400_000);
-  if (offset === 0) return 'Today';
-  if (offset === -1) return 'Yesterday';
-  if (offset === 1) return 'Tomorrow';
-  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-/** "2026-09-04" → "4 Sep". */
-function prettyShortDate(date: string) {
-  const d = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return date;
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
-
-/**
- * A filter button with a panel under it.
- *
- * The design uses these rather than native selects because the date filter has
- * two controls in one panel ("Any date" and a picker), which a `<select>`
- * cannot hold. Both filters use it so they read as one row.
- */
-function FilterPopover({
-  label,
-  active,
-  icon,
-  disabled,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  icon: React.ReactNode;
-  /** Greyed out and closed — the filter makes no sense on this tab. */
-  disabled?: boolean;
-  children: (close: () => void) => React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  return (
-    <div className="filter-btn-wrap" ref={wrapRef}>
-      <button
-        className={`filter-btn ${active ? 'active-filter' : ''}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        disabled={disabled}
-      >
-        {icon}
-        <span>{label}</span>
-      </button>
-      {open && !disabled && (
-        <div className="filter-panel">{children(() => setOpen(false))}</div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Who the doctor is. The clinic line and the date that used to sit under the
- * name are gone — the updated design drops both, and neither was telling the
- * doctor something they did not know.
- *
- * For a staff login the band answers a different question — who *you* are and
- * whose clinic you are working in — so it leads with the staff member's name
- * and role, and puts the doctor underneath. The doctor's own login is
- * unchanged.
- */
-function DoctorHero({
-  doctor,
-  fallbackName,
-  staff,
-}: {
-  doctor: Doctor | undefined;
-  fallbackName: string;
-  /** The signed-in staff member, when the account is not the doctor's own. */
-  staff: { name: string; role: string | null } | null;
-}) {
-  const doctorName = doctor?.name ?? fallbackName;
-  const meta = [doctor?.qualifications, doctor?.specialization]
-    .filter(Boolean)
-    .join(' · ');
-  const avatarName = staff?.name ?? doctorName;
-
-  return (
-    <header className="doc-hero">
-      <div className="doc-hero-top">
-        {!staff && doctor?.profile_photo_url ? (
-          <img className="doc-avatar" src={doctor.profile_photo_url} alt="" />
-        ) : (
-          <span className="doc-avatar" aria-hidden>
-            {initials(avatarName)}
-          </span>
-        )}
-        <div style={{ minWidth: 0 }}>
-          {staff ? (
-            <>
-              <h1 className="doc-name">
-                {staff.name}
-                {staff.role && <span className="role-chip">{staff.role}</span>}
-              </h1>
-              <div className="doc-meta">{doctorName}</div>
-            </>
-          ) : (
-            <>
-              <h1 className="doc-name">{doctorName}</h1>
-              {meta && <div className="doc-meta">{meta}</div>}
-            </>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function TabButton({
-  label,
-  active,
-  count,
-  pending,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  count: number;
-  pending: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`range-tab ${active ? 'active' : ''}`}
-      onClick={onClick}
-      title={pending > 0 ? `${pending} still to see` : undefined}
-    >
-      <span>{label}</span>
-      <span className="range-tab-count">({count})</span>
-      {/* The amber dot is the only thing that says "there is work left here" —
-          the count beside it is the whole tab, done and undone together. */}
-      {pending > 0 && !active && <span className="range-tab-dot" aria-hidden />}
-    </button>
-  );
-}
-
 function isDone(status: ConsultationStatus) {
   return status === 'done';
 }
@@ -640,65 +469,120 @@ function isOpen(status: ConsultationStatus) {
   return status === 'pending' || status === 'on_hold';
 }
 
-/** The design's left accent bar: where this visit sits in the day. */
-function bucketOf(a: Appointment, range: Range, isNext: boolean): string {
-  if (range === 'previous') return 'previous';
-  if (range === 'upcoming') return 'upcoming';
+/**
+ * The design's left accent bar: where this visit sits in the day.
+ *
+ * Past rows dim. A day the doctor has already worked through is reference,
+ * and on any day but today every row is in that state — which is the honest
+ * reading of a list you are looking back at.
+ */
+function bucketOf(a: Appointment, isToday: boolean, isNext: boolean): string {
+  if (!isToday) return 'previous';
   // Anything that is over — seen, missed or called off — recedes to grey.
   if (!isOpen(a.consultation_status) || isCancelled(a)) return 'today-done';
   return isNext ? 'today-next' : 'today-wait';
 }
 
-function RangeTable({
-  range,
-  search,
-  date,
-  from,
-  to,
-  status,
+/**
+ * One day's list. Presentational — the page owns the query, because the KPI
+ * figures above are counts of these same rows and must not come from a
+ * different request.
+ */
+function DayTable({
+  rows: filtered,
+  loading,
+  isToday,
   filtersActive,
+  canAct,
   onSelect,
 }: {
-  range: Range;
-  search?: string;
-  date?: string;
-  from?: string;
-  to?: string;
-  status: StatusFilter;
+  rows: Appointment[];
+  loading: boolean;
+  isToday: boolean;
   filtersActive: boolean;
+  /** False for a viewer who may read the queue but not work it. */
+  canAct: boolean;
   onSelect: (id: string) => void;
 }) {
   const narrow = useMediaQuery(NARROW);
-  const listQ = useQuery({
-    queryKey: ['appointments', { range, search, date, from, to }],
-    queryFn: () => appointmentsApi.list({ range, search, date, from, to }),
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<Appointment | null>(null);
+  const menuBtn = useRef<HTMLButtonElement>(null);
+  const closeMenu = useCallback(() => setMenuFor(null), []);
+  const { menuRef, style } = useAnchoredMenu(!!menuFor, menuBtn, closeMenu);
+
+  const onSelectionChange = (next: Set<string>) => setSelected(next);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['appointments'] });
+  };
+
+  /** Marking a visit done from the list, without opening it. */
+  const markDone = useMutation({
+    mutationFn: (id: string) => appointmentsApi.setConsultation(id, 'done'),
+    onSuccess: () => {
+      refresh();
+      toast.success('Marked as completed');
+    },
+    onError: (e) => toast.error(e),
   });
 
-  const filtered = useMemo(() => {
-    const rows = listQ.data ?? [];
-    if (status === 'all') return rows;
-    if (status === 'done') return rows.filter((a) => isDone(a.consultation_status));
-    return rows.filter((a) => isOpen(a.consultation_status));
-  }, [listQ.data, status]);
+  /*
+   * Cancel is the only thing in the row menu. Cancelling frees the slot and
+   * keeps the row, so the day still reads as what happened; nothing on this
+   * screen deletes an appointment.
+   */
+  const cancel = useMutation({
+    mutationFn: (id: string) => appointmentsApi.setConsultation(id, 'rejected'),
+    onSuccess: () => {
+      refresh();
+      setCancelling(null);
+      toast.success('Appointment cancelled', 'The slot is free to book again.');
+    },
+    onError: (e) => {
+      setCancelling(null);
+      toast.error(e);
+    },
+  });
+
+  const bulkDone = async () => {
+    const ids = [...selected];
+    for (const id of ids) {
+      try {
+        await appointmentsApi.setConsultation(id, 'done');
+      } catch {
+        // Keep going: one refusal should not strand the rest of the batch.
+      }
+    }
+    setSelected(new Set());
+    refresh();
+    toast.success(`${ids.length} appointment${ids.length === 1 ? '' : 's'} marked as completed`);
+  };
 
   /*
-   * The first appointment of the day that is still pending is the one the
-   * doctor is about to see. Marking it is what turns a list into a queue.
+   * The first appointment still pending is the one the doctor is about to
+   * see. Marking it is what turns a list into a queue — and only on today:
+   * on any other day there is no "next".
    */
   const nextId = useMemo(() => {
-    if (range !== 'today') return null;
+    if (!isToday) return null;
     return (
       filtered.find((a) => isOpen(a.consultation_status) && !isCancelled(a))?.id ?? null
     );
-  }, [filtered, range]);
+  }, [filtered, isToday]);
 
-  if (listQ.isLoading) return <Loading />;
+  if (loading) return <Loading />;
   if (!filtered.length) {
     return (
       <Empty>
         {filtersActive
           ? 'No appointments match your search or filters.'
-          : `No ${range === 'today' ? 'appointments today' : `${range} appointments`}.`}
+          : isToday
+            ? 'No appointments today.'
+            : 'No appointments on this day.'}
       </Empty>
     );
   }
@@ -713,43 +597,68 @@ function RangeTable({
     // The server already orders Previous newest-first and Upcoming
     // soonest-first, so a heading goes in wherever the date changes. Today
     // is one day and needs none.
-    let lastDate: string | null = null;
+    // Every row is the same date now, so the date-group headings the three
+    // range tabs needed are gone with them.
     return (
       <div className="appt-cards">
-        {filtered.map((a) => {
-          const heading =
-            range !== 'today' && a.appointment_date !== lastDate
-              ? dateGroupLabel(a.appointment_date)
-              : null;
-          lastDate = a.appointment_date;
-          return (
-            <Fragment key={a.id}>
-              {heading && <div className="date-group">{heading}</div>}
-              <AppointmentCard
-                a={a}
-                bucket={bucketOf(a, range, a.id === nextId)}
-                isNext={a.id === nextId}
-                onClick={() => onSelect(a.id)}
-              />
-            </Fragment>
-          );
-        })}
+        {filtered.map((a) => (
+          <AppointmentCard
+            key={a.id}
+            a={a}
+            bucket={bucketOf(a, isToday, a.id === nextId)}
+            isNext={a.id === nextId}
+            onClick={() => onSelect(a.id)}
+          />
+        ))}
       </div>
     );
   }
 
+  const allSelected = filtered.length > 0 && filtered.every((a) => selected.has(a.id));
+
   return (
     <div className="table-wrap">
-      <table>
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span>
+            {selected.size} selected
+          </span>
+          {canAct && (
+            <button className="btn btn-sm" onClick={bulkDone}>
+              Mark as completed
+            </button>
+          )}
+          <button className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+      <table className="appt-table">
         <thead>
           <tr>
+            {/* Bulk select is desktop-only by design — a phone row is a card
+                with no room for a checkbox, and the actions it enables are
+                desk work rather than something done between patients. */}
+            <th className="c-check">
+              <input
+                type="checkbox"
+                aria-label="Select every appointment"
+                checked={allSelected}
+                onChange={(e) =>
+                  onSelectionChange(
+                    e.target.checked ? new Set(filtered.map((a) => a.id)) : new Set(),
+                  )
+                }
+              />
+            </th>
             <th>Patient</th>
             <th>Contact</th>
+            <th>Reports</th>
             <th>Status</th>
-            {/* Every row on the Today tab carries today's date, so printing it
-                on each of them says nothing — the time is the part that
-                differs. The other two tabs span days and still need it. */}
-            <th>{range === 'today' ? 'Time' : 'Date & time'}</th>
+            {/* One day per view, so every row carries the same date and only
+                the time differs. */}
+            <th>Time</th>
+            <th className="c-actions" aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
@@ -757,17 +666,65 @@ function RangeTable({
             <AppointmentRow
               key={a.id}
               a={a}
-              bucket={bucketOf(a, range, a.id === nextId)}
-              showDate={range !== 'today'}
+              bucket={bucketOf(a, isToday, a.id === nextId)}
               isNext={a.id === nextId}
+              checked={selected.has(a.id)}
+              onCheck={(next) => {
+                const s = new Set(selected);
+                if (next) s.add(a.id);
+                else s.delete(a.id);
+                setSelected(s);
+              }}
+              onMarkDone={() => markDone.mutate(a.id)}
+              markingDone={markDone.isPending}
+              menuOpen={menuFor === a.id}
+              onMenu={() => setMenuFor((v) => (v === a.id ? null : a.id))}
+              menuRef={menuFor === a.id ? menuBtn : nullRef}
               onClick={() => onSelect(a.id)}
             />
           ))}
         </tbody>
       </table>
+
+      {menuFor && (
+        <div ref={menuRef} className="action-menu-dropdown" style={{ ...style, zIndex: 70 }}>
+          <button
+            className="action-menu-item danger"
+            onClick={() => {
+              const row = filtered.find((x) => x.id === menuFor) ?? null;
+              setMenuFor(null);
+              setCancelling(row);
+            }}
+          >
+            Cancel appointment
+          </button>
+        </div>
+      )}
+
+      {cancelling && (
+        <ConfirmDialog
+          title="Cancel this appointment?"
+          message={
+            <>
+              {cancelling.patient_name}'s {cancelling.start_time?.slice(0, 5)} slot is
+              freed and can be booked again. The row stays on the day, marked
+              cancelled.
+            </>
+          }
+          confirmLabel="Cancel it"
+          cancelLabel="Keep it"
+          destructive
+          busy={cancel.isPending}
+          onConfirm={() => cancel.mutate(cancelling.id)}
+          onCancel={() => setCancelling(null)}
+        />
+      )}
     </div>
   );
 }
+
+/** A stable placeholder, so a row that owns no open menu passes a real ref. */
+const nullRef = { current: null } as React.RefObject<HTMLButtonElement | null>;
 
 /**
  * One appointment as a card — the phone and tablet equivalent of a row.
@@ -858,26 +815,52 @@ function AppointmentCard({
 function AppointmentRow({
   a,
   bucket,
-  showDate,
   isNext,
+  checked,
+  onCheck,
+  onMarkDone,
+  markingDone,
+  menuOpen,
+  onMenu,
+  menuRef,
   onClick,
 }: {
   a: Appointment;
   bucket: string;
-  showDate: boolean;
   isNext: boolean;
+  checked: boolean;
+  onCheck: (next: boolean) => void;
+  onMarkDone: () => void;
+  markingDone: boolean;
+  menuOpen: boolean;
+  onMenu: () => void;
+  menuRef: React.RefObject<HTMLButtonElement | null>;
   onClick: () => void;
 }) {
+  // The report count has a column of its own now, so it comes off this line.
   const who = [
-    a.patient_gender,
+    // Capitalised, as the design has it — the column stores "female".
+    a.patient_gender && a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1),
     a.patient_age && `${a.patient_age} yrs`,
-    reportsLabel(a.reports_count),
+    a.description?.trim() || null,
   ]
     .filter(Boolean)
     .join(' · ');
 
+  const over =
+    isDone(a.consultation_status) || isCancelled(a) || isMissed(a);
+
   return (
     <tr className={`clickable-row appt-row ${bucket}`} onClick={onClick}>
+      {/* Stops a tick or a menu press opening the visit underneath it. */}
+      <td className="c-check" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          aria-label={`Select ${a.patient_name}`}
+          checked={checked}
+          onChange={(e) => onCheck(e.target.checked)}
+        />
+      </td>
       <td>
         <span className="row-name-cell">
           <span className={`appt-avatar sm ${avatarTone(a.patient_name)}`} aria-hidden>
@@ -904,6 +887,18 @@ function AppointmentRow({
         </span>
       </td>
       <td className="muted">{a.patient_mobile}</td>
+      {/* A column of its own, as the design has it: a paperclip and a count,
+          or a dash when the visit carries nothing. */}
+      <td className="c-reports muted">
+        {a.reports_count ? (
+          <span className="rep-count">
+            <ClipIcon />
+            {a.reports_count}
+          </span>
+        ) : (
+          <span aria-label="No reports">—</span>
+        )}
+      </td>
       <td>
         {/* A patient's own cancellation lives on the appointment, not the
             consultation; it reads the same as the clinic's. A stale pending
@@ -911,31 +906,52 @@ function AppointmentRow({
         <Badge value={displayStatus(a)} />
       </td>
       <td className="muted" style={{ whiteSpace: 'nowrap' }}>
-        {showDate ? `${a.appointment_date} · ` : ''}
         {a.start_time?.slice(0, 5)}
+      </td>
+      <td className="c-actions" onClick={(e) => e.stopPropagation()}>
+        <div className="row-actions">
+          {/* Marking a visit done without opening it — the desk's move when
+              the patient has already been seen and left. Greyed once the
+              visit is over rather than hidden, so the column does not jump
+              about as the day fills in. */}
+          <button
+            type="button"
+            className={`row-act done ${over ? 'is-over' : ''}`}
+            disabled={over || markingDone}
+            title={over ? displayStatus(a) : 'Mark as completed'}
+            aria-label={over ? displayStatus(a) : 'Mark as completed'}
+            onClick={onMarkDone}
+          >
+            <CheckCircleIcon size={17} />
+          </button>
+          <button
+            ref={menuRef as React.RefObject<HTMLButtonElement>}
+            type="button"
+            className="row-act"
+            aria-label="More actions"
+            aria-expanded={menuOpen}
+            onClick={onMenu}
+          >
+            ⋮
+          </button>
+        </div>
       </td>
     </tr>
   );
 }
 
-function StatTile({
-  accent,
-  icon,
-  num,
-  label,
-}: {
-  accent: 'teal' | 'marigold' | 'berry' | 'sky';
-  icon: React.ReactNode;
-  num: number;
-  label: string;
-}) {
+/** A paperclip, for the reports column. */
+function ClipIcon() {
   return (
-    <div className={`stat-tile ${accent}`}>
-      <span className="stat-icon" aria-hidden>
-        {icon}
-      </span>
-      <div className="stat-num">{num}</div>
-      <div className="stat-label">{label}</div>
-    </div>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3l8-8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
+

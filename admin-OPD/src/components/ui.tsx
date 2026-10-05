@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { X } from 'lucide-react';
+import { SearchIcon } from './icons';
+import { PHONE, useMediaQuery } from '../lib/useMediaQuery';
+import { useAnchoredMenu } from '../lib/anchoredMenu';
 
 export function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
@@ -160,16 +164,26 @@ export function Field({
   error,
   children,
   className,
+  required,
 }: {
   label: string;
   error?: string;
   children: ReactNode;
   /** Extra classes on the wrapper — lets a flex row give a field its width. */
   className?: string;
+  /** Prints a red asterisk after the label so required fields read as such. */
+  required?: boolean;
 }) {
   return (
     <div className={`field ${className ?? ''}`.trim()}>
-      <label>{label}</label>
+      <label>
+        {label}
+        {required && (
+          <span className="req" aria-hidden="true">
+            *
+          </span>
+        )}
+      </label>
       {children}
       {error && <span className="err">{error}</span>}
     </div>
@@ -275,69 +289,14 @@ export function ActionMenuDropdown({
   onClose,
   children,
 }: {
-  btnRef: React.RefObject<HTMLButtonElement>;
+  btnRef: React.RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   children: ReactNode;
 }) {
-  const [coords, setCoords] = useState<{ top?: number; bottom?: number; right: number }>({ right: 0 });
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      const right = Math.max(12, window.innerWidth - rect.right);
-      const spaceBelow = window.innerHeight - rect.bottom;
-
-      if (spaceBelow < 180) {
-        setCoords({
-          bottom: Math.max(12, window.innerHeight - rect.top + 4),
-          right,
-        });
-      } else {
-        setCoords({
-          top: Math.max(12, rect.bottom + 4),
-          right,
-        });
-      }
-    }
-  }, [btnRef]);
-
-  useEffect(() => {
-    const handleScrollOrResize = () => onClose();
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        btnRef.current &&
-        !btnRef.current.contains(e.target as Node)
-      ) {
-        onClose();
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('scroll', handleScrollOrResize, true);
-    window.addEventListener('resize', handleScrollOrResize);
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('scroll', handleScrollOrResize, true);
-      window.removeEventListener('resize', handleScrollOrResize);
-    };
-  }, [btnRef, onClose]);
+  const { menuRef, style } = useAnchoredMenu(true, btnRef, onClose);
 
   return (
-    <div
-      ref={menuRef}
-      className="action-menu-dropdown"
-      style={{
-        position: 'fixed',
-        top: coords.top !== undefined ? `${coords.top}px` : 'auto',
-        bottom: coords.bottom !== undefined ? `${coords.bottom}px` : 'auto',
-        right: `${coords.right}px`,
-        zIndex: 9999,
-      }}
-    >
+    <div ref={menuRef} className="action-menu-dropdown" style={{ ...style, zIndex: 70 }}>
       {children}
     </div>
   );
@@ -358,6 +317,110 @@ export function InfoRow({ label, value, copyable }: { label: string; value: stri
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The screen's create action.
+ *
+ * On desktop it sits in `.page-head` where it is written. On a phone the
+ * design lifts it out of the header and floats it bottom-right, because the
+ * header scrolls away and the thing the screen exists to create has to stay
+ * reachable with the list scrolled anywhere. That is a CSS move, not a second
+ * render — see `.page-cta` in index.css — so the button keeps one position in
+ * the DOM and one place in the tab order.
+ *
+ * This replaced the page-specific `.fab-row` on Appointments, which floated a
+ * walk-in button at every width while every other screen used this — two
+ * mechanisms for one idea, and only one of them had a safe-area inset. That
+ * screen now carries Walk-in in its header like the rest.
+ */
+export function FloatingCta({ children }: { children: ReactNode }) {
+  return <div className="page-cta">{children}</div>;
+}
+
+/**
+ * The list search box, collapsed behind an icon on a phone.
+ *
+ * A 220px input is most of a 390px toolbar, and on the screens that also carry
+ * filters it pushed them onto a third row. Closed it is a 40px icon button;
+ * open it takes the full width and takes focus.
+ *
+ * Closing **clears the query**, deliberately: a collapsed box that is still
+ * filtering is a list that has silently lied about how many rows the clinic
+ * has, with nothing on screen to say why.
+ */
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  label = 'Search',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  label?: string;
+}) {
+  const phone = useMediaQuery(PHONE);
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus follows the toggle rather than `autoFocus`, which only fires on
+  // mount and so did nothing the second time the box was opened.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  // Leaving the phone layer while collapsed would otherwise strand the input
+  // hidden on a desktop width, where there is no toggle to press.
+  useEffect(() => {
+    if (!phone) setOpen(false);
+  }, [phone]);
+
+  const collapsed = phone && !open;
+
+  return (
+    <div className={`dash-search ${collapsed ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}>
+      {collapsed ? (
+        <button
+          type="button"
+          className="dash-search-toggle"
+          onClick={() => setOpen(true)}
+          aria-label={label}
+          aria-expanded={false}
+        >
+          <SearchIcon size={17} />
+        </button>
+      ) : (
+        <>
+          <span className="dash-search-icon" aria-hidden>
+            <SearchIcon size={17} />
+          </span>
+          <input
+            ref={inputRef}
+            className="input"
+            type="search"
+            placeholder={placeholder}
+            aria-label={label}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {phone && (
+            <button
+              type="button"
+              className="dash-search-close"
+              onClick={() => {
+                onChange('');
+                setOpen(false);
+              }}
+              aria-label="Close search"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

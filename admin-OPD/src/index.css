@@ -1,90 +1,163 @@
 /* ── myDigitalOPD design system ───────────────────────────────
-   Redesign (2026-09): the "Calm Clinical" blue was replaced by the teal /
-   marigold system in the approved mockups. Poppins carries the headings,
-   Inter the body; surfaces are flat cards on a warm grey page with a soft
-   shadow and 0.5px hairlines.
+   Redesign (2026-09-30): the teal / marigold system is retuned onto the
+   doctor-panel prototype — a neutral-grey SaaS shell carrying a single green
+   accent. Three things changed and nothing else:
 
-   Every token name from the previous system is kept and remapped rather than
-   renamed, so screens that were not individually redesigned pick the new look
-   up for free and nothing that referenced a token can break. Names marked
-   "was undefined" were referenced in code but never declared — they resolved
-   to an invalid value and silently inherited; they are declared now.
+     surfaces   the green-tinted greys (#f0f0f0 page, #dceee6 borders) become
+                neutral (#F5F6F8, #E5E7EB). This is the change you actually
+                see; the accent barely moved (#167567 → #137A6C).
+     palette    marigold, berry and sky stop being decorative accents and
+                become the semantic four — ok / warn / danger / info. Only the
+                female-avatar pink survives as a colour in its own right,
+                because the prototype keeps it.
+     shape      16/12px radii tighten to 12/8px and pills are gone: chips and
+                badges are 6px rectangles now. Only avatars and status dots
+                stay round.
 
-   Semantic colours still map 1:1 to record state, but the mockups invert the
-   old reading: a *completed* consultation is neutral grey (it is done, it
-   should recede) and teal is kept for a closed/confirmed record.
+   The prototype's own token names are the primary set below; every name this
+   app already used is kept and remapped onto them, so screens that have not
+   been individually redesigned pick the new look up for free. Remap, never
+   rename — see CLAUDE.md. A name that has become meaningless (--radius-pill)
+   stays as a dead alias rather than being deleted.
 
-   Mobile-first: base styles target small screens; @media (min-width) enhances. */
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+   Inter carries everything now; Poppins is gone, so --font-heading is an
+   alias for --font rather than a second family.
+
+   Mobile-first: base styles target small screens; @media (min-width) enhances.
+   Breakpoints are the prototype's four — see --bp-* below. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  /* ── Brand ──────────────────────────────────────────────── */
-  --teal: #167567;
-  --teal-dark: #0d4f45;
-  --sage-tint: #d8f0e6;
-  --sage-line: #b7ded0;
+  /* ── Surfaces ───────────────────────────────────────────── */
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f8f9fa;
+  --surface-3: #f1f3f5;
 
-  --marigold: #f2a128;
-  --marigold-dark: #b9760c;
-  --marigold-tint: #fcebcb;
+  /* ── Lines ──────────────────────────────────────────────── */
+  --border: #e5e7eb;
+  --border-2: #eef0f3;
+  --border-strong: #d3d7dd;
 
-  --berry: #b84571;
-  --berry-dark: #8a2f53;
-  --berry-tint: #f6e1ea;
+  /* ── Ink ────────────────────────────────────────────────── */
+  --text: #14171b;
+  --muted: #6b7280;
+  --faint: #9ca3af;
 
-  --sky: #2e86ab;
-  --sky-dark: #1f5f7a;
-  --sky-tint: #dceef6;
+  /* ── Accent — the one brand colour. Every primary CTA is this
+        and nothing else is. ─────────────────────────────────── */
+  --accent: #137a6c;
+  --accent-hover: #0f655a;
+  --accent-soft: #e6f3f0;
+  --accent-text: #0d5a4f;
+  --accent-row: #f3faf8;
 
-  /* Neutral "spent" surface — completed rows, taken slots. */
-  --neutral-tint: #f2f1ea;
-  --neutral-line: #e4e2d8;
+  /* ── Semantic four — reserved for record state, never decorative ── */
+  --ok: #137a3b;
+  --ok-soft: #dff5e8;
+  --danger: #b42318;
+  --danger-soft: #fde4e1;
+  --warn: #8a5a00;
+  --warn-soft: #fcf0d0;
+  --info: #1d4ed8;
+  --info-soft: #e3ecfc;
 
-  /* ── Legacy names, remapped onto the brand above ────────── */
-  --primary: var(--teal);
-  --primary-hover: var(--teal-dark);
-  --primary-tint: var(--sage-tint);
-  --secondary: var(--teal-dark);
-  --secondary-accent: #1d9e75;
-  --secondary-tint: var(--sage-tint);
-
-  --page: #f0f0f0;
-  --bg: var(--page); /* was undefined */
-  --card: #ffffff;
-  --surface-2: #f7f8f7; /* was undefined */
-  --border: #dceee6;
-  --line: var(--border);
-  --text: #163832;
-  --text-secondary: #4f6e67;
-  --text-muted: #8aa39c; /* was undefined */
-  --muted: var(--text-muted); /* was undefined */
-
-  --ink: var(--text);
-  --ink-soft: var(--text-secondary);
-  --ink-faint: var(--text-muted);
-
-  --danger: #c4433a; /* was undefined */
-  --warning: var(--marigold); /* was undefined */
-  --warning-ink: var(--marigold-dark); /* was undefined */
-
-  /* ── Semantic state — reserved, never decorative ────────── */
-  --state-available: var(--teal);
-  --state-booked: var(--neutral-line);
-  --state-on-hold: var(--marigold-dark);
-  --state-error: var(--danger);
-  --state-done: var(--teal-dark);
+  /* Patient avatars. The only place a colour still means "who" rather than
+     "what state" — the prototype keeps it, so we do. */
+  --avatar-f: #fce7f0;
+  --avatar-f-ink: #9d2c5a;
+  --avatar-m: #e3ecfc;
+  --avatar-m-ink: #1d4ed8;
+  --avatar-o: #ede9fe;
+  --avatar-o-ink: #5b21b6;
 
   /* ── Shape & depth ──────────────────────────────────────── */
-  --radius-card: 16px;
-  --radius-control: 12px;
-  --radius-pill: 999px;
-  --hairline: 0.5px solid var(--border);
-  --shadow: 0 10px 24px rgba(22, 56, 50, 0.07);
-  --shadow-sm: 0 2px 8px rgba(22, 56, 50, 0.05);
+  --r: 8px;
+  --r-lg: 12px;
+  --r-chip: 6px;
+  --sh-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --sh-md: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --sh-lg: 0 24px 48px rgba(16, 24, 40, 0.16);
 
   /* ── Type ───────────────────────────────────────────────── */
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-heading: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* ── Breakpoints ────────────────────────────────────────── */
+  /* Declared for documentation only — @media cannot read a custom property.
+     The four the prototype uses; `useMediaQuery.ts` mirrors them. Anything
+     between these numbers in a media query is a leftover, not a decision. */
+  --bp-xs: 400px;
+  --bp-sm: 767px;
+  --bp-md: 900px;
+  --bp-lg: 1180px;
+
+  /* ═══ Legacy names, remapped onto the set above ═══════════
+     Nothing below introduces a colour. Each line exists so code written
+     against the old system keeps working. */
+
+  /* Brand */
+  --teal: var(--accent);
+  --teal-dark: var(--accent-hover);
+  --sage-tint: var(--accent-soft);
+  /* Was a green dashed line on upload zones and empty states. The new system
+     has no green lines — the accent marks a chosen state, not an edge — so
+     these become the strong neutral. */
+  --sage-line: var(--border-strong);
+
+  /* Marigold, berry and sky were four decorative accents. They are the
+     semantic colours now; the pink survives only as the avatar tint. */
+  --marigold: var(--warn);
+  --marigold-dark: var(--warn);
+  --marigold-tint: var(--warn-soft);
+  --berry: var(--avatar-f-ink);
+  --berry-dark: var(--avatar-f-ink);
+  --berry-tint: var(--avatar-f);
+  --sky: var(--info);
+  --sky-dark: var(--info);
+  --sky-tint: var(--info-soft);
+
+  /* "Spent" surface — completed rows, taken slots. */
+  --neutral-tint: var(--surface-3);
+  --neutral-line: var(--border);
+
+  --primary: var(--accent);
+  --primary-hover: var(--accent-hover);
+  --primary-tint: var(--accent-soft);
+  --secondary: var(--accent-hover);
+  --secondary-accent: var(--accent);
+  --secondary-tint: var(--accent-soft);
+
+  --page: var(--bg);
+  --card: var(--surface);
+  --line: var(--border);
+  --text-secondary: var(--muted);
+  --text-muted: var(--faint);
+
+  --ink: var(--text);
+  --ink-soft: var(--muted);
+  --ink-faint: var(--faint);
+
+  --warning: var(--warn);
+  --warning-ink: var(--warn);
+
+  /* Semantic state — reserved, never decorative. */
+  --state-available: var(--accent);
+  --state-booked: var(--border-strong);
+  --state-on-hold: var(--warn);
+  --state-error: var(--danger);
+  --state-done: var(--muted);
+
+  --radius-card: var(--r-lg);
+  --radius-control: var(--r);
+  /* Dead alias: pills are gone from the system. Kept so a stylesheet that
+     still asks for one gets the house radius instead of nothing. */
+  --radius-pill: var(--r);
+  /* 1px, not the old 0.5px — the prototype draws real hairlines and the
+     half-pixel ones disappeared on non-retina screens anyway. */
+  --hairline: 1px solid var(--border);
+  --shadow: var(--sh-md);
+  --shadow-sm: var(--sh-sm);
+  --font-heading: var(--font);
 
   /* ittitude house mark — a second brand, kept in its own colours. */
   --ittitude-ink: #1f2124;
@@ -134,7 +207,7 @@ img {
 }
 
 /* ── Sidebar ───────────────────────────────────────────────
-   Below 700px this is an off-canvas drawer. At and above it, it becomes a
+   Below 768px this is an off-canvas drawer. At and above it, it becomes a
    permanent rail — 72px of icons, expanding to 240px when the doctor asks for
    the labels. Both states live on the same element so the transition is a
    width change rather than a swap. */
@@ -149,7 +222,11 @@ img {
   position: fixed;
   top: 0;
   left: 0;
-  height: 100vh;
+  /* dvh, not vh: on iOS `vh` is the height with the toolbars retracted, so a
+     100vh drawer runs past the bottom of the screen and takes Settings —
+     pinned to its foot — with it. */
+  height: 100dvh;
+  padding-top: env(safe-area-inset-top, 0px);
   z-index: 40;
   transform: translateX(-100%);
   transition: transform 0.22s ease;
@@ -212,6 +289,82 @@ img {
   gap: 2px;
 }
 
+/*
+  A group heading in the sidebar — "Main menu", "Practice".
+  Hidden in the rail, where there are no labels for it to head.
+*/
+.nav-heading {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 12px 10px 4px;
+}
+.nav-heading:first-child {
+  padding-top: 2px;
+}
+/* Pushes whatever follows it to the foot of the sidebar. */
+.sidebar-items .spacer {
+  flex: 1;
+  min-height: 12px;
+}
+
+/*
+  Tabs — one screen, several panes, the pane in the URL.
+
+  A rail of links under the page title, the active one underlined in the
+  accent. Scrolls sideways rather than wrapping: three tabs fit on a phone,
+  but a fourth should slide rather than start a second row and push the
+  content down.
+*/
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+.tabs .tab {
+  flex-shrink: 0;
+  border: 0;
+  background: none;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  /* Sits the underline on the container's own border rather than above it. */
+  margin-bottom: -1px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.tabs .tab:hover {
+  color: var(--text);
+}
+.tabs .tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  .tabs {
+    margin-bottom: 14px;
+  }
+  .tabs .tab {
+    padding: 10px 12px;
+  }
+}
+
 .sidebar-powered-by {
   padding: 12px;
   margin-top: 8px;
@@ -241,6 +394,22 @@ img {
   background: var(--primary-tint);
   color: var(--teal-dark);
 }
+/* Settings reads as a card at the foot of the rail, not as one more menu row
+   — it is the only item down there and the design sets it apart. */
+.nav-item.is-bottom {
+  border: var(--hairline);
+  background: var(--card);
+  margin-top: 4px;
+}
+.nav-item.is-bottom:hover {
+  border-color: var(--primary);
+  background: var(--page);
+}
+.nav-item.is-bottom.active {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+
 .sidebar .spacer {
   flex: 1;
 }
@@ -255,13 +424,16 @@ img {
   min-width: 0;
 }
 .topbar {
-  height: 56px;
+  /* Stays at 0 and grows its own height for the notch, so the contents clear
+     it rather than sliding underneath. */
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
   border-bottom: var(--hairline);
   background: var(--card);
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  padding-inline: 16px;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -313,18 +485,6 @@ img {
   font-size: 12.5px;
   object-fit: cover;
 }
-.topbar-brand {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-}
-.topbar-brand .brand-name {
-  font-family: var(--font-heading);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-}
 
 .content {
   padding: 16px;
@@ -334,9 +494,9 @@ img {
   margin: 0 auto;
 }
 
-/* ── Rail (≥700px) ─────────────────────────────────────────
+/* ── Rail (≥768px) ─────────────────────────────────────────
    The design's first breakpoint: the drawer stops being a drawer. */
-@media (min-width: 700px) {
+@media (min-width: 768px) {
   .sidebar {
     position: sticky;
     align-self: flex-start;
@@ -416,7 +576,7 @@ img {
   }
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
   .content {
     padding: 24px 28px;
   }
@@ -457,23 +617,17 @@ img {
 }
 
 /* Opt-in multi-column groups */
-@media (min-width: 760px) {
+@media (min-width: 768px) {
   .cols-2 {
     grid-template-columns: 1fr 1fr;
-  }
-  .cols-1-2 {
-    grid-template-columns: minmax(260px, 320px) 1fr;
   }
   .cols-2-1 {
     grid-template-columns: 1fr minmax(260px, 320px);
   }
-  .cols-1-1-2 {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 /* Mobile & Small Tablet responsive adjustments */
-@media (max-width: 759px) {
+@media (max-width: 767px) {
   .content {
     padding: 12px 14px;
   }
@@ -485,9 +639,6 @@ img {
   }
   /* The wordmark is the first thing to give up room on a narrow topbar; the
      mark alone still says whose app this is. */
-  .topbar-brand .brand-name {
-    font-size: 13.5px;
-  }
 }
 
 /* ── Card ──────────────────────────────────────────────────── */
@@ -593,25 +744,16 @@ img {
   color: var(--text);
   outline: none;
 }
+/* Placed by `useAnchoredMenu`, which supplies position/left/top inline. No
+   `right` here: a fixed element given both left and right stretches between
+   them instead of sizing to its content. */
 .action-menu-dropdown {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
   background: var(--card);
   border: var(--hairline);
   border-radius: var(--radius-control);
   box-shadow: 0 4px 16px rgba(22, 56, 50, 0.12);
-  z-index: 50;
   min-width: 130px;
   padding: 4px 0;
-}
-.action-menu-dropdown.drop-up {
-  top: auto;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: 4px;
-  box-shadow: 0 -4px 16px rgba(22, 56, 50, 0.12);
 }
 .action-menu-item {
   display: block;
@@ -694,10 +836,6 @@ img {
 }
 /* Clear all on the left, Save draft on the right: one starts over, the other
    commits, and they should not sit beside each other as a pair. */
-.rx-actions {
-  align-items: center;
-  gap: 8px;
-}
 .rx-clear {
   color: var(--danger);
 }
@@ -710,13 +848,6 @@ img {
 
 /* One medicine: a grey slab with its fields on a line, a remove disc in the
    corner and its remark folded away. */
-.med-row {
-  background: var(--page);
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  padding: 10px 10px 9px;
-  position: relative;
-}
 .med-row.from-ai {
   border-color: var(--sage-line);
   background: #f6fbf9;
@@ -732,11 +863,6 @@ img {
   border-radius: 7px;
   background: var(--sage-tint);
   color: var(--teal-dark);
-}
-.med-row-fields {
-  display: flex;
-  gap: 6px;
-  padding-right: 22px;
 }
 .med-row-fields > .field {
   flex: 1;
@@ -759,7 +885,7 @@ img {
    half the row, while "1-0-1 before food" and "2 weeks" were being typed into
    boxes barely wider than the words — so past 1000px the name gives its slack
    to the two short fields instead of taking all of it. */
-@media (min-width: 1000px) {
+@media (min-width: 900px) {
   .med-row-fields > .field.med-name {
     flex: 0 1 300px;
   }
@@ -773,11 +899,7 @@ img {
 /* On a phone the three fields on one line leave the medicine name about 130px
    — too narrow to read what you typed. The name takes the row and the two
    short fields share the next one. */
-@media (max-width: 560px) {
-  .med-row-fields {
-    flex-wrap: wrap;
-    gap: 8px 6px;
-  }
+@media (max-width: 767px) {
   .med-row-fields > .field.med-name {
     flex: 1 1 100%;
   }
@@ -785,47 +907,6 @@ img {
   .med-row-fields > .field.med-days {
     flex: 1 1 0;
   }
-}
-.med-remove {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 21px;
-  height: 21px;
-  border-radius: 50%;
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-}
-.med-remove:hover {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.med-remark-toggle {
-  display: inline-block;
-  margin-top: 6px;
-  background: none;
-  border: 0;
-  padding: 0;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--marigold-dark);
-  cursor: pointer;
-}
-.med-remark-field {
-  margin-top: 5px;
-}
-.med-remark-input {
-  padding: 7px 9px;
-  font-size: 12px;
 }
 .med-warning {
   display: flex;
@@ -841,7 +922,7 @@ img {
   padding: 1px 8px;
   font-family: inherit;
   font-size: 11.5px;
-  border-radius: 999px;
+  border-radius: var(--r-chip);
   color: var(--state-on-hold);
   background: none;
   border: 1px solid currentColor;
@@ -861,7 +942,7 @@ img {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: var(--berry);
+  background: var(--accent);
   color: #fff;
   border: none;
   display: flex;
@@ -871,7 +952,7 @@ img {
   box-shadow: 0 6px 16px rgba(184, 69, 113, 0.35);
 }
 .mic-btn:hover:not(:disabled) {
-  background: var(--berry-dark);
+  background: var(--accent-hover);
 }
 .mic-btn:disabled {
   opacity: 0.5;
@@ -892,7 +973,7 @@ img {
   width: 26px;
   height: 26px;
   border-width: 3px;
-  border-top-color: var(--berry);
+  border-top-color: var(--accent);
 }
 .mic-btn.recording {
   background: var(--danger);
@@ -1058,7 +1139,7 @@ tr.appt-row.today-done td:first-child {
   border-left-color: var(--text-muted);
 }
 tr.appt-row.today-next td:first-child {
-  border-left-color: var(--marigold);
+  border-left-color: var(--accent);
 }
 tr.appt-row.today-wait td:first-child {
   border-left-color: var(--teal);
@@ -1082,77 +1163,24 @@ tr.appt-row.upcoming td:first-child {
   margin-top: 1px;
 }
 
-/* ── Range tabs (Previous / Today / Upcoming) ───────────────
-   Always one row. On a phone they shrink rather than wrap: three short,
-   related choices read as a single control, and a wrapped third button
-   looks like it belongs to something else. */
-.range-tabs {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  align-items: center;
-  /* The search and filter row sits directly above; without this the two read
-     as one crowded block. */
-  margin-top: 14px;
-}
-.range-tab {
-  position: relative;
-  flex: 1 1 0;
-  text-align: center;
-  padding: 10px 8px;
-  border-radius: 14px;
-  background: var(--card);
-  border: 1.5px solid var(--border);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
+/* ── Status badges ──────────────────────────────────────────
+   A dot and a word, as the design draws them: the colour carries the state
+   and the dot makes it legible to someone who cannot tell the tints apart.
+
+   There was no base rule here at all — only the colour variants and the dot,
+   and a dot is an inline box that cannot take a width, so nothing rendered
+   and the badge read as a bare tinted rectangle. Found by looking at the
+   real screen rather than at the stylesheet. */
+.badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
   white-space: nowrap;
-}
-.range-tab:hover {
-  border-color: var(--sage-line);
-}
-.range-tab.active {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: #fff;
-}
-.range-tab-count {
-  font-size: 11px;
-  font-weight: 700;
-  opacity: 0.7;
-}
-/* Amber dot = "there is still work in this tab". It is dropped on the active
-   tab, where the list itself already answers the question. */
-.range-tab-dot {
-  position: absolute;
-  top: 7px;
-  right: 8px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--marigold);
-}
-
-@media (max-width: 520px) {
-  .range-tabs {
-    gap: 6px;
-  }
-  .range-tab {
-    flex: 1 1 0;
-    padding: 8px 6px;
-    font-size: 13px;
-    gap: 5px;
-  }
-  .range-tab-count {
-    padding: 1px 6px;
-    font-size: 11px;
-  }
 }
 .badge::before {
   content: '';
@@ -1194,11 +1222,16 @@ tr.appt-row.upcoming td:first-child {
   background: var(--primary-tint);
 }
 /* A no-show is the patient's doing, not the clinic's — it reads as a warning
-   rather than the error colour a cancellation carries. */
-.badge-no_show,
+   rather than the error colour a cancellation carries. Missed used to share
+   that amber; the prototype puts it in danger (`ST.missed = 'danger'`), and
+   it is right to: a missed appointment is the clinic's problem to chase. */
+.badge-no_show {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
 .badge-missed {
-  color: var(--marigold-dark);
-  background: var(--marigold-tint);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 /* ── Slot chips ────────────────────────────────────────────── */
@@ -1289,27 +1322,13 @@ tr.appt-row.upcoming td:first-child {
    about 300px wide inside its padding, which no set of full labels fits — so
    the buttons split the width evenly and swap to short labels rather than
    wrapping onto a second row. */
-.outcome-actions .lbl-short {
-  display: none;
-}
 
-@media (max-width: 560px) {
-  .outcome-actions {
-    width: 100%;
-    flex-wrap: nowrap;
-    gap: 6px;
-  }
+@media (max-width: 767px) {
   .outcome-actions .btn {
     flex: 1 1 0;
     min-width: 0;
     padding: 9px 6px;
     font-size: 13px;
-  }
-  .outcome-actions .lbl-full {
-    display: none;
-  }
-  .outcome-actions .lbl-short {
-    display: inline;
   }
 }
 
@@ -1342,10 +1361,1401 @@ tr.appt-row.upcoming td:first-child {
   flex-wrap: wrap;
 }
 
+/* ── Segmented tabs ────────────────────────────────────────
+   Two mutually exclusive views of one list, where a dropdown would hide the
+   fact that there is a second one. Used by the template tabs. */
+.seg {
+  display: inline-flex;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--page);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  border: 0;
+  background: transparent;
+  border-radius: calc(var(--r) - 2px);
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button.selected {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(22, 56, 50, 0.1);
+}
+.seg-n {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.seg button.selected .seg-n {
+  color: var(--primary);
+}
+
+/* ── Template cards ────────────────────────────────────────
+   A template is read as a whole — what it prescribes and what it advises —
+   so it is a card rather than a table row, and the grid gives each one the
+   room its medicine list needs. */
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  padding: 14px;
+  min-width: 0;
+}
+.tpl-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tpl-cat {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--primary);
+  background: var(--neutral-tint);
+  border-radius: var(--r);
+  padding: 2px 7px;
+}
+.tpl-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: var(--hairline);
+  border-radius: var(--r);
+  padding: 1px 6px;
+}
+.tpl-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.3;
+}
+.tpl-meds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tpl-meds li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.tpl-med-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tpl-med-dose {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* The advice on a medicine card is a footnote to the prescription above it. */
+.tpl-advice {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  padding-top: 8px;
+  border-top: var(--hairline);
+}
+/* On an advice-only template the advice IS the template, so it reads at full
+   weight instead. A card showing a name above an empty medicine box, with the
+   substance in the grey footnote above, looks like a record that failed to
+   load rather than like the kind of template it is. */
+.tpl-advice-lead {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.55;
+  margin: 0;
+}
+.tpl-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: var(--hairline);
+}
+.tpl-card.advice-only .tpl-card-foot {
+  border-top: var(--hairline);
+}
+.tpl-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.tpl-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── The medicine grid ──────────────────────────────────────
+   Five columns and a delete, with the labels in a header row rather than
+   repeated on every line. Name and dose are separate fields, as the design
+   has them; an earlier round joined them into one box. */
+.med-head,
+.med {
+  display: grid;
+  grid-template-columns: 1.6fr 0.9fr 0.9fr 0.9fr 1.4fr 34px;
+  gap: 10px;
+  min-width: 0;
+}
+.med-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0 7px 2px;
+}
+.med {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.med .input {
+  height: 36px;
+  padding: 7px 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.med-rm {
+  width: 34px;
+  height: 36px;
+  border: 1px solid transparent;
+  background: var(--danger-soft, #fbeae8);
+  color: var(--state-error);
+  border-radius: var(--r);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.med-rm:hover {
+  background: #f9d8d4;
+  border-color: #f6cfca;
+}
+.med-error {
+  font-size: 12px;
+  color: var(--state-error);
+  margin: -4px 0 10px 2px;
+}
+
+/* The section heading and its own action on one line. */
+.rx-lbl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rx-lbl-row .rx-section-title,
+.rx-lbl-row .section-label {
+  margin: 0;
+}
+
+/* ── Who the prescription is for ────────────────────────────
+   A chip at the top of the panel, between the mode tabs and the form. It
+   replaced a full patient card in the left column; the record it carried
+   folds away under "Patient details" there instead. */
+.rx-patient {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: -14px -14px 14px;
+  border-bottom: var(--hairline);
+  background: var(--page);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  flex-wrap: wrap;
+}
+.rxp-who {
+  min-width: 0;
+}
+.rxp-who b {
+  display: block;
+  font-size: 13.5px;
+}
+.rxp-who span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.rxp-cond {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.chip-warn {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--r);
+  padding: 2px 7px;
+  background: var(--danger-soft, #fbeae8);
+  color: var(--state-error);
+}
+
+/* ── The prescription footer ────────────────────────────────
+   One row: Clear · Save as template · Draft saved ···· Preview · Issue.
+   `order` carries the phone's different arrangement — see the phone block. */
+.vfoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px -14px -14px;
+  padding: 14px;
+  border-top: var(--hairline);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: var(--card);
+}
+.vfoot-grow {
+  flex: 1 1 auto;
+}
+.rx-save-state {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ── The day axis ───────────────────────────────────────────
+   One control where three range tabs and a date popover used to sit. */
+.day-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.day-arrow {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.day-arrow:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.day-today {
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+.day-today:disabled {
+  background: var(--neutral-tint);
+  border-color: var(--primary);
+  color: var(--primary);
+  cursor: default;
+}
+/* The native date input, wearing the label. Clicking anywhere on the chip
+   opens the platform's own picker, which every phone already knows. */
+.day-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 0;
+}
+.day-pick::after {
+  content: '▾';
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.day-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  /* No `width: 100%` — with `inset: 0` already stretching it, the percentage
+     resolves against the padding box and leaves the chip's padding dead to
+     the click, so tapping the date text did nothing. */
+  cursor: pointer;
+}
+
+/* ── KPI strip ──────────────────────────────────────────────
+   One figure by default; the rest behind a toggle, and each one a filter. */
+/* One control row: day axis · total · statistics switch · search · reset ·
+   export. The three extra figures open in a drawer *under* it rather than
+   widening it, so the row never reflows as the switch is thrown. */
+.dash-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dash-controls .dash-search {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+.dash-controls .day-nav {
+  margin-bottom: 0;
+}
+.dash-export {
+  flex: none;
+  gap: 6px;
+}
+.kpi-drawer {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 14px 12px;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  padding: 10px 16px;
+  min-width: 108px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kpi:hover {
+  border-color: var(--primary);
+}
+.kpi.selected {
+  border-color: var(--primary);
+  background: var(--neutral-tint);
+}
+.kpi-num {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi.selected .kpi-num {
+  color: var(--primary);
+}
+.kpi-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+/* A switch, as the design draws it — not an underlined link. It turns a
+   persistent view on and off, which is what a switch means; a link reads as
+   "go somewhere". */
+
+/* The total reads as one chip on the control row: label, then figure. */
+.kpi-total {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  min-width: 0;
+}
+.kpi-total .kpi-num {
+  font-size: 17px;
+}
+.kpi-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  align-self: center;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px 4px;
+}
+.kpi-switch {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border-strong, #c9d2d8);
+  transition: background 0.15s ease;
+}
+.kpi-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+.kpi-toggle[aria-expanded='true'] .kpi-switch {
+  background: var(--primary);
+}
+.kpi-toggle[aria-expanded='true'] .kpi-switch::after {
+  transform: translateX(16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-switch,
+  .kpi-switch::after {
+    transition: none;
+  }
+}
+.dash-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── First-run setup wizard ─────────────────────────────────
+   Chrome-free and centred: no sidebar, no top bar, nothing to click but the
+   four steps. It is the only screen a doctor sees before the app exists for
+   them, and anything else on it is a way out of a job they have to finish. */
+.setup-screen {
+  min-height: 100%;
+  background: var(--page);
+  padding: 32px 16px calc(40px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+.setup-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.setup-head {
+  text-align: center;
+  margin-bottom: 22px;
+}
+.setup-head p {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+.setup-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  flex-wrap: wrap;
+}
+.setup-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+  padding: 6px 13px 6px 7px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.setup-step:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.setup-step-n {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--page);
+  font-size: 11px;
+  font-weight: 700;
+}
+.setup-step.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+.setup-step.active .setup-step-n {
+  background: var(--primary);
+  color: #fff;
+}
+.setup-step.done .setup-step-n {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+
+.setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Back and Continue under the card, not inside it — the card is the step and
+   these move between steps. */
+.setup-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+.setup-foot .btn {
+  min-height: 42px;
+  padding-inline: 22px;
+}
+
+/* Multi-select chips, reusing the template editor's chip. */
+.chip-pick {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The heading above each setup step — the step pills say where you are, this
+   says what to do. */
+.setup-step-head {
+  margin-bottom: 2px;
+}
+.setup-step-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+.setup-step-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* The required asterisk on a field label. */
+.field label .req {
+  color: var(--danger);
+  margin-left: 2px;
+}
+
+/* A selected qualification, as a removable chip. The × is part of the button:
+   clicking the chip removes it. */
+.qual-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: var(--hairline);
+  border-color: var(--primary);
+  border-radius: 999px;
+  background: var(--primary-tint);
+  color: var(--primary);
+  padding: 5px 8px 5px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.qual-chip .x {
+  display: inline-flex;
+  opacity: 0.8;
+}
+.qual-chip:hover .x {
+  opacity: 1;
+}
+.qual-add {
+  display: flex;
+  gap: 8px;
+}
+.qual-add .select {
+  flex: 1 1 auto;
+}
+
+/* The letterhead choice on the Review step: two side-by-side options, one of
+   which is on. */
+.lh-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.lh-opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  border: var(--hairline);
+  background: var(--card);
+  border-radius: var(--r);
+  padding: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.lh-opt svg {
+  color: var(--text-secondary);
+  flex: none;
+  margin-top: 1px;
+}
+.lh-opt b {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.lh-opt b small {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.lh-opt span {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.lh-opt:hover {
+  border-color: var(--border-strong);
+}
+.lh-opt.on {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+.lh-opt.on svg {
+  color: var(--primary);
+}
+
+/* The uploaded-file row under the custom option. */
+.lh-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.lh-file .n {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The field summary at the bottom of Review. */
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 18px;
+  margin: 0;
+}
+.kv dt {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.kv dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .lh-choice {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .setup-screen {
+    padding-top: 20px;
+  }
+  /* The labels drop at phone width; the numbers alone still say where you
+     are, and four labelled pills wrapped onto three rows. */
+  .setup-step-label {
+    display: none;
+  }
+  .setup-step {
+    padding: 6px;
+  }
+  .setup-foot .btn {
+    flex: 1 1 0;
+  }
+}
+
+/* ── Patient record summary ─────────────────────────────────
+   The derived half of a patient's history, above the visit list. */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 4px 0 6px;
+}
+.overview-card {
+  min-width: 0;
+}
+.overview-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.overview-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.ov-label {
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ov-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* Says where these numbers come from. They are counted off free text, and a
+   doctor should read them as a tally of what was typed rather than as a
+   curated problem list. */
+.overview-note {
+  margin: 0 0 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ── The visit header card ──────────────────────────────────
+   Who, when, and which visit this is — across the top of the page, above the
+   two columns. The prescription panel keeps its own chip; the two answer
+   different questions and the design carries both. */
+.visit-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--card);
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  margin-bottom: 14px;
+}
+.visit-header .appt-avatar.lg {
+  width: 52px;
+  height: 52px;
+  font-size: 17px;
+  flex: none;
+}
+.vh-who {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.vh-who h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.vh-who p {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.vh-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+}
+.vh-when strong {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.vh-when strong.cancelled {
+  color: var(--state-error);
+}
+.vh-when span {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.vh-visit-chip {
+  flex: none;
+  border: var(--hairline);
+  border-radius: var(--r);
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ── "Generate summary with AI" ─────────────────────────────
+   Before anything is generated the card is one offer and a sentence saying
+   what it does — no heading, because there is no result to head. */
+/* Title left, actions right, on the card's one header line. */
+.ai-box-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.ai-box-actions .link-btn {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ai-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-offer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--r);
+  background: var(--neutral-tint);
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+.ai-offer-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+}
+.ai-offer-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ai-offer-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── Appointment table: reports, bulk select, row actions ─── */
+.appt-table .c-check {
+  width: 34px;
+  padding-right: 0;
+}
+.appt-table .c-check input {
+  cursor: pointer;
+}
+.appt-table .c-reports {
+  white-space: nowrap;
+}
+.rep-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.appt-table .c-actions {
+  width: 84px;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.row-act {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.row-act:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.row-act.done:not(.is-over) {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  background: var(--neutral-tint);
+}
+/* Greyed rather than hidden, so the column does not jump about as the day
+   fills in. */
+.row-act.is-over {
+  opacity: 0.4;
+  cursor: default;
+}
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: var(--hairline);
+  background: var(--neutral-tint);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ── Report viewer + clamped summary ────────────────────────
+   The file opens over the visit rather than in a browser tab. */
+.report-viewer {
+  min-height: 40vh;
+}
+.report-viewer img,
+.report-viewer iframe {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: #fff;
+}
+.report-viewer iframe {
+  height: 68vh;
+}
+.report-viewer img {
+  height: auto;
+  object-fit: contain;
+}
+.report-name {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.report-name:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+/* Three lines, then it stops. A summary runs to a paragraph or more, and
+   several of them stacked pushed the prescription off the screen. */
+.report-summary-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* The ellipsis the clamp draws sits on the third line's last word. */
+}
+.report-readmore {
+  margin-top: 4px;
+}
+
+/* ── AI summaries ───────────────────────────────────────────
+   Generation is the doctor's to ask for, so a summary card has a resting
+   state with nothing in it and a button. */
+.ai-idle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ai-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: var(--hairline);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.ai-disclaimer svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+/* ── Templates inside the consultation ─────────────────────── */
+.rx-tpl-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+/* Tinted and rounded, the way the design draws it — this is the one control
+   on the form that brings something in rather than editing what is there, and
+   it reads as an offer rather than as another field's button. */
+.tpl-use-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  border-radius: 999px;
+  background: var(--neutral-tint);
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+.tpl-use-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  border-color: var(--primary);
+}
+.tpl-use-btn svg {
+  flex: none;
+}
+.tpl-use-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.rx-tpl-applied {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.rx-tpl-applied b {
+  color: var(--text);
+}
+
+/* The picker menu itself rides `.action-menu-dropdown`, so placement, the
+   60vh cap and the phone z-index all come from one place. */
+.tpl-menu {
+  min-width: 248px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.tpl-menu-group {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 12px 3px;
+}
+.tpl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.tpl-menu-item:hover {
+  background: var(--page);
+}
+.tpl-menu-icon {
+  display: inline-flex;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.tpl-menu-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tpl-menu-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.tpl-menu-note {
+  padding: 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ── Template editor ───────────────────────────────────────── */
+.tpl-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tpl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tpl-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tpl-section-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tpl-section-hint {
+  font-size: 12px;
+}
+.tpl-empty-note {
+  font-size: 13px;
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r);
+  text-align: center;
+}
+.tpl-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tpl-chip {
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.tpl-chip:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+.tpl-chip.selected {
+  background: var(--neutral-tint);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── The phone layer: sheets, the floating action, anchored menus ──
+   Everything here is the design's mobile contract for the shared primitives,
+   which is why it is one block rather than a rule on each screen. Screens do
+   not opt in; a modal is a sheet at this width whoever opened it. */
+@media (max-width: 767px) {
+  /* A dialog becomes a bottom sheet. It arrives from the edge the thumb is
+     already at, and a full-width sheet stops the 16px backdrop gutter eating
+     into a form that was already short of room. */
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+    /* The backdrop is the scroll container for a centred modal; a sheet caps
+       its own height instead, and letting the backdrop scroll as well meant
+       the sheet could be dragged half off the top of the screen. */
+    overflow: hidden;
+  }
+  .modal,
+  .modal-lg {
+    max-width: none;
+    margin: 0;
+    /* dvh, not vh: on iOS Safari `vh` is the height with the toolbars
+       retracted, so a 92vh sheet had its footer under the address bar until
+       you scrolled. */
+    max-height: 92dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+  }
+  /* A sheet caps its own height, so whichever box is the tall one has to be
+     the one that scrolls. A `modal-pinned` already has `.modal-body` for
+     that; everything else scrolls the sheet itself. Without this the cap
+     silently clipped the end of any dialog taller than the screen — the
+     backdrop used to be what scrolled, and it no longer does. */
+  .modal:not(.modal-pinned) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .modal-head {
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    z-index: 1;
+  }
+  .modal-pinned {
+    max-height: 92dvh;
+  }
+  .modal-pinned .modal-body {
+    padding-right: 0;
+  }
+  .modal-foot {
+    position: sticky;
+    bottom: 0;
+    /* Clears the home indicator, which otherwise sits over the confirm. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* The create action leaves the header and floats. 48px because it is the
+     one target on the screen that must not be missed. */
+  .page-cta {
+    position: fixed;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    /* Under the drawer (60) and the toasts (100), over the page. */
+    z-index: 40;
+  }
+  .page-cta .btn {
+    min-height: 48px;
+    padding: 0 18px;
+    font-size: 14px;
+    box-shadow: 0 10px 22px rgba(22, 56, 50, 0.28);
+  }
+  /* Room for it at the end of the list, or the floating button covers the
+     last row instead of the empty page it looks like it is over. */
+  .content:has(.page-cta) {
+    padding-bottom: 88px;
+  }
+
+  /*
+    The prescription footer's other arrangement: Issue full width on its own
+    line, the rest sharing the line under it, the save note last. Same
+    elements as the desktop row — only `order` and the flex basis differ,
+    which is the whole reason the footer is built from `order` rather than
+    source order.
+
+    Written for the design pass and lost when a later edit replaced this
+    block; the responsive sweep is what found them gone.
+  */
+  .vfoot {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin: 12px -12px -12px;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .vfoot .btn-primary,
+  .vfoot .vfoot-issue {
+    order: 1;
+    flex: 1 1 100%;
+    min-height: 46px;
+  }
+  .vfoot .btn:not(.btn-primary):not(.vfoot-issue) {
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .vfoot-grow {
+    display: none;
+  }
+  .rx-save-state,
+  .vfoot-issued {
+    order: 3;
+    width: 100%;
+    text-align: center;
+    margin: 0;
+  }
+
+  /* Each medicine becomes a card: the name and its delete button share the
+     first line, the other fields stack beneath. The header row goes — its
+     labels are the placeholders here. */
+  .med-head {
+    display: none;
+  }
+  .med {
+    grid-template-columns: 1fr 40px;
+    gap: 8px;
+    padding: 10px;
+    border: var(--hairline);
+    border-radius: var(--r);
+    background: var(--page);
+    margin-bottom: 8px;
+  }
+  .med .input {
+    height: 40px;
+    grid-column: 1;
+    background: var(--card);
+  }
+  .med-rm {
+    grid-column: 2;
+    grid-row: 1;
+    height: 40px;
+  }
+
+  /* The chip stays put while the form scrolls a long way under it. */
+  .rx-patient {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin: -12px -12px 12px;
+    padding: 10px 12px;
+  }
+  .rxp-cond {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  /* The visit header card stacks: name, then time, then the visit chip. */
+  .visit-header {
+    gap: 10px;
+    padding: 14px;
+  }
+  .vh-when {
+    align-items: flex-start;
+  }
+  .vh-visit-chip {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* An anchored menu near the bottom of a long list could be taller than the
+     space it was flipped into. */
+  .action-menu-dropdown {
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 70;
+  }
+}
+
 /* ── Toast (top-right) ─────────────────────────────────────── */
 .toast-wrap {
   position: fixed;
-  top: 20px;
+  /* Below the notch, not behind it. */
+  top: calc(20px + env(safe-area-inset-top, 0px));
   right: 20px;
   left: 20px;
   display: flex;
@@ -1353,8 +2763,14 @@ tr.appt-row.upcoming td:first-child {
   gap: 10px;
   z-index: 100;
   align-items: flex-end;
+  /* The wrap spans the full width but a toast is at most 340px of it, so the
+     rest of the strip is invisible and sat above the page at z-index 100 —
+     every tap along the top of the screen went into it instead of the button
+     underneath. Only the toast itself takes clicks (it dismisses on click). */
+  pointer-events: none;
 }
 .toast {
+  pointer-events: auto;
   background: var(--card);
   border: var(--hairline);
   border-left: 3px solid var(--primary);
@@ -1432,18 +2848,6 @@ tr.appt-row.upcoming td:first-child {
 .login-card .field {
   text-align: left;
 }
-.login-logo {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: var(--primary);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  margin-bottom: 14px;
-}
 /* ── Sign-up email verification ─────────────────────────────── */
 .verify-box {
   margin-top: 14px;
@@ -1494,45 +2898,6 @@ tr.appt-row.upcoming td:first-child {
    bleeds to the top and both edges of the content column and keeps only its
    rounded underside, so nothing sits above it. Each breakpoint cancels
    whatever gutter `.content` is carrying at that width. */
-.doc-hero {
-  background: linear-gradient(180deg, var(--teal) 0%, var(--teal-dark) 100%);
-  color: #fff;
-  padding: 22px 20px 24px;
-  border-radius: 0 0 28px 28px;
-  /* Cancels .content's phone gutter (12px 14px). */
-  margin: -12px -14px 0;
-}
-.doc-hero-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.doc-avatar {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--marigold-tint);
-  color: var(--marigold-dark);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-heading);
-  font-weight: 600;
-  font-size: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  object-fit: cover;
-}
-.doc-name {
-  font-size: 17px;
-  color: #fff;
-  overflow-wrap: anywhere;
-}
-.doc-meta {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
-  margin-top: 2px;
-}
 /* The role, as a small tag beside a staff member's name — on the teal band
    and on the phone top bar alike. */
 .role-chip {
@@ -1540,7 +2905,7 @@ tr.appt-row.upcoming td:first-child {
   vertical-align: middle;
   margin-left: 8px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-chip);
   font-family: var(--font);
   font-size: 11px;
   font-weight: 600;
@@ -1581,16 +2946,6 @@ tr.appt-row.upcoming td:first-child {
   padding: 11px 4px 9px;
   text-align: center;
 }
-.stat-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  margin: 0 auto 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-}
 .stat-num {
   font-family: var(--font-heading);
   font-weight: 700;
@@ -1604,33 +2959,21 @@ tr.appt-row.upcoming td:first-child {
   margin-top: 3px;
   line-height: 1.2;
 }
-.stat-tile.teal .stat-icon {
-  background: var(--sage-tint);
-  color: var(--teal-dark);
-}
-.stat-tile.teal .stat-num {
-  color: var(--teal-dark);
-}
-.stat-tile.marigold .stat-icon {
-  background: var(--marigold-tint);
-  color: var(--marigold-dark);
-}
-.stat-tile.marigold .stat-num {
-  color: var(--marigold-dark);
-}
-.stat-tile.berry .stat-icon {
-  background: var(--berry-tint);
-  color: var(--berry-dark);
-}
-.stat-tile.berry .stat-num {
-  color: var(--berry-dark);
-}
-.stat-tile.sky .stat-icon {
-  background: var(--sky-tint);
-  color: var(--sky-dark);
-}
-.stat-tile.sky .stat-num {
-  color: var(--sky-dark);
+/*
+  The four tiles used to be four colours — teal, marigold, berry, sky. The
+  redesign has one accent and reserves colour for record state, so a KPI is
+  not a place to spend it: four differently-coloured numbers implied a
+  relationship between them that does not exist. The icon is a quiet neutral
+  chip and the figure is ink.
+
+  The `.teal / .marigold / .berry / .sky` class names still arrive from
+  `StatTile`'s `accent` prop and are deliberately left unstyled rather than
+  removed — the whole strip is replaced by the prototype's collapsible KPI
+  bar in the appointments pass, and taking the prop out now would be a second
+  edit to the same lines.
+*/
+.stat-num {
+  color: var(--text);
 }
 
 /* ── Dashboard toolbar (search · date · status · walk-in) ──── */
@@ -1658,6 +3001,66 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text-muted);
   pointer-events: none;
 }
+/* ── The screen's create action ─────────────────────────────
+   Desktop: nothing special, it sits in `.page-head` as written. The phone
+   layer below lifts it out. See `FloatingCta` in components/ui.tsx. */
+.page-cta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Collapsed search: a 40px icon button standing in for the input. Only ever
+   rendered at <=767px — `SearchField` decides, not a `display:none` here, so
+   the input is genuinely absent rather than hidden-but-focusable. */
+.dash-search-toggle {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--hairline);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.dash-search-toggle:hover {
+  background: var(--page);
+  color: var(--text);
+}
+.dash-search-close {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dash-search-close:hover {
+  color: var(--text);
+}
+.dash-search.is-collapsed {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* The native search clear would sit under our own close button. */
+.dash-search.is-open .input {
+  padding-right: 38px;
+}
+.dash-search.is-open .input::-webkit-search-cancel-button {
+  display: none;
+}
+
 .dash-toolbar-filters {
   display: flex;
   gap: 8px;
@@ -1674,11 +3077,6 @@ tr.appt-row.upcoming td:first-child {
    A button that opens a panel, rather than a native select: the date filter
    holds two controls at once ("Any date" and a picker), which a <select>
    cannot. Both filters use it so the row reads as one thing. */
-.filter-btn-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-}
 .filter-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1707,42 +3105,12 @@ tr.appt-row.upcoming td:first-child {
   border-color: var(--teal);
   color: var(--teal-dark);
 }
-.filter-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  min-width: 168px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  box-shadow: var(--shadow);
-  padding: 6px;
-  z-index: 30;
-}
-.filter-opt {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 9px 11px;
-  border: 0;
-  background: none;
-  border-radius: 9px;
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.filter-opt:hover {
-  background: var(--page);
-}
+/* Placed by `useAnchoredMenu` — position/left/top arrive inline. It used to
+   stretch to the trigger's width with left:0/right:0; now it sizes to its
+   options and is right-aligned to the button. */
 .filter-opt.selected {
   background: var(--sage-tint);
   color: var(--teal-dark);
-}
-.filter-date {
-  padding: 6px 5px 2px;
 }
 .filter-date .input {
   width: 100%;
@@ -1772,38 +3140,6 @@ tr.appt-row.upcoming td:first-child {
    The one control on this screen that creates something, and it has to be
    reachable with the list scrolled anywhere — the desk books a walk-in while
    looking at the queue, not at the top of the page. */
-/* Both floating actions sit in one row so they never overlap, whatever the
-   text width — Walk In outermost, QR beside it. */
-.fab-row {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 40;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-.fab-walkin {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--teal);
-  color: #fff;
-  border: none;
-  padding: 13px 18px;
-  border-radius: var(--radius-pill);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 10px 22px rgba(22, 56, 50, 0.28);
-}
-.fab-walkin:hover:not(:disabled) {
-  background: var(--teal-dark);
-}
-.fab-walkin:active:not(:disabled) {
-  transform: scale(0.96);
-}
 /* The header at the shape it prints — the aspect ratio comes inline from the
    doctor's own image, since the PDF box is sized to it. */
 .lh-header-box {
@@ -1874,7 +3210,7 @@ tr.appt-row.upcoming td:first-child {
   right: 8px;
   top: -11px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-chip);
   background: var(--primary, #1b6ef3);
   color: #fff;
   font-size: 11px;
@@ -1920,38 +3256,17 @@ tr.appt-row.upcoming td:first-child {
   text-align: center;
 }
 /* The QR sits quieter than Walk In: white on the page, teal on press. */
-.fab-walkin.fab-qr {
-  background: var(--card);
-  color: var(--teal-dark);
-  border: 1.5px solid var(--sage-line);
-  box-shadow: var(--shadow);
-}
-.fab-walkin.fab-qr:hover {
-  background: var(--sage-tint);
-}
-.fab-walkin:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
-@media (min-width: 700px) {
+@media (min-width: 768px) {
   /* Cancels .content's 20px gutter. */
-  .doc-hero {
-    margin: -20px -20px 0;
-    border-radius: 0 0 22px 22px;
-    padding: 22px 24px 24px;
-  }
 }
-/* ── Dashboard, phone (<700px) ─────────────────────────────
+/* ── Dashboard, phone (<768px) ─────────────────────────────
    Same intent as the wide layout — less chrome, more rows. The teal identity
    band is gone (the initials live in the top bar, see `TopbarPortal`), the
    counters drop their icons, and the toolbar sits straight on the page
    rather than in a panel of its own, all on the design's 14px gutters.
    The card rules for this width live after the card section below. */
-@media (max-width: 699px) {
-  .doc-hero {
-    display: none;
-  }
+@media (max-width: 767px) {
 
   /* KPI tiles stay four-up — side-by-side icon+figure was too wide for a
      390px row — but the icon goes and the padding tightens. */
@@ -1961,9 +3276,6 @@ tr.appt-row.upcoming td:first-child {
   }
   .stat-tile {
     padding: 7px 4px 6px;
-  }
-  .stat-icon {
-    display: none;
   }
   .stat-num {
     font-size: 17px;
@@ -2006,44 +3318,24 @@ tr.appt-row.upcoming td:first-child {
   .reset-filters-btn {
     width: 38px;
   }
-  .range-tabs {
-    margin-top: 10px;
-  }
   .list-panel .empty,
   .list-panel .loading {
     padding-top: 28px;
   }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 767px) {
   .stat-row {
     gap: 7px;
   }
 }
 
-/* ── Dashboard, desktop (≥1024px) ──────────────────────────
+/* ── Dashboard, desktop (≥900px) ───────────────────────────
    A desktop dashboard rather than a stretched phone screen: a slim identity
    band, a KPI strip that reads left-to-right, one toolbar line, and the
    appointment list as a scannable table. */
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
   /* Cancels .content's 24px 28px gutter. */
-  .doc-hero {
-    background: linear-gradient(120deg, var(--teal-dark), var(--teal));
-    margin: -24px -28px 0;
-    border-radius: 0 0 18px 18px;
-    padding: 20px 28px 22px;
-  }
-  .doc-hero-top {
-    gap: 14px;
-  }
-  .doc-avatar {
-    width: 46px;
-    height: 46px;
-    font-size: 15px;
-  }
-  .doc-name {
-    font-size: 18px;
-  }
 
   /* Icon at the left, the figure over its label at the right. */
   .stat-row {
@@ -2058,14 +3350,6 @@ tr.appt-row.upcoming td:first-child {
     align-items: center;
     text-align: left;
     padding: 16px 18px;
-  }
-  .stat-icon {
-    grid-column: 1;
-    grid-row: 1 / 3;
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    margin: 0;
   }
   .stat-num {
     grid-column: 2;
@@ -2087,25 +3371,11 @@ tr.appt-row.upcoming td:first-child {
   .dash-toolbar-filters {
     flex-wrap: nowrap;
   }
-  .filter-btn-wrap {
-    flex: 0 0 auto;
-  }
   .filter-btn {
     min-width: 122px;
     padding: 11px 16px;
   }
-  .range-tabs {
-    max-width: 520px;
-  }
 
-  .fab-row {
-    right: 34px;
-    bottom: 30px;
-  }
-  .fab-walkin {
-    padding: 14px 20px;
-    font-size: 13.5px;
-  }
 }
 
 .hero {
@@ -2149,7 +3419,10 @@ tr.appt-row.upcoming td:first-child {
    label column takes what the four checkbox columns leave. */
 .checkbox-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr));
+  /* A module label, then View / Create / Edit — three action columns, not
+     four. Deletion left the grid in phase 10; the column count has to leave
+     with it, or every row wraps a cell short and the labels scramble. */
+  grid-template-columns: minmax(0, 2.2fr) repeat(3, minmax(0, 1fr));
   gap: 8px 6px;
   align-items: center;
   min-width: 0;
@@ -2264,9 +3537,9 @@ tr.appt-row.upcoming td:first-child {
 
 
 /* ── Appointment cards (phone) ──────────────────────────────
-   The table scrolls sideways below 760px, which hides the status column just
+   The table scrolls sideways below 768px, which hides the status column just
    when it is being scanned for. These replace it there; the table is untouched
-   from 760px up. The left rail carries the state — amber for the patient who
+   from 768px up. The left rail carries the state — amber for the patient who
    is next, grey once the consultation is done, teal for the rest of today. */
 .appt-cards {
   display: flex;
@@ -2311,7 +3584,7 @@ tr.appt-row.upcoming td:first-child {
 }
 .appt-card.today-next::before,
 .appt-card.next::before {
-  background: var(--marigold);
+  background: var(--accent);
 }
 .appt-card.today-wait::before {
   background: var(--teal);
@@ -2342,16 +3615,16 @@ tr.appt-row.upcoming td:first-child {
   color: var(--teal-dark);
 }
 .appt-avatar.av-1 {
-  background: var(--marigold-tint);
-  color: var(--marigold-dark);
+  background: var(--avatar-o);
+  color: var(--avatar-o-ink);
 }
 .appt-avatar.av-2 {
-  background: var(--berry-tint);
-  color: var(--berry-dark);
+  background: var(--avatar-f);
+  color: var(--avatar-f-ink);
 }
 .appt-avatar.av-3 {
-  background: var(--sky-tint);
-  color: var(--sky-dark);
+  background: var(--avatar-m);
+  color: var(--avatar-m-ink);
 }
 .appt-avatar.sm {
   width: 28px;
@@ -2385,8 +3658,8 @@ tr.appt-row.upcoming td:first-child {
   white-space: nowrap;
 }
 .appt-badge.next {
-  background: var(--marigold-tint);
-  color: var(--marigold-dark);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 /* A finished consultation should recede, not celebrate — grey, not teal. */
 .appt-badge.done {
@@ -2394,13 +3667,13 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text-muted);
 }
 .appt-badge.leave {
-  background: var(--berry-tint);
-  color: var(--berry-dark);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 .appt-badge.no-show,
 .appt-badge.missed {
-  background: var(--marigold-tint);
-  color: var(--marigold-dark);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 /* Called off, by either side — the error tint the status badge uses. */
 .appt-badge.cancelled {
@@ -2461,7 +3734,7 @@ tr.appt-row.upcoming td:first-child {
 /* Phone cards. Sits after the card rules above on purpose: these override
    them by source order, and the dashboard-chrome phone block further up
    cannot, because the card rules come later than it does. */
-@media (max-width: 699px) {
+@media (max-width: 767px) {
   /* Tighter cards: only the row inside carries padding, and the meta and the
      phone share a line instead of stacking. */
   .appt-cards {
@@ -2586,7 +3859,7 @@ tr.appt-row.upcoming td:first-child {
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--marigold-dark);
+  color: var(--accent-text);
   cursor: pointer;
 }
 /* The wizard's single footer action spans the dialog — it is the only way
@@ -2618,8 +3891,8 @@ tr.appt-row.upcoming td:first-child {
   cursor: pointer;
 }
 .member-chip.selected {
-  border-color: var(--marigold);
-  background: var(--marigold-tint);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .member-avatar {
   width: 34px;
@@ -2659,8 +3932,8 @@ tr.appt-row.upcoming td:first-child {
   flex-shrink: 0;
 }
 .member-chip.selected .member-radio {
-  border-color: var(--marigold);
-  background: var(--marigold);
+  border-color: var(--accent);
+  background: var(--accent);
   box-shadow: inset 0 0 0 3px #fff;
 }
 
@@ -2848,8 +4121,8 @@ tr.appt-row.upcoming td:first-child {
   color: #fff;
 }
 .register-inner .step.active .step-dot {
-  background: var(--marigold);
-  border-color: var(--marigold);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 .register-inner .step-label {
@@ -2973,41 +4246,24 @@ tr.appt-row.upcoming td:first-child {
   font-family: inherit;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--berry-dark);
+  color: var(--danger);
   cursor: pointer;
 }
 /* Adding a medicine and adding a slot are the same gesture in the design:
-   a dashed marigold bar the width of what it adds to. */
-.add-med-btn {
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  padding: 9px;
-  border-radius: var(--radius-control);
-  border: 1.5px dashed var(--marigold);
-  background: transparent;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--marigold-dark);
-  text-align: center;
-  cursor: pointer;
-}
-.add-med-btn:hover {
-  background: var(--marigold-tint);
-}
+   a dashed bar the width of what it adds to. Neutral edge, accent ink — it
+   was amber, which read as a warning about a button that only adds a row. */
 .add-slot-toggle {
   display: block;
   width: 100%;
   margin-top: 12px;
   padding: 9px;
   border-radius: var(--radius-control);
-  border: 1.5px dashed var(--marigold);
+  border: 1.5px dashed var(--border-strong);
   background: transparent;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  color: var(--marigold-dark);
+  color: var(--accent-text);
   cursor: pointer;
 }
 .tg-save {
@@ -3045,10 +4301,10 @@ tr.appt-row.upcoming td:first-child {
   cursor: pointer;
 }
 .dr-apply-all {
-  color: var(--sky-dark);
+  color: var(--accent-text);
 }
 .dr-clear {
-  color: var(--berry-dark);
+  color: var(--danger);
 }
 .form-notice {
   margin: 10px 0 0;
@@ -3076,17 +4332,15 @@ tr.appt-row.upcoming td:first-child {
   bottom: 0;
   width: 5px;
 }
-.register-inner .teal-accent::before {
-  background: var(--teal);
-}
-.register-inner .marigold-accent::before {
-  background: var(--marigold);
-}
-.register-inner .berry-accent::before {
-  background: var(--berry);
-}
+/* Four coloured spines down the side of four registration cards, one colour
+   each. There is one accent now, and a card is not a state — the spine marks
+   "this is a section", which is the same fact four times over. The class
+   names stay so the markup does not need touching. */
+.register-inner .teal-accent::before,
+.register-inner .marigold-accent::before,
+.register-inner .berry-accent::before,
 .register-inner .sky-accent::before {
-  background: var(--sky);
+  background: var(--accent);
 }
 .register-inner .box-title {
   font-size: 14.5px;
@@ -3178,38 +4432,9 @@ tr.appt-row.upcoming td:first-child {
 }
 
 /* ── Working days ────────────────────────────────────────────── */
-.day-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-top: 10px;
-}
-.day-check {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 10px;
-  border: 1.5px solid var(--border);
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.day-check:has(input:checked) {
-  background: var(--sage-tint);
-  border-color: var(--sage-line);
-  color: var(--teal-dark);
-}
 .day-check.all {
   display: inline-flex;
   border-style: dashed;
-}
-.day-check input {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
-  cursor: pointer;
-  accent-color: var(--teal);
 }
 
 .time-row {
@@ -3263,23 +4488,26 @@ tr.appt-row.upcoming td:first-child {
   margin-top: 18px;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 400px) {
   .time-row {
     grid-template-columns: 1fr 1fr;
-  }
-  .day-grid {
-    grid-template-columns: repeat(3, 1fr);
   }
 }
 
 /* ══ Consultation screen ══════════════════════════════════════ */
+/* A white band across the top of the visit, as the design draws it — the back
+   link and the overflow, nothing else. It was a bare row sitting on the page
+   background, which left the screen opening on no fixed edge at all. */
 .visit-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
   flex-wrap: wrap;
+  background: var(--card);
+  border-bottom: var(--hairline);
+  margin: -16px -16px 16px;
+  padding: 12px 16px;
 }
 .visit-topbar-right {
   display: flex;
@@ -3293,9 +4521,11 @@ tr.appt-row.upcoming td:first-child {
   position: relative;
 }
 .opts-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  /* A rounded square, not a circle: it matches the other header controls and
+     the design draws it that way. */
+  border-radius: var(--r);
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text-secondary);
@@ -3368,22 +4598,6 @@ tr.appt-row.upcoming td:first-child {
   flex-direction: column;
   margin-bottom: 10px;
 }
-.pc-row {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-.pc-info {
-  flex: 1;
-  min-width: 0;
-}
-.pc-name {
-  font-family: var(--font-heading);
-  font-weight: 600;
-  font-size: 14.5px;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .pc-meta {
   font-size: 11.5px;
   color: var(--text-secondary);
@@ -3391,49 +4605,9 @@ tr.appt-row.upcoming td:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pc-time {
-  text-align: right;
-  flex-shrink: 0;
-}
-.pc-time-val {
-  font-family: var(--font-heading);
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--text);
-}
 .pc-time-val.cancelled {
   color: var(--text-muted);
   text-decoration: line-through;
-}
-.pc-time-date {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  margin-top: 1px;
-}
-.patient-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px dashed var(--border);
-}
-.pa-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Padding rather than a fixed height: these wrap to two lines on a narrow
-     phone, and a 34px box clipped them. */
-  min-height: 40px;
-  padding: 9px 10px;
-  border-radius: 11px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  border: 1.5px solid;
-  background: var(--card);
 }
 .pa-btn.history {
   border-color: rgba(46, 134, 171, 0.35);
@@ -3441,37 +4615,14 @@ tr.appt-row.upcoming td:first-child {
 }
 .pa-btn.cancel {
   border-color: rgba(184, 69, 113, 0.35);
-  color: var(--berry-dark);
+  color: var(--danger);
 }
 .pa-btn.reschedule {
   border-color: var(--sage-line);
   color: var(--teal-dark);
 }
-.pa-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 
 /* ── The record behind the card, folded away ─────────────────── */
-.patient-more {
-  background: var(--card);
-  border: var(--hairline);
-  border-radius: var(--radius-card);
-  padding: 10px 14px;
-  margin-bottom: 12px;
-}
-.patient-more > summary {
-  cursor: pointer;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-.patient-more-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 4px 24px;
-  margin-top: 10px;
-}
 
 /* ── Step strip (Reports · Prescription · Preview) ────────────
    Dots joined by a track, matching the patient booking stepper: marigold is
@@ -3516,8 +4667,8 @@ tr.appt-row.upcoming td:first-child {
   flex-shrink: 0;
 }
 .step2.active .step2-dot {
-  background: var(--marigold);
-  border-color: var(--marigold);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 .step2.done .step2-dot {
@@ -3559,62 +4710,92 @@ tr.appt-row.upcoming td:first-child {
    it — without this the bar covers whatever the doctor scrolled to, which on
    the prescription step is the field they are typing in. */
 .visit-page {
+  /* Room for the sticky footer under the prescription. */
   padding-bottom: 88px;
 }
-.visit-bottom-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+
+/* Phone: one column, reference above the prescription. `display: contents`
+   at >=900px hands these two to the page grid instead. */
+.visit-cols {
   display: flex;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 30;
+  flex-direction: column;
+  gap: 14px;
 }
-.visit-bottom-inner {
+.visit-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.visit-main {
+  min-width: 0;
+}
+
+/* Previous visits — three, then a link to the full history page. */
+.vh-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vh-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   width: 100%;
-  max-width: 760px;
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
-  pointer-events: auto;
-  box-shadow: 0 -8px 20px rgba(22, 56, 50, 0.06);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.btn-secondary-cta {
-  /* Equal halves with the primary, as the design has them — not a small Back
-     tucked beside a stretched Save. */
-  flex: 1;
-  justify-content: center;
-  padding: 12px 18px;
-  border-radius: 13px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.btn-cta {
-  flex: 1;
-  background: var(--teal);
-  color: #fff;
-  border: none;
-  padding: 12px 18px;
-  border-radius: 13px;
-  font-family: var(--font-heading);
-  font-size: 13.5px;
-  font-weight: 600;
+  border: 0;
+  background: transparent;
+  padding: 8px 6px;
+  margin: 0 -6px;
+  border-radius: var(--r);
+  font-family: inherit;
+  text-align: left;
   cursor: pointer;
 }
-.btn-cta:hover {
-  background: var(--teal-dark);
+.vh-item:hover {
+  background: var(--page);
+}
+.vh-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.vh-h {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.vh-h b {
+  font-size: 12.5px;
+}
+.vh-h span {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.vh-meds {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+.vh-meds span {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.vh-all {
+  width: 100%;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 4px;
+}
+.vh-dx {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 /* Waiting on a dictation to become a draft. */
-.btn-cta:disabled,
-.btn-cta:disabled:hover {
-  background: var(--teal);
-  opacity: 0.55;
-  cursor: wait;
-}
 
 /* ── Patient header, shared by the history and patient screens ── */
 .visit-patient-card {
@@ -3668,10 +4849,7 @@ tr.appt-row.upcoming td:first-child {
   margin: 12px 0 6px;
 }
 
-@media (max-width: 520px) {
-  .pa-btn {
-    font-size: 10.5px;
-  }
+@media (max-width: 767px) {
   .step2-label {
     font-size: 10.5px;
   }
@@ -3796,26 +4974,6 @@ tr.appt-row.upcoming td:first-child {
 }
 /* "View" is a word, not a glyph: opening the file is the one action a doctor
    cannot be left to guess at. */
-.ra-view-btn {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 9px;
-  background: var(--sage-tint);
-  border: 1px solid var(--sage-line);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--teal-dark);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.ra-view-btn:hover {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: #fff;
-}
 .report-state {
   display: inline-flex;
   align-items: center;
@@ -3862,14 +5020,14 @@ tr.appt-row.upcoming td:first-child {
 }
 .add-tile {
   background: var(--page);
-  border: 1.5px dashed var(--berry);
+  border: 1.5px dashed var(--border-strong);
   border-radius: 13px;
   padding: 12px 6px;
   text-align: center;
   font-family: inherit;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--berry-dark);
+  color: var(--accent-text);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -3877,47 +5035,76 @@ tr.appt-row.upcoming td:first-child {
   gap: 3px;
 }
 .add-tile:hover {
-  background: var(--berry-tint);
+  background: var(--accent-soft);
 }
 
 /* ── Prescription mode tabs ────────────────────────────────
    Four equal tiles: the four ways to write a prescription are alternatives to
    each other, so none of them should look like the default. */
-.rx-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  margin: 0 0 14px;
+/* ── The prescription card's header ─────────────────────────
+   Title left, modes right, on one line above the form. */
+.rx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: -14px -14px 0;
+  padding: 12px 16px;
+  border-bottom: var(--hairline);
+}
+.rx-head h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* A segmented control on a grey track, not four tiles across the card. The
+   mode is a small choice about how to write this one prescription; the tiles
+   gave it the weight of page navigation. */
+.rx-modes {
+  display: inline-flex;
+  background: var(--page);
+  border-radius: var(--r);
+  padding: 3px;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.rx-modes::-webkit-scrollbar {
+  display: none;
 }
 .rx-tab {
-  background: var(--card);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-control);
-  padding: 9px 2px 8px;
-  text-align: center;
-  cursor: pointer;
-  font-family: inherit;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
+  border: 0;
+  background: none;
+  padding: 6px 11px;
+  border-radius: calc(var(--r) - 2px);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
 }
 .rx-tab-icon {
-  color: var(--text-secondary);
   display: flex;
+  flex: none;
 }
 .rx-tab-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+.rx-tab:hover {
+  color: var(--text);
 }
 .rx-tab.active {
-  background: var(--teal);
-  border-color: var(--teal);
-}
-.rx-tab.active .rx-tab-icon,
-.rx-tab.active .rx-tab-label {
-  color: #fff;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(22, 56, 50, 0.12);
 }
 
 /* ── Preview: the document, framed as the file it becomes ──── */
@@ -4030,7 +5217,7 @@ tr.appt-row.upcoming td:first-child {
 .pdf-max-body > div {
   height: 100%;
 }
-@media (min-width: 700px) {
+@media (min-width: 768px) {
   .pdf-max-backdrop {
     padding: 24px;
   }
@@ -4252,20 +5439,27 @@ tr.appt-row.upcoming td:first-child {
   background: var(--page);
 }
 
-/* ── Consultation, desktop (≥1024px) ───────────────────────
+/* ── Consultation, desktop (≥900px) ────────────────────────
    Two columns: the patient stays in view on the left while the working panel
    — reports, prescription, the document — sits on the right. The pinned
    bottom bar unpins and sits under the panel it belongs to, because on a
    desktop there is no thumb reaching for the bottom of a screen. */
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
   .visit-page {
     display: grid;
     grid-template-columns: 340px 1fr;
+    /* Reference down the left — what this patient has been through and what
+       they brought in — and the prescription on the right.
+       Two rows, not three: the patient card used to have one of its own here
+       and has since moved into the prescription panel as a chip. Leaving its
+       empty row behind made `main` span two rows, so a growing medicine list
+       stretched the grid and pushed the reports column down the page away
+       from the top — white space above Reports that grew with every medicine
+       added. */
     grid-template-areas:
-      'back    back'
-      'patient steps'
-      'patient panel'
-      'patient cta';
+      'back   back'
+      'header header'
+      'aside  main';
     align-content: start;
     column-gap: 24px;
     max-width: 1240px;
@@ -4273,55 +5467,50 @@ tr.appt-row.upcoming td:first-child {
   .visit-topbar {
     grid-area: back;
   }
-  .visit-patient-col {
-    grid-area: patient;
-    position: sticky;
-    top: 20px;
-    align-self: start;
+  /* Without a named area this card was auto-placed into an implicit row
+     *below* both columns — present in the DOM, invisible at the top of the
+     screen where it belongs. A grid with explicit areas fills every cell it
+     names, so anything unnamed lands after them. */
+  .visit-header {
+    grid-area: header;
   }
   .visit-patient-col .patient-card {
     padding: 20px;
   }
-  .visit-page > .steps2 {
-    grid-area: steps;
-    margin-bottom: 14px;
+  /* The wrapper exists for the phone's single column; at this width its two
+     children take their own grid areas instead. */
+  .visit-cols {
+    display: contents;
   }
-  .visit-panel {
-    grid-area: panel;
+  /* Neither column is sticky. The patient card used to be, when it was the
+     whole left column; with the reference stack below it in the same column,
+     a sticky card would have the reference scrolling up behind it. */
+  .visit-aside {
+    grid-area: aside;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    /* Sits at the top of its row rather than stretching to the height of the
+       prescription beside it. */
+    align-self: start;
+  }
+  .visit-main {
+    grid-area: main;
     min-width: 0;
   }
 
+
   /* The card becomes a profile panel: identity stacked, actions listed. */
-  .visit-patient-col .pc-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  .visit-patient-col .pc-time {
-    text-align: left;
-  }
-  .visit-patient-col .patient-actions {
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 16px;
-  }
-  .visit-patient-col .pa-btn {
-    width: 100%;
-    min-height: 42px;
-    font-size: 12.5px;
-  }
 
   .step2-label {
     font-size: 12px;
   }
-  .rx-tabs {
-    gap: 10px;
-  }
   .rx-tab {
-    padding: 12px 2px 11px;
+    padding: 7px 10px;
   }
   .rx-tab-label {
-    font-size: 11px;
+    font-size: 12px;
   }
   .pdf-scroll {
     padding: 20px;
@@ -4330,30 +5519,11 @@ tr.appt-row.upcoming td:first-child {
   .visit-page {
     padding-bottom: 40px;
   }
-  /* Unpinned: it sits under the panel rather than over the window. */
-  .visit-bottom-bar {
-    grid-area: cta;
-    position: static;
-    justify-content: flex-start;
-    pointer-events: auto;
-    margin-top: 16px;
-    align-self: start;
-  }
-  .visit-bottom-inner {
-    max-width: none;
-    background: transparent;
-    border-top: 0;
-    box-shadow: none;
-    padding: 0;
-  }
 
 }
 
 /* The caption line carries a phone glyph; give it room so it cannot sit on
    the digits the way the emoji it replaced did. */
-.pc-mobile {
-  margin-left: 5px;
-}
 .pc-meta svg {
   vertical-align: -0.12em;
 }
@@ -4598,14 +5768,6 @@ tr.row-warn td {
 .my-plan-renew.is-soon {
   color: var(--marigold-dark);
 }
-.my-plan-sub {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: var(--hairline);
-}
 .my-plan-history {
   list-style: none;
   margin: 8px 0 0;
@@ -4718,11 +5880,578 @@ tr.row-warn td {
   text-decoration: underline;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   .form-row-2 {
     grid-template-columns: 1fr;
   }
   .plan-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Patients list and patient profile — the redesign's people views
+   ══════════════════════════════════════════════════════════════ */
+
+/* Screen-reader-only label behind an icon-only control. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A square icon button — the profile's "more" control. */
+.btn-icon {
+  padding: 9px;
+  width: 38px;
+  height: 38px;
+}
+
+/* ── Patients toolbar ──────────────────────────────────────── */
+.patients-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.toolbar-grow {
+  flex: 1 1 auto;
+}
+.patients-toolbar .search-field,
+.patients-toolbar .search {
+  min-width: 200px;
+}
+.sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.sort-pill .select {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.chip-toggle {
+  border: var(--hairline);
+  background: var(--card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-control);
+  padding: 8px 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip-toggle.on {
+  background: var(--sage-tint, var(--page));
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ── Conditions chips (list + profile) ─────────────────────── */
+.cond-chips {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.cond-chip {
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: var(--r, 8px);
+  padding: 2px 8px;
+  background: var(--sky-tint, #e8f1fb);
+  color: var(--sky-ink, #1c5fa8);
+  white-space: nowrap;
+}
+.cond-chip.more {
+  background: var(--page);
+  color: var(--text-muted);
+}
+
+/* ── Row actions (book · open) ─────────────────────────────── */
+.row-acts {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.icon-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  border: var(--hairline);
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.icon-act:hover {
+  background: var(--page);
+  color: var(--text);
+}
+.icon-act.go:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+/* ── Family group header row in the table ──────────────────── */
+tr.family-head td {
+  background: var(--page);
+  padding: 8px 16px;
+}
+tr.family-head td > * {
+  vertical-align: middle;
+}
+tr.family-head td {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.fam-phone {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Phone patient card gains an action row ────────────────── */
+.appt-card.is-static {
+  display: flex;
+  flex-direction: column;
+}
+.appt-card.is-static .appt-card-main {
+  width: 100%;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.appt-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: var(--hairline);
+}
+.appt-card-actions .btn {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+/* ── Duplicate warning in the new-patient form ─────────────── */
+.dupe-warn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--marigold-tint, #fff5e6);
+  border: 1px solid var(--marigold, #e8a33d);
+  font-size: 12.5px;
+}
+.dupe-warn .btn {
+  margin-left: auto;
+}
+
+/* ══ Patient profile ═══════════════════════════════════════ */
+.patient-profile {
+  max-width: 1040px;
+  margin: 0 auto;
+}
+.profile-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.profile-menu-wrap {
+  position: relative;
+}
+
+/* Identity card */
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.appt-avatar.lg {
+  width: 56px;
+  height: 56px;
+  font-size: 19px;
+}
+.profile-who {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.profile-who h1 {
+  font-size: 21px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-who .pc-meta {
+  margin-top: 2px;
+}
+.profile-stats {
+  display: flex;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+.profile-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.profile-stat b {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.profile-stat span {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Two-column body */
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 16px;
+  align-items: start;
+}
+.profile-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.profile-card {
+  padding: 0;
+  overflow: hidden;
+}
+.profile-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 16px;
+  border-bottom: var(--hairline);
+}
+.profile-card-head h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.profile-card-head .link-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.profile-card-head .muted {
+  font-size: 12px;
+}
+.profile-card-body {
+  padding: 14px 16px;
+}
+
+/* Clinical summary rows */
+.summary-rows {
+  margin: 0;
+}
+.summary-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: var(--hairline);
+  font-size: 13px;
+}
+.summary-row:last-child {
+  border-bottom: 0;
+}
+.summary-row dt {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+.summary-row dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* Documents + upcoming + family rows */
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+}
+.doc-row:hover {
+  background: var(--page);
+}
+.doc-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-row .muted {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.upcoming-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+.upcoming-ico {
+  color: var(--primary);
+  margin-top: 1px;
+  flex: none;
+}
+.upcoming-when {
+  font-weight: 600;
+}
+.upcoming-row .muted {
+  font-size: 12.5px;
+}
+.family-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 6px 4px;
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+.family-row:hover {
+  background: var(--page);
+}
+.family-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.family-row .muted {
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 767px) {
+  .profile-stats {
+    gap: 18px;
+    width: 100%;
+  }
+  .profile-head {
+    gap: 12px;
+  }
+}
+
+
+/* ── IVF prescription form ──────────────────────────────────── */
+.ivf-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ivf-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ivf-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ivf-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-tint);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.ivf-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: var(--surface);
+}
+.ivf-section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 6px;
+}
+.ivf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+.ivf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ivf-field > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.ivf-field-wide {
+  grid-column: 1 / -1;
+  margin-bottom: 10px;
+}
+.ivf-field textarea.input {
+  resize: vertical;
+}
+
+/* Investigation table (test · date · report) */
+.ivf-inv {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.ivf-inv-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) 1fr 1.6fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ivf-inv-row:last-child {
+  border-bottom: 0;
+}
+.ivf-inv-head {
+  background: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ivf-inv-label {
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ivf-inv .input {
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+/* Semen analysis grid */
+.ivf-semen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: auto;
+}
+.ivf-semen-row {
+  display: grid;
+  grid-template-columns: 24px 1.4fr repeat(6, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 620px;
+}
+.ivf-semen-head {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.ivf-semen-n {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ivf-semen .input {
+  padding: 5px 7px;
+  font-size: 13px;
+}
+
+/* Action bar */
+.ivf-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+}
+
+/* Template list */
+.ivf-template-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ivf-template-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+@media (max-width: 640px) {
+  .ivf-inv-row {
+    grid-template-columns: minmax(90px, 1.2fr) 1fr 1.3fr;
   }
 }
