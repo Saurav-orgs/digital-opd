@@ -1,11 +1,12 @@
 """Which backend serves a call, and what happens when one is out.
 
 This is the policy every route now shares, so it is asserted here rather than
-inferred from four call sites. The tier that matters most is the last one: a
-route marked `local=False` must fail loudly rather than let a 3B model write
-clinical narrative, and the imaging chain must reach Gemini — it used to be
-Claude or nothing, which told clinics without an Anthropic key that their
-X-rays could not be read.
+inferred from four call sites. Two rules carry the weight. A hosted backend
+that failed is never fallen through from — the local model serves only a host
+with no hosted key, because reaching for an Ollama that production does not
+have put a connection error on the doctor's screen. And the imaging chain must
+reach Gemini — it used to be Claude or nothing, which told clinics without an
+Anthropic key that their X-rays could not be read.
 
 Driven with `asyncio.run` rather than pytest-asyncio: this project does not
 depend on it, and one `run()` per test is cheaper than a new test dependency.
@@ -114,38 +115,74 @@ def test_skips_claude_entirely_when_it_is_off(backends, monkeypatch):
     assert backends.called == ["gemini"]
 
 
-def test_falls_to_local_when_both_hosted_fail(backends):
+def test_a_failed_hosted_backend_does_not_fall_to_local(backends):
+    """The bug: a Gemini hiccup used to reach for an Ollama that is not there.
+
+    Production has no local model installed, so the third tier could only ever
+    fail — and it failed loudly, putting "Could not reach the local LLM at
+    http://127.0.0.1:11434" on the doctor's screen mid-consultation.
+    """
     backends.claude = RuntimeError("down")
     backends.gemini = RuntimeError("down")
+    with pytest.raises(llm_chain.NoBackend):
+        chain()
+    assert backends.called == ["claude", "gemini"]
+
+
+def test_gemini_only_clinic_does_not_fall_to_local(backends, monkeypatch):
+    """The production shape: Gemini configured, Claude off, no Ollama."""
+    monkeypatch.setattr(settings, "claude_enabled", False)
+    backends.gemini = RuntimeError("429 from Google")
+    with pytest.raises(llm_chain.NoBackend):
+        chain()
+    assert backends.called == ["gemini"]
+
+
+def test_the_doctor_reads_a_sentence_not_the_reason(backends):
+    """`detail` is for the log; `str(err)` is rendered verbatim in the UI."""
+    backends.claude = RuntimeError("down")
+    backends.gemini = RuntimeError("Could not reach http://127.0.0.1:11434")
+    with pytest.raises(llm_chain.NoBackend) as caught:
+        chain()
+    assert str(caught.value) == llm_chain.AI_UNAVAILABLE
+    assert "http" not in str(caught.value)
+    assert "127.0.0.1" in caught.value.detail
+
+
+def test_local_serves_a_host_with_no_hosted_key(backends, monkeypatch):
+    """An offline install: the local model is the only backend, not a fallback."""
+    monkeypatch.setattr(settings, "claude_enabled", False)
+    monkeypatch.setattr(settings, "gemini_enabled", False)
     _, provider = chain()
     assert provider == "ollama"
-    assert backends.called == ["claude", "gemini", "local"]
+    assert backends.called == ["local"]
 
 
-def test_never_reaches_local_for_narrative(backends):
+def test_never_reaches_local_for_narrative(backends, monkeypatch):
     """ALLOW_LOCAL_NARRATIVE=false must fail rather than degrade quietly."""
-    backends.claude = RuntimeError("down")
-    backends.gemini = RuntimeError("down")
+    monkeypatch.setattr(settings, "claude_enabled", False)
+    monkeypatch.setattr(settings, "gemini_enabled", False)
     with pytest.raises(llm_chain.NoBackend):
         chain(local=False)
     assert "local" not in backends.called
 
 
 def test_respects_local_llm_disabled(backends, monkeypatch):
+    monkeypatch.setattr(settings, "claude_enabled", False)
+    monkeypatch.setattr(settings, "gemini_enabled", False)
     monkeypatch.setattr(settings, "local_llm_enabled", False)
-    backends.claude = RuntimeError("down")
-    backends.gemini = RuntimeError("down")
     with pytest.raises(llm_chain.NoBackend):
         chain()
-    assert "local" not in backends.called
+    assert backends.called == []
 
 
-def test_raises_when_every_tier_fails(backends):
-    backends.claude = RuntimeError("down")
-    backends.gemini = RuntimeError("down")
+def test_raises_when_the_only_backend_fails(backends, monkeypatch):
+    monkeypatch.setattr(settings, "claude_enabled", False)
+    monkeypatch.setattr(settings, "gemini_enabled", False)
     backends.local = RuntimeError("connection refused")
-    with pytest.raises(llm_chain.NoBackend):
+    with pytest.raises(llm_chain.NoBackend) as caught:
         chain()
+    assert str(caught.value) == llm_chain.AI_UNAVAILABLE
 
 
 def test_claude_gets_its_own_prompt(backends, monkeypatch):

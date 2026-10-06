@@ -6,6 +6,7 @@ import { PatientAuthModule } from '../patient-auth/patient-auth.module';
 import { ReportsModule } from '../reports/reports.module';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
+import { IvfCaseSheetsModule } from '../ivf-case-sheets/ivf-case-sheets.module';
 
 @Module({
   imports: [
@@ -17,6 +18,9 @@ import { ConsultationsModule } from '../consultations/consultations.module';
     // Provides PrescriptionsService: a "prescription ready" notification
     // carries a fresh download link for the PDF.
     ConsultationsModule,
+    // Provides IvfCaseSheetsService: an IVF doctor's prescription is their
+    // case-sheet, and its notice needs the same download link.
+    IvfCaseSheetsModule,
   ],
   controllers: [PatientPortalController],
 })

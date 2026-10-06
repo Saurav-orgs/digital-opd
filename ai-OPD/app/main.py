@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
-from . import claude_llm, cost_log, documents, llm, llm_chain, transcribe
+from . import claude_llm, cost_log, documents, gemini_llm, llm, llm_chain, transcribe
 from rapidfuzz import fuzz
 
 from .spellfix import TRUSTED_THRESHOLD, speller
@@ -525,12 +525,10 @@ async def _summarize_extracted(
             local=settings.allow_local_narrative,
         )
     except llm_chain.NoBackend as err:
-        raise HTTPException(
-            503,
-            "No AI backend could summarise this report (the local model is not "
-            "trusted with clinical narrative unless ALLOW_LOCAL_NARRATIVE=true). "
-            "Please retry, or open the report directly.",
-        ) from err
+        # str(err) is the sentence for the doctor; err.detail names the backend
+        # that actually went down, which only helps someone reading the log.
+        log.warning("report-summary has no backend: %s", err.detail)
+        raise HTTPException(503, str(err)) from err
 
     # 2. Contradiction Guard & Consistency Enforcement
     sanitized = contradiction_guard.validate_and_sanitize_summary(raw, ir, raw_text=text)
@@ -592,7 +590,9 @@ async def consolidate_reports(body: ConsolidateRequest) -> ConsolidateResponse:
             local=settings.allow_local_narrative,
         )
     except llm_chain.NoBackend as err:
-        log.warning("Consolidation fell back to joining the source summaries (%s).", err)
+        log.warning(
+            "Consolidation fell back to joining the source summaries (%s).", err.detail
+        )
         raw = deterministic()
 
     # Preserve all authoritative abnormal values across all source reports
@@ -796,12 +796,8 @@ async def summarize_progress(body: ProgressRequest) -> ProgressResponse:
             local=settings.allow_local_narrative,
         )
     except llm_chain.NoBackend as err:
-        raise HTTPException(
-            503,
-            "No AI backend could write this progress note (the local model is "
-            "not trusted with clinical narrative unless "
-            "ALLOW_LOCAL_NARRATIVE=true). Please retry.",
-        ) from err
+        log.warning("progress has no backend: %s", err.detail)
+        raise HTTPException(503, str(err)) from err
 
     summary = _ground_trends(
         ProgressSummary.model_validate(raw), body.previous, body.current
@@ -1512,6 +1508,10 @@ async def extract_prescription(
                 claude_kw=_EXTRACT_KW,
             )
         except llm_chain.NoBackend as err:
+            # The doctor sees str(err) verbatim — a failed consultation stores
+            # it and renders it under "Couldn't process the recording" — so the
+            # technical reason goes to the log and nowhere near the screen.
+            log.warning("prescription has no backend: %s", err.detail)
             raise HTTPException(503, str(err)) from err
 
     started = time.monotonic()
@@ -1539,27 +1539,26 @@ async def extract_prescription(
     if not draft.medicines and _dictates_medicines(body.transcript):
         log.warning(
             "No medicines extracted from %d chars that look like a prescription; "
-            "retrying on the local model.",
+            "asking a second time.",
             len(body.transcript),
         )
-        # Deliberately the local model, not another Gemini call. Gemini has
-        # just looked at this transcript and found nothing, so asking it again
-        # is the least informative thing to do — and its free tier allows only
-        # 20 requests a day, which a doubled call burns through fast. The local
-        # model is a genuinely different opinion and costs nothing.
+
         async def second_opinion() -> tuple[dict, str]:
-            if settings.local_llm_enabled:
-                return (
-                    await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA),
-                    "ollama",
-                )
-            # No local model on this host. Rather than let the safety net
-            # quietly disappear along with Ollama, ask Claude again: the
-            # failure this retry was written for is sampling non-determinism —
-            # the same transcript returning nothing once and both medicines the
-            # next time — so a second call is still the right move, even to the
-            # same backend. An empty draft the doctor cannot tell from a real
-            # "no medication today" is the outcome worth spending a call to avoid.
+            """One more attempt, on a backend this host actually has.
+
+            The failure this retry was written for is sampling
+            non-determinism — the same transcript returning nothing once and
+            both medicines the next time — so a second call is worth making
+            even to a backend that has just answered. An empty draft the
+            doctor cannot tell from a real "no medication today" is the
+            outcome worth spending a call to avoid.
+
+            Claude first when it is configured: a genuinely different opinion.
+            The local model only on a host with no hosted key, the same rule
+            the chain follows — it used to be asked first here, which on
+            production (no Ollama installed) spent the retry on a connection
+            refusal and threw the safety net away.
+            """
             if llm_chain.claude_ready():
                 claude_system, claude_user = prompt_for(prescription_claude_prompt)
                 return (
@@ -1567,6 +1566,24 @@ async def extract_prescription(
                         claude_system, claude_user, PRESCRIPTION_JSON_SCHEMA, **_EXTRACT_KW
                     ),
                     "claude",
+                )
+            if llm_chain.gemini_ready():
+                # Gemini has just looked at this transcript and found nothing,
+                # so this is the least informative of the three — but it is
+                # the only one a Gemini-only clinic has, and sampling is not
+                # deterministic. Its free tier allows 20 requests a day, which
+                # is why this runs only for a transcript that plainly dictates
+                # medicines and never more than once.
+                return (
+                    await gemini_llm.generate_json(
+                        system, user, PRESCRIPTION_JSON_SCHEMA, route="prescription"
+                    ),
+                    "gemini",
+                )
+            if settings.local_llm_enabled:
+                return (
+                    await llm.generate_json(system, user, PRESCRIPTION_JSON_SCHEMA),
+                    "ollama",
                 )
             raise llm.LlmError("No backend available for a second opinion.")
 

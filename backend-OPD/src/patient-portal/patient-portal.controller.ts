@@ -26,6 +26,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ReportsService } from '../reports/reports.service';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
+import { IvfCaseSheetsService } from '../ivf-case-sheets/ivf-case-sheets.service';
 import { NotificationType } from '../common/enums';
 import { CreateOwnReportDto } from '../reports/dto/create-own-report.dto';
 import { UpdateOwnReportDto } from '../reports/dto/update-own-report.dto';
@@ -52,6 +53,7 @@ export class PatientPortalController {
     private readonly reports: ReportsService,
     private readonly profiles: PatientProfilesService,
     private readonly prescriptions: PrescriptionsService,
+    private readonly ivfCaseSheets: IvfCaseSheetsService,
   ) {}
 
   @Get('appointments')
@@ -192,7 +194,14 @@ export class PatientPortalController {
       .filter((n) => n.type === NotificationType.PRESCRIPTION_READY)
       .map((n) => n.data?.prescriptionId)
       .filter((id): id is string => typeof id === 'string');
-    const pdfUrls = await this.prescriptions.pdfUrlsFor(prescriptionIds);
+    // Two tables can hold the document behind the notice — an e-prescription
+    // or an IVF doctor's case-sheet — and the notification does not say which.
+    // Ids are uuids from different tables, so asking both and merging cannot
+    // collide, and whichever does not own the id simply returns nothing.
+    const pdfUrls = new Map([
+      ...(await this.prescriptions.pdfUrlsFor(prescriptionIds)),
+      ...(await this.ivfCaseSheets.pdfUrlsFor(prescriptionIds)),
+    ]);
 
     return items.map((n) => {
       const id = n.data?.prescriptionId;

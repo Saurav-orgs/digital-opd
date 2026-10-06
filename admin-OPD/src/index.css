@@ -804,6 +804,21 @@ img {
   background: var(--border);
   margin: 16px 0 14px;
 }
+/* The notice a writing tab shows once the visit was issued as the other
+   document (IVF form vs handwritten page) — see PrescriptionTabs. */
+.rx-frozen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px;
+  margin-top: 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  font-size: 13.5px;
+}
 .rx-section-title {
   font-family: var(--font-heading);
   font-weight: 600;

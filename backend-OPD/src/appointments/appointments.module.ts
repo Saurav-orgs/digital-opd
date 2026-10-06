@@ -12,6 +12,7 @@ import { SlotsModule } from '../slots/slots.module';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
+import { IvfCaseSheetsModule } from '../ivf-case-sheets/ivf-case-sheets.module';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
 import { BlockedNumbersModule } from '../blocked-numbers/blocked-numbers.module';
 
@@ -30,6 +31,9 @@ import { BlockedNumbersModule } from '../blocked-numbers/blocked-numbers.module'
     // Provides PrescriptionsService so a visit can carry its issued
     // prescription without duplicating the projection logic.
     ConsultationsModule,
+    // Provides IvfCaseSheetsService: an IVF doctor's prescription is their
+    // case-sheet, and a visit must carry it like any other.
+    IvfCaseSheetsModule,
     // Booking resolves which patient on the number the visit is for.
     PatientProfilesModule,
     // Public booking is refused for numbers the clinic has blocked.

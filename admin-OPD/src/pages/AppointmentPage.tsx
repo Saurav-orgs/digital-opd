@@ -5,6 +5,7 @@ import {
   appointmentsApi,
   blockedNumbersApi,
   consultationApi,
+  ivfCaseSheetApi,
   reportsApi,
 } from '../api/endpoints';
 import type { Appointment, ConsultationSession, EPrescription, PatientReport, Slot } from '../api/types';
@@ -368,7 +369,32 @@ export default function AppointmentPage() {
     queryFn: () => consultationApi.prescription(id!),
     enabled: !!id,
   });
-  const alreadyIssued = prescriptionQ.data?.status === 'issued';
+
+  /*
+   * An IVF & Fertility doctor's prescription is their case-sheet, in its own
+   * table — so "has this visit been issued" cannot be answered by the
+   * e-prescription alone. It used not to be asked at all: a doctor who issued
+   * the IVF form still had a writable Handwrite pad and an Issue button under
+   * it, and could hand the same visit a second prescription.
+   *
+   * Queried only for the doctors who have the tab, and under the same key the
+   * IVF editor uses, so the two share one cache entry and one request.
+   */
+  const isIvf = isIvfDoctor(a?.doctor?.specialization);
+  const ivfSheetQ = useQuery({
+    queryKey: ['ivf-case-sheet', id],
+    queryFn: () => ivfCaseSheetApi.get(id!),
+    enabled: !!id && isIvf,
+  });
+
+  /** Which document this visit was issued as, or null while it is a draft. */
+  const issuedVia: 'prescription' | 'ivf' | null =
+    prescriptionQ.data?.status === 'issued'
+      ? 'prescription'
+      : ivfSheetQ.data?.status === 'issued'
+        ? 'ivf'
+        : null;
+  const alreadyIssued = issuedVia !== null;
 
   /*
    * Is a dictation still being turned into a draft?
@@ -838,11 +864,8 @@ export default function AppointmentPage() {
               disabled={closed}
               flushRef={flushRef}
               onRecorderBusy={setRecorderBusy}
-              modes={
-                isIvfDoctor(a.doctor?.specialization)
-                  ? ['ivf', 'handwrite', 'upload']
-                  : undefined
-              }
+              modes={isIvf ? ['ivf', 'handwrite', 'upload'] : undefined}
+              issuedVia={issuedVia}
               patientName={a.patient_name}
               patientAge={a.patient_age}
               patientChip={<RxPatient appointment={a} />}

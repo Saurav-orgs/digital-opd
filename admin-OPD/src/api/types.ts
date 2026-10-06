@@ -354,7 +354,13 @@ export interface EPrescription {
   appointment_id: string;
   consultation_session_id: string | null;
   status: 'draft' | 'issued';
-  mode: 'structured' | 'handwritten';
+  /**
+   * `ivf` appears only on a visit read back from history: an IVF & Fertility
+   * doctor's prescription is their case-sheet, and it is projected into this
+   * same shape so every client renders it without knowing the difference. The
+   * draft endpoints never return it — that document has its own.
+   */
+  mode: 'structured' | 'handwritten' | 'ivf';
   diagnosis: string | null;
   /** The patient's background as the doctor put it on record. Usually null
    *  — the editor shows the field only when there is something in it. */

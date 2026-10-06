@@ -60,6 +60,7 @@ export function PrescriptionTabs({
   footer,
   patientChip,
   modes = MODES,
+  issuedVia = null,
   patientName,
   patientAge,
 }: {
@@ -76,6 +77,17 @@ export function PrescriptionTabs({
    * default list.
    */
   modes?: Mode[];
+  /**
+   * Which document this visit was issued as, or null while it is still a draft.
+   *
+   * Each editor already freezes itself when the document *it* writes is issued
+   * — `PrescriptionEditor` and `HandwritingCanvas` both swap to the issued
+   * copy. What none of them can see is the other document: an IVF doctor's
+   * case-sheet and their handwritten page are different tables, so issuing the
+   * sheet left the Handwrite pad writable and a second prescription for the
+   * same visit one click away.
+   */
+  issuedVia?: 'prescription' | 'ivf' | null;
   /** Prefill for the IVF form's patient fields. */
   patientName?: string;
   patientAge?: number | null;
@@ -110,6 +122,17 @@ export function PrescriptionTabs({
   });
   /** Only switch to a tab this card actually shows. */
   const offers = (m: Mode) => modes.includes(m);
+  /**
+   * A writing tab that is not the document this visit was issued as.
+   *
+   * Upload is left alone deliberately: it attaches a photo of a paper
+   * prescription rather than writing one, and it has never been closed off
+   * after issuing for any other doctor either.
+   */
+  const frozen = (m: Mode) =>
+    m !== 'upload' && (issuedVia === 'ivf' ? m !== 'ivf' : issuedVia === 'prescription' && m === 'ivf');
+  /** Is `m` the tab showing, and not frozen behind an issued prescription? */
+  const shows = (m: Mode) => mode === m && !frozen(m);
   const setMode = (m: Mode) => {
     setModeState(m);
     writeMode(appointmentId, m);
@@ -251,7 +274,14 @@ export function PrescriptionTabs({
 
       {patientChip}
 
-      {mode === 'ivf' && (
+      {frozen(mode) && (
+        <IssuedElsewhere
+          issuedVia={issuedVia}
+          onGo={() => setMode(issuedVia === 'ivf' ? 'ivf' : offers('handwrite') ? 'handwrite' : 'type')}
+        />
+      )}
+
+      {shows('ivf') && (
         <IvfCaseSheetEditor
           appointmentId={appointmentId}
           canEdit={canEdit}
@@ -261,7 +291,7 @@ export function PrescriptionTabs({
         />
       )}
 
-      {mode === 'handwrite' && (
+      {shows('handwrite') && (
         <>
           <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 10 }}>
             Write the prescription by hand — on a tablet use your stylus. It prints on
@@ -271,7 +301,7 @@ export function PrescriptionTabs({
         </>
       )}
 
-      {mode === 'voice' && (
+      {shows('voice') && (
         <>
           <div className="rx-panel-title">Record prescription</div>
           <div className="rx-panel-sub">Dictate the diagnosis and medicines</div>
@@ -307,7 +337,7 @@ export function PrescriptionTabs({
         </>
       )}
 
-      {mode === 'type' && (
+      {shows('type') && (
         <>
           <PrescriptionEditor
             appointmentId={appointmentId}
@@ -319,7 +349,7 @@ export function PrescriptionTabs({
         </>
       )}
 
-      {mode === 'upload' && (
+      {shows('upload') && (
         <div className="stack" style={{ gap: 14 }}>
           <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
             Photograph the prescription, or upload a scan you already have.
@@ -456,12 +486,45 @@ export function PrescriptionTabs({
         Clear, Save as template and Draft saved sit on the same line as
         Preview and Issue — one row, as the design has it.
       */}
-      {footer && (mode === 'handwrite' || mode === 'upload') && (
+      {footer && (shows('handwrite') || shows('upload')) && (
         <div className="vfoot">
           <div className="vfoot-grow" />
           {footer}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * What a writing tab shows once this visit has been issued as the other
+ * document — an IVF doctor's case-sheet, or their handwritten page.
+ *
+ * It names which one and offers the tab that can withdraw it, because the
+ * doctor's next move is always the same: withdraw, then write. Before this,
+ * the tab simply stayed writable and let them issue a second prescription for
+ * one visit; the server refuses that now, but a refusal the doctor meets after
+ * writing a page is a worse way to learn it.
+ */
+function IssuedElsewhere({
+  issuedVia,
+  onGo,
+}: {
+  issuedVia: 'prescription' | 'ivf' | null;
+  onGo: () => void;
+}) {
+  const where = issuedVia === 'ivf' ? 'IVF form' : 'prescription';
+  return (
+    <div className="rx-frozen">
+      <div>
+        <b>This visit's prescription has been issued.</b>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+          It was issued from the {where}. Withdraw it there to make any changes.
+        </div>
+      </div>
+      <button type="button" className="btn btn-sm" onClick={onGo}>
+        {issuedVia === 'ivf' ? 'Open the IVF form' : 'Open the prescription'}
+      </button>
     </div>
   );
 }

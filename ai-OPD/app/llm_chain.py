@@ -1,11 +1,25 @@
 """The one place that decides which backend serves an LLM call.
 
-Every route wants the same thing — try Claude, then Gemini, then the local
-model, and log which one answered — and before this module each of the four
-wrote that chain out by hand. Four copies of a fallback policy is four places
-for it to drift, and it had already: the imaging route never learned about
-Gemini at all, so a clinic running without an Anthropic key was told its
-X-rays "could not be read" when Gemini could read them perfectly well.
+Every route wants the same thing — try Claude, then Gemini, and log which one
+answered — and before this module each of the four wrote that chain out by
+hand. Four copies of a fallback policy is four places for it to drift, and it
+had already: the imaging route never learned about Gemini at all, so a clinic
+running without an Anthropic key was told its X-rays "could not be read" when
+Gemini could read them perfectly well.
+
+**The local model is not a fallback for a hosted backend that failed.** It
+serves only a deployment that has no hosted key at all — a laptop running the
+whole stack offline. Once Claude or Gemini has been asked and could not
+answer, the call fails and the doctor is told the AI is unavailable.
+
+That used to be a three-tier chain, and the bug it caused is the reason for the
+rule: production has no Ollama installed, so a Gemini hiccup during a voice
+prescription put "Every backend failed for prescription: Could not reach the
+local LLM at http://127.0.0.1:11434: All connection attempts failed" on the
+doctor's screen. Two things wrong with that, and dropping the tier fixes both —
+the doctor reads an internal URL instead of a sentence, and on a host where
+Ollama *is* installed they would silently get a 3B model's clinical text
+because a frontier model was briefly busy.
 
 What is deliberately NOT here:
 
@@ -28,9 +42,26 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
+# What the doctor reads. The sidecar's `detail` is rendered verbatim — a failed
+# consultation stores it and shows it under "Couldn't process the recording" —
+# so it is a finished sentence with no provider names, URLs or env flags in it.
+# The reason belongs in the log, where someone can act on it.
+AI_UNAVAILABLE = (
+    "The AI service is not available right now. Nothing was saved — "
+    "please try again in a few minutes."
+)
+
 
 class NoBackend(RuntimeError):
-    """Every backend was unavailable, refused, or failed."""
+    """No backend could serve this route.
+
+    `str(err)` is the sentence for the doctor; `detail` is the technical reason,
+    for the log. Callers that turn this into a 503 should pass `str(err)`.
+    """
+
+    def __init__(self, detail: str, message: str = AI_UNAVAILABLE) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 def claude_ready() -> bool:
@@ -68,42 +99,57 @@ async def generate_json(
     tuned against, while Claude gets a much shorter one, because the guards
     downstream do the mechanical work its rules would otherwise describe.
 
-    `local` is whether the local model may serve this route at all. False
-    means the chain stops after Gemini and raises rather than letting a 3B
-    model write clinical narrative.
+    `local` is whether the local model may serve this route at all. It applies
+    only to a host with no hosted key configured, since a hosted backend that
+    *failed* is never fallen through from; False means such a host raises
+    rather than letting a 3B model write clinical narrative.
     """
+    asked_hosted = False
+    hosted_err: Exception | None = None
+
     if claude_ready():
+        asked_hosted = True
         c_system, c_user = claude_prompt or (system, user)
         kw: dict[str, Any] = {"route": route, "effort": effort}
         kw.update(claude_kw or {})
         try:
             return await claude_llm.generate_json(c_system, c_user, schema, **kw), "claude"
         except Exception as err:
-            log.warning("Claude %s failed (%s); falling back to Gemini.", route, err)
+            log.warning("Claude %s failed (%s).", route, err)
+            hosted_err = err
 
     if gemini_ready():
+        asked_hosted = True
         try:
             return await gemini_llm.generate_json(
                 system, user, schema, route=route
             ), "gemini"
         except Exception as err:
-            log.warning("Gemini %s failed (%s); falling back to the local model.", route, err)
+            log.warning("Gemini %s failed (%s).", route, err)
+            hosted_err = err
 
+    # A hosted backend was asked and could not answer. Stop here rather than
+    # hand the work to the local model: see the module docstring.
+    if asked_hosted:
+        raise NoBackend(f"every hosted backend failed for {route}: {hosted_err}")
+
+    # Nothing hosted is configured at all — an offline install. The local model
+    # is this host's only backend, not a fallback from a failure.
     if not local:
         raise NoBackend(
-            f"No cloud backend could serve {route}, and the local model is not "
-            "trusted with this output."
+            f"no hosted backend is configured for {route}, and the local model "
+            "is not trusted with this output (ALLOW_LOCAL_NARRATIVE=false)."
         )
     if not settings.local_llm_enabled:
         raise NoBackend(
-            f"No cloud backend could serve {route}, and the local model is "
-            "disabled (LOCAL_LLM_ENABLED=false)."
+            f"no backend is configured for {route}: no hosted key, and the "
+            "local model is disabled (LOCAL_LLM_ENABLED=false)."
         )
 
     try:
         return await llm.generate_json(system, user, schema), "ollama"
     except Exception as err:
-        raise NoBackend(f"Every backend failed for {route}: {err}") from err
+        raise NoBackend(f"the local model failed for {route}: {err}") from err
 
 
 async def generate_json_from_image(
@@ -118,11 +164,11 @@ async def generate_json_from_image(
 ) -> tuple[dict[str, Any], str]:
     """The same chain for a report that is a picture — an X-ray, an ECG strip.
 
-    Two tiers, not three: the local model has no eyes, so there is nothing
-    under Gemini to fall through to. Both hosted backends read an image, and
-    either one is enough to keep a clinic's imaging working — which is the
-    whole point of this function existing, since the route used to be Claude
-    or nothing.
+    Hosted only, and always was: the local model has no eyes, so there is
+    nothing under Gemini to fall through to. Both hosted backends read an
+    image, and either one is enough to keep a clinic's imaging working — which
+    is the whole point of this function existing, since the route used to be
+    Claude or nothing.
     """
     if claude_ready():
         try:
@@ -140,4 +186,4 @@ async def generate_json_from_image(
         except Exception as err:
             log.warning("Gemini %s failed (%s).", route, err)
 
-    raise NoBackend(f"No backend able to read an image is configured for {route}.")
+    raise NoBackend(f"no backend able to read an image answered for {route}.")

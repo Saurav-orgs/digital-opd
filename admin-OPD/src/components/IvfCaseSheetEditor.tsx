@@ -72,6 +72,18 @@ export function IvfCaseSheetEditor({
     },
   });
 
+  /*
+   * The visit itself changed, not just this sheet: issuing closes the
+   * consultation out, the same way issuing a prescription does. Without this
+   * the page went on showing the visit as pending, and the dashboard's count
+   * with it, until something else happened to refetch.
+   */
+  const invalidateVisit = () => {
+    qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
+    qc.invalidateQueries({ queryKey: ['appointments'] });
+    qc.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+
   const issue = useMutation({
     mutationFn: async () => {
       if (dirty) await ivfCaseSheetApi.save(appointmentId, data);
@@ -79,6 +91,7 @@ export function IvfCaseSheetEditor({
     },
     onSuccess: (s) => {
       qc.setQueryData(['ivf-case-sheet', appointmentId], s);
+      invalidateVisit();
       setDirty(false);
       setPreviewOpen(false);
       toast.success('Prescription issued to the patient.');
@@ -90,6 +103,10 @@ export function IvfCaseSheetEditor({
     mutationFn: () => ivfCaseSheetApi.withdraw(appointmentId),
     onSuccess: (s) => {
       qc.setQueryData(['ivf-case-sheet', appointmentId], s);
+      // The visit stays done — withdrawing is "I issued the wrong thing", not
+      // "this visit did not happen", and the prescription path works the same
+      // way. The caches still refresh: what the visit carries has changed.
+      invalidateVisit();
       setConfirmWithdraw(false);
       toast.success('Prescription withdrawn. The patient can no longer see it.');
     },

@@ -5,6 +5,7 @@ import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
 import { StorageService } from '../uploads/storage.service';
+import { DoctorsService } from '../doctors/doctors.service';
 import {
   COLOR,
   CONTENT_W,
@@ -20,6 +21,9 @@ import {
   imageHeader,
   pageFurniture,
   patientInfo,
+  rebookQr,
+  type Frame,
+  frameFor,
 } from '../prescriptions/prescription-pdf.layout';
 import {
   FEMALE_TESTS,
@@ -53,6 +57,9 @@ export class IvfCaseSheetPdfService {
   constructor(
     private readonly config: ConfigService,
     private readonly storage: StorageService,
+    // For `bookingUrl` alone — the one definition of the doctor's booking
+    // link, which the rebook block at the foot of the sheet encodes.
+    private readonly doctors: DoctorsService,
   ) {}
 
   async render(
@@ -65,7 +72,14 @@ export class IvfCaseSheetPdfService {
     // The lowest baseline the body may reach before a new page. The issued copy
     // stops above its footer; the print copy keeps the same stop so the two
     // paginate alike.
+    //
+    // Deliberately NOT the rebook block's `frame.bodyBottom`, which the
+    // prescription uses: this sheet is a dense multi-page form, and taking the
+    // block's height off every page would reflow all of them to buy room on
+    // the last. The block handles the collision itself — it moves to a fresh
+    // page when the body has already run into its space.
     const bodyBottom = FOOTER_TOP - 14;
+    const frame = frameFor(!letterhead);
 
     const doc = new PDFDocument({
       size: 'A4',
@@ -119,12 +133,38 @@ export class IvfCaseSheetPdfService {
     y = this.semenAnalysis(doc, data.semenAnalysis, y, ensure);
     y = this.maleInvestigations(doc, data, y, ensure);
     y = this.usgAndAfc(doc, data, y, ensure);
-    this.diagnosisAndPlan(doc, data.diagnosisAndPlan, y, ensure);
+    y = this.diagnosisAndPlan(doc, data.diagnosisAndPlan, y, ensure);
+
+    // The patient leaves with this sheet in hand, so it carries the same
+    // "book your next visit" QR and link the prescription does. It did not,
+    // because the block was private to `PrescriptionPdfService` — an IVF
+    // doctor's prescription went out with no way to rebook on it.
+    await this.rebookBlock(doc, doctor, y, frame);
 
     if (letterhead) pageFurniture(doc);
 
     doc.end();
     return done;
+  }
+
+  /**
+   * The shared rebook block, for this doctor. The layout module draws it and
+   * `DoctorsService` owns the URL — same split as the prescription's.
+   */
+  private async rebookBlock(
+    doc: PDFKit.PDFDocument,
+    doctor: Doctor,
+    y: number,
+    frame: Frame,
+  ): Promise<void> {
+    let url: string;
+    try {
+      url = this.doctors.bookingUrl(doctor);
+    } catch (err) {
+      this.logger.warn(`Could not build the booking URL: ${(err as Error).message}`);
+      return;
+    }
+    await rebookQr(doc, url, y, frame, this.logger);
   }
 
   private envClinic(): EnvClinic {
