@@ -1,14 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
+import { Sequelize } from 'sequelize-typescript';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
+import { EPrescription } from '../database/models/e-prescription.model';
 import { IvfCaseSheetPdfService } from './ivf-case-sheet-pdf.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ActivityLogService } from '../activity/activity-log.service';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
-import { NotificationType, PrescriptionStatus } from '../common/enums';
+import {
+  ActivityAction,
+  ConsultationStatus,
+  NotificationType,
+  PrescriptionStatus,
+} from '../common/enums';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { UpdateIvfCaseSheetDto } from './dto/ivf-case-sheet.dto';
 import {
@@ -36,9 +45,16 @@ export class IvfCaseSheetsService {
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
     @InjectModel(Doctor) private readonly doctorModel: typeof Doctor,
     @InjectModel(IvfCaseSheet) private readonly sheetModel: typeof IvfCaseSheet,
+    // Only to answer "has this visit already been issued as a handwritten or
+    // typed prescription". The model rather than PrescriptionsService, which
+    // would be a dependency cycle — see the same note over there.
+    @InjectModel(EPrescription)
+    private readonly prescriptionModel: typeof EPrescription,
     private readonly pdf: IvfCaseSheetPdfService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly activity: ActivityLogService,
+    private readonly sequelize: Sequelize,
   ) {}
 
   /** The appointment's case-sheet, creating an empty draft on first open. */
@@ -52,7 +68,7 @@ export class IvfCaseSheetsService {
   async update(appointmentId: string, dto: UpdateIvfCaseSheetDto, user: AuthUser) {
     const { appointment } = await this.assertAccess(appointmentId, user);
     const sheet = await this.findOrCreate(appointment);
-    this.assertEditable(sheet);
+    await this.assertEditable(sheet);
 
     await sheet.update({ data: sanitizeIvfCaseSheetData(dto.data) } as any);
     return this.toView(await this.reload(sheet.id));
@@ -70,7 +86,7 @@ export class IvfCaseSheetsService {
   async issue(appointmentId: string, user: AuthUser) {
     const { appointment, doctor } = await this.assertAccess(appointmentId, user);
     const sheet = await this.findOrCreate(appointment);
-    this.assertEditable(sheet);
+    await this.assertEditable(sheet);
 
     if (isIvfCaseSheetEmpty(sheet.data || {})) {
       throw new AppException(ErrorCode.CASE_SHEET_EMPTY);
@@ -87,22 +103,151 @@ export class IvfCaseSheetsService {
       `ivf-case-sheets/${appointment.doctor_id}`,
     );
 
-    await sheet.update({
-      status: PrescriptionStatus.ISSUED,
-      issued_at: new Date(),
-      pdf_key: key,
-    } as any);
+    /*
+     * Freeze it, and close the visit out with it — in one transaction,
+     * because "issued but still pending" is precisely the state this
+     * prevents, and a half-applied write would recreate it.
+     *
+     * Issuing the case-sheet used not to touch `consultation_status` at all,
+     * so an IVF doctor who issued the prescription and moved on left the
+     * appointment sitting at `pending` for ever, while every other doctor's
+     * visit closed itself. Handing the patient their prescription is what
+     * finishing a visit means, whichever document it is.
+     *
+     * `rejected` and `no_show` are left alone: both are deliberate statements
+     * about a visit that did not happen the normal way, and neither should be
+     * overwritten by a late reprint.
+     */
+    const closesVisit =
+      appointment.consultation_status === ConsultationStatus.PENDING ||
+      appointment.consultation_status === ConsultationStatus.ON_HOLD;
+    const previousStatus = appointment.consultation_status;
+
+    await this.sequelize.transaction(async (t) => {
+      await sheet.update(
+        {
+          status: PrescriptionStatus.ISSUED,
+          issued_at: new Date(),
+          pdf_key: key,
+        } as any,
+        { transaction: t },
+      );
+      if (closesVisit) {
+        await appointment.update(
+          { consultation_status: ConsultationStatus.DONE } as any,
+          { transaction: t },
+        );
+      }
+    });
 
     await this.notifications.create(
       appointment.patient_mobile,
       NotificationType.PRESCRIPTION_READY,
       'Your prescription is ready',
       `Dr. ${doctor.name} has issued your prescription for ${appointment.appointment_date}.`,
-      { appointmentId: appointment.id, caseSheetId: sheet.id },
+      // `prescriptionId`, not a name of its own: the patient's bell resolves
+      // this key into a download link and withdrawing clears the notice by
+      // matching it (`removeForPrescription`). Under `caseSheetId` neither
+      // happened — the patient got a notice with no PDF behind it, and
+      // withdrawing the sheet left that notice sitting in their feed.
+      { appointmentId: appointment.id, prescriptionId: sheet.id },
       appointment.doctor_id,
     );
 
+    // Written straight through, not batched: this is the moment a document
+    // reached a patient, and it is the row someone would later ask to see.
+    this.activity.recordForUser(user, {
+      action: ActivityAction.PRESCRIPTION_ISSUED,
+      summary:
+        `Issued an IVF prescription for ${appointment.patient_name} ` +
+        `(${appointment.appointment_date}).`,
+      entity_type: 'prescription',
+      entity_id: sheet.id,
+      doctor_id: appointment.doctor_id,
+      metadata: {
+        appointment_id: appointment.id,
+        patient_mobile: appointment.patient_mobile,
+        document: 'ivf_case_sheet',
+      },
+    });
+
+    // Recorded separately, and in the same words `setConsultation` uses, so
+    // "who marked this visit done, and when" has one answer in the log
+    // whether a human pressed the button or issuing did it.
+    if (closesVisit) {
+      this.activity.recordForUser(user, {
+        action: ActivityAction.APPOINTMENT_CONSULTATION_SET,
+        summary:
+          `Marked ${appointment.patient_name}'s visit on ` +
+          `${appointment.appointment_date} as done (prescription issued).`,
+        entity_type: 'appointment',
+        entity_id: appointment.id,
+        doctor_id: appointment.doctor_id,
+        metadata: {
+          from: previousStatus,
+          to: ConsultationStatus.DONE,
+          via: 'ivf_case_sheet_issue',
+        },
+      });
+    }
+
     return this.toView(await this.reload(sheet.id));
+  }
+
+  /**
+   * The issued sheet as the patient's clients already expect a prescription to
+   * look — the same keys `PrescriptionsService.findIssuedForAppointment`
+   * returns, so a visit carries it under `e_prescription` and MyVisits, the
+   * Flutter app and the doctor's history render it with no new code.
+   *
+   * No `AuthUser`: the caller has already established whose visit this is.
+   * `medicines` is always empty and the PDF is the document, exactly as it is
+   * for a handwritten prescription. `diagnosisAndPlan` is the sheet's free
+   * note, and the only part of it worth a line in a list.
+   */
+  async findIssuedForAppointment(appointmentId: string) {
+    const sheet = await this.sheetModel.findOne({
+      where: { appointment_id: appointmentId, status: PrescriptionStatus.ISSUED },
+    });
+    if (!sheet) return null;
+
+    const data = (sheet.data || {}) as IvfCaseSheetData;
+    return {
+      id: sheet.id,
+      mode: 'ivf' as const,
+      diagnosis: data.diagnosisAndPlan?.trim() || null,
+      previous_history: null,
+      advice: null,
+      follow_up_date: null,
+      issued_at: sheet.issued_at,
+      pdf_url: await this.storage.presignedGetUrl(sheet.pdf_key),
+      handwriting_image_url: null,
+      medicines: [],
+    };
+  }
+
+  /**
+   * Fresh download links for a batch of issued sheets, keyed by sheet id —
+   * the same contract as `PrescriptionsService.pdfUrlsFor`, so the patient's
+   * notification feed can merge the two maps and not care which document a
+   * "prescription ready" notice belongs to. A withdrawn sheet has no entry.
+   */
+  async pdfUrlsFor(sheetIds: string[]): Promise<Map<string, string>> {
+    const urls = new Map<string, string>();
+    if (sheetIds.length === 0) return urls;
+
+    const rows = await this.sheetModel.findAll({
+      where: {
+        id: { [Op.in]: sheetIds },
+        status: PrescriptionStatus.ISSUED,
+      },
+      attributes: ['id', 'pdf_key'],
+    });
+    for (const row of rows) {
+      const url = await this.storage.presignedGetUrl(row.pdf_key);
+      if (url) urls.set(row.id, url);
+    }
+    return urls;
   }
 
   /** The issued PDF's bytes, served through the API (CORS, same access check). */
@@ -226,10 +371,32 @@ export class IvfCaseSheetsService {
     return this.sheetModel.findByPk(id) as Promise<IvfCaseSheet>;
   }
 
-  private assertEditable(sheet: IvfCaseSheet): void {
+  /**
+   * May this visit's case-sheet still be written to?
+   *
+   * The mirror of `PrescriptionsService.assertEditable`: one visit has one
+   * prescription, and for an IVF doctor it is either this sheet or the
+   * handwritten/typed one. Issuing either ends the visit's writing until it
+   * is withdrawn.
+   */
+  private async assertEditable(sheet: IvfCaseSheet): Promise<void> {
     if (sheet.status === PrescriptionStatus.ISSUED) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message: 'This prescription has already been issued and cannot be changed.',
+      });
+    }
+    const issuedPrescription = await this.prescriptionModel.findOne({
+      where: {
+        appointment_id: sheet.appointment_id,
+        status: PrescriptionStatus.ISSUED,
+      },
+      attributes: ['id'],
+    });
+    if (issuedPrescription) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          "This visit's prescription has already been issued. Withdraw it " +
+          'before writing another one.',
       });
     }
   }

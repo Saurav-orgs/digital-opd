@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import { ConfigService } from '@nestjs/config';
 import { IvfCaseSheetPdfService } from './ivf-case-sheet-pdf.service';
 import { StorageService } from '../uploads/storage.service';
+import { DoctorsService } from '../doctors/doctors.service';
 import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
@@ -17,7 +18,11 @@ describe('IvfCaseSheetPdfService', () => {
   const storage = {
     download: jest.fn(),
   } as unknown as StorageService;
-  const service = new IvfCaseSheetPdfService(config, storage);
+  const BOOKING_URL = 'https://patient.test/d/shweta-mittal';
+  const doctors = {
+    bookingUrl: () => BOOKING_URL,
+  } as unknown as DoctorsService;
+  const service = new IvfCaseSheetPdfService(config, storage, doctors);
 
   const doctor = {
     name: 'Shweta Mittal',
@@ -71,6 +76,65 @@ describe('IvfCaseSheetPdfService', () => {
   it('renders the print copy (no letterhead) too', async () => {
     const buf = await service.render(sheet, appointment, doctor, { letterhead: false });
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  /**
+   * The sheet is what the patient leaves with, so it carries the same "book
+   * your next visit" QR and link the prescription does. It did not: the block
+   * was private to `PrescriptionPdfService`, so an IVF doctor's prescription
+   * went out with no way to rebook printed on it anywhere.
+   */
+  it('prints the booking QR and link at the foot of the sheet', async () => {
+    const proto = PDFDocument.prototype as unknown as Record<string, any>;
+    const origText = proto.text;
+    const origImage = proto.image;
+    const drawn: string[] = [];
+    let images = 0;
+    proto.text = function (t: unknown, ...rest: unknown[]) {
+      drawn.push(String(t));
+      return origText.call(this, t, ...rest);
+    };
+    proto.image = function (...args: unknown[]) {
+      images++;
+      return origImage.apply(this, args as never);
+    };
+    try {
+      await service.render(sheet, appointment, doctor);
+    } finally {
+      proto.text = origText;
+      proto.image = origImage;
+    }
+
+    expect(drawn).toContain('Book your next appointment');
+    // The URL is printed as well as encoded — a photocopy with no scannable
+    // code can still be typed in.
+    expect(drawn).toContain(BOOKING_URL);
+    // The doctor has no uploaded letterhead here, so the QR is the only image.
+    expect(images).toBe(1);
+  });
+
+  it('leaves the block off when no portal base is configured', async () => {
+    const relative = {
+      bookingUrl: () => '/d/shweta-mittal',
+    } as unknown as DoctorsService;
+    const proto = PDFDocument.prototype as unknown as Record<string, any>;
+    const origText = proto.text;
+    const drawn: string[] = [];
+    proto.text = function (t: unknown, ...rest: unknown[]) {
+      drawn.push(String(t));
+      return origText.call(this, t, ...rest);
+    };
+    try {
+      await new IvfCaseSheetPdfService(config, storage, relative).render(
+        sheet,
+        appointment,
+        doctor,
+      );
+    } finally {
+      proto.text = origText;
+    }
+    // Nothing can scan a relative path, so nothing is printed.
+    expect(drawn).not.toContain('Book your next appointment');
   });
 
   it('renders an almost-empty sheet without throwing', async () => {

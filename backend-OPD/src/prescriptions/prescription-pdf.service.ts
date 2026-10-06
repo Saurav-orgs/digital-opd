@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import PDFDocument from 'pdfkit';
-import * as QRCode from 'qrcode';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { EPrescription } from '../database/models/e-prescription.model';
@@ -13,10 +12,8 @@ import {
   COLOR,
   CONTENT_W,
   EnvClinic,
-  FOOTER_TOP,
   HEADER_TOP,
   MARGIN,
-  PAGE,
   continuationPage,
   doctorHeader,
   fetchHeaderImage,
@@ -27,35 +24,10 @@ import {
   imageHeader,
   pageFurniture,
   patientInfo,
+  rebookQr,
+  type Frame,
+  frameFor,
 } from './prescription-pdf.layout';
-
-/**
- * The "book your next visit" QR block is pinned to the bottom of the last
- * page, directly above the footer, rather than flowing after the body. This
- * is the height it takes including the divider above it; the body renderers
- * stop short of it so nothing runs underneath the code.
- */
-const REBOOK_H = 100;
-/**
- * On the print copy the sheet goes onto the doctor's own pad, whose footer
- * is already printed where ours would be. Ours is left off and the QR block
- * is lifted this much (≈1.5 cm) clear of it, so the body stops higher too.
- */
-const PRINT_FOOTER_LIFT = 43;
-
-/**
- * The vertical frame the body and QR block work within — where the QR sits
- * and the lowest baseline the body may reach before starting a new page.
- * Two of them: the issued copy's, and the print copy's with its lifted QR.
- */
-interface Frame {
-  rebookTop: number;
-  bodyBottom: number;
-}
-function frameFor(print: boolean): Frame {
-  const rebookTop = FOOTER_TOP - REBOOK_H - (print ? PRINT_FOOTER_LIFT : 0);
-  return { rebookTop, bodyBottom: rebookTop - 12 };
-}
 
 @Injectable()
 export class PrescriptionPdfService {
@@ -132,7 +104,7 @@ export class PrescriptionPdfService {
     // The patient leaves with this sheet in hand — the QR is how the next
     // visit gets booked without them having to find the clinic online again.
     // It sits at the foot of the last page, whatever the body left above it.
-    await this.rebookQr(doc, doctor, y, frame);
+    await this.rebookBlock(doc, doctor, y, frame);
 
     // Render footer & furniture on all pages — not on the print copy, whose
     // pad carries its own.
@@ -396,17 +368,15 @@ export class PrescriptionPdfService {
     return y + availH;
   }
 
-  // ── Book the Next Visit (URL + QR) ─────────────────────────
   /**
-   * A QR of the doctor's booking page, plus the URL in plain text beside it.
+   * The shared rebook block, for this doctor.
    *
-   * The URL is printed as well as encoded on purpose: a patient with no camera
-   * to hand, or a fax-quality photocopy of this sheet, can still type it in.
-   *
-   * Best-effort — a prescription must be issued even if the QR cannot be drawn,
-   * so every failure here degrades to no block rather than a failed issue.
+   * `bookingUrl` has exactly one definition (`DoctorsService`) and the layout
+   * module is deliberately free of it, so resolving the doctor to a URL is
+   * this service's job and drawing it is the layout's. A URL that cannot even
+   * be built degrades to no block, like every other failure in there.
    */
-  private async rebookQr(
+  private async rebookBlock(
     doc: PDFKit.PDFDocument,
     doctor: Doctor,
     y: number,
@@ -419,77 +389,7 @@ export class PrescriptionPdfService {
       this.logger.warn(`Could not build the booking URL: ${(err as Error).message}`);
       return;
     }
-    // A relative path is what `bookingUrl` returns when no portal base is
-    // configured. Nothing can scan that, so print nothing.
-    if (!/^https?:\/\//i.test(url)) return;
-
-    let png: Buffer;
-    try {
-      png = await QRCode.toBuffer(url, {
-        type: 'png',
-        width: 256,
-        margin: 0,
-        errorCorrectionLevel: 'M',
-      });
-    } catch (err) {
-      this.logger.warn(`Could not render the booking QR: ${(err as Error).message}`);
-      return;
-    }
-
-    // Pinned to the foot of the page, above the footer furniture. A new page
-    // is started only if the body genuinely ran into that space; `pageFurniture`
-    // runs after this and covers whichever page we end on.
-    if (y > frame.bodyBottom) continuationPage(doc);
-    y = frame.rebookTop;
-
-    const qrSize = 64;
-
-    doc
-      .save()
-      .moveTo(MARGIN, y)
-      .lineTo(PAGE.width - MARGIN, y)
-      .lineWidth(0.5)
-      .strokeColor(COLOR.line)
-      .stroke()
-      .restore();
-
-    y += 12;
-
-    try {
-      doc.image(png, MARGIN, y, { fit: [qrSize, qrSize] });
-    } catch (err) {
-      this.logger.warn(`Could not embed the booking QR: ${(err as Error).message}`);
-      return;
-    }
-
-    const textX = MARGIN + qrSize + 14;
-    const textW = CONTENT_W - qrSize - 14;
-
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(11.5)
-      .fillColor(COLOR.ink)
-      .text('Book your next appointment', textX, y + 6, { width: textW });
-
-    doc
-      .font('Helvetica')
-      .fontSize(9.5)
-      .fillColor(COLOR.muted)
-      .text('Scan this code, or open the link below.', textX, doc.y + 2, {
-        width: textW,
-      });
-
-    doc
-      .font('Helvetica')
-      .fontSize(9.5)
-      .fillColor(COLOR.accent)
-      .text(url, textX, doc.y + 3, {
-        width: textW,
-        link: url,
-        underline: false,
-        lineBreak: false,
-        ellipsis: true,
-      });
+    await rebookQr(doc, url, y, frame, this.logger);
   }
 
   /** Best-effort handwriting fetch. */

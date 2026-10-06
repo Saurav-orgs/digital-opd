@@ -11,6 +11,7 @@ import { SlotsService } from '../slots/slots.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
+import { IvfCaseSheetsService } from '../ivf-case-sheets/ivf-case-sheets.service';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
 import { BlockedNumbersService } from '../blocked-numbers/blocked-numbers.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -48,6 +49,9 @@ export class AppointmentsService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly prescriptions: PrescriptionsService,
+    // An IVF doctor's prescription is their case-sheet, in its own table. A
+    // visit has at most one of the two, so it is read through `issuedRx`.
+    private readonly ivfCaseSheets: IvfCaseSheetsService,
     private readonly profiles: PatientProfilesService,
     private readonly blocked: BlockedNumbersService,
     private readonly config: ConfigService,
@@ -540,8 +544,28 @@ export class AppointmentsService {
       // Combined AI summary across all of this visit's reports (fields already
       // on the appointment row via toJSON: reports_summary / _status / _error /
       // _count).
-      e_prescription: await this.prescriptions.findIssuedForAppointment(id),
+      e_prescription: await this.issuedRx(id),
     };
+  }
+
+  /**
+   * This visit's issued prescription, whichever document it is.
+   *
+   * An IVF & Fertility doctor issues a case-sheet instead of a medicine list,
+   * and it used to stop at their own screen: the patient was told their
+   * prescription was ready and then had nowhere to open it, because every
+   * patient-facing payload read `e_prescriptions` alone. Both projections
+   * return the same keys, so one `??` is the whole fix and no client changed.
+   *
+   * At most one can be issued at a time — `assertEditable` on both sides
+   * refuses the second — so the order here only decides which to look for
+   * first, not which wins.
+   */
+  private async issuedRx(appointmentId: string) {
+    return (
+      (await this.prescriptions.findIssuedForAppointment(appointmentId)) ??
+      (await this.ivfCaseSheets.findIssuedForAppointment(appointmentId))
+    );
   }
 
   /**
@@ -746,7 +770,7 @@ export class AppointmentsService {
         prescriptions: await this.presignPrescriptions(a),
         reports: await this.reportsForAppointment(a.id),
         // Null until the doctor issues it — a draft is never patient-visible.
-        e_prescription: await this.prescriptions.findIssuedForAppointment(a.id),
+        e_prescription: await this.issuedRx(a.id),
       })),
     );
   }

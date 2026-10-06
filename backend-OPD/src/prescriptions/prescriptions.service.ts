@@ -10,6 +10,7 @@ import { ConsultationSession } from '../database/models/consultation-session.mod
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
+import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
 import { PrescriptionPdfService } from './prescription-pdf.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { StorageService } from '../uploads/storage.service';
@@ -57,6 +58,12 @@ export class PrescriptionsService {
     private readonly sessionModel: typeof ConsultationSession,
     @InjectModel(AiTrainingSample)
     private readonly trainingModel: typeof AiTrainingSample,
+    // Only to answer "has this visit already been issued as an IVF
+    // case-sheet". The model, not IvfCaseSheetsService: that service depends
+    // on this one's storage and notification wiring, and the two services
+    // asking each other questions is a dependency cycle Nest refuses to boot.
+    @InjectModel(IvfCaseSheet)
+    private readonly ivfSheetModel: typeof IvfCaseSheet,
     private readonly pdf: PrescriptionPdfService,
     private readonly medicines: MedicinesService,
     private readonly storage: StorageService,
@@ -81,7 +88,7 @@ export class PrescriptionsService {
   ) {
     await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
-    this.assertEditable(prescription);
+    await this.assertEditable(prescription);
 
     await prescription.update({
       // Editing the structured fields makes this a structured prescription.
@@ -110,7 +117,7 @@ export class PrescriptionsService {
   ) {
     const appointment = await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
-    this.assertEditable(prescription);
+    await this.assertEditable(prescription);
     if (!file) throw new AppException(ErrorCode.FILE_REQUIRED);
 
     const { key } = await this.storage.uploadImage(
@@ -158,7 +165,7 @@ export class PrescriptionsService {
   async issue(appointmentId: string, user: AuthUser) {
     const appointment = await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
-    this.assertEditable(prescription);
+    await this.assertEditable(prescription);
 
     const medicines = await this.medicinesFor(prescription.id);
     this.assertIssuable(prescription, medicines);
@@ -826,11 +833,38 @@ export class PrescriptionsService {
     } as any);
   }
 
-  private assertEditable(prescription: EPrescription): void {
+  /**
+   * May this visit's prescription still be written to?
+   *
+   * Two documents can be the prescription for one visit — this one, and an IVF
+   * doctor's case-sheet — and issuing either one ends the visit's writing. An
+   * IVF doctor who issued their case-sheet could still draw on the Handwrite
+   * pad and issue a second prescription for the same visit, because each
+   * document only ever checked its own status.
+   *
+   * The gate sits here rather than at the three call sites because `update`,
+   * `saveHandwriting` and `issue` are all of them, and a fourth write path
+   * added later should not have to remember.
+   */
+  private async assertEditable(prescription: EPrescription): Promise<void> {
     if (prescription.status === PrescriptionStatus.ISSUED) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message:
           'This prescription has already been issued and cannot be changed.',
+      });
+    }
+    const issuedSheet = await this.ivfSheetModel.findOne({
+      where: {
+        appointment_id: prescription.appointment_id,
+        status: PrescriptionStatus.ISSUED,
+      },
+      attributes: ['id'],
+    });
+    if (issuedSheet) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          "This visit's prescription has already been issued. Withdraw it " +
+          'before writing another one.',
       });
     }
   }

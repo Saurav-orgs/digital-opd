@@ -5,7 +5,11 @@ import { Appointment } from '../database/models/appointment.model';
 import { ConsultationSession } from '../database/models/consultation-session.model';
 import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
-import { AiClientService, AiDraftPrescription } from '../ai/ai-client.service';
+import {
+  AiClientService,
+  AiDraftPrescription,
+  AiUnavailableError,
+} from '../ai/ai-client.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { AppException } from '../common/errors/app.exception';
@@ -303,7 +307,8 @@ export class ConsultationsService {
         );
       } catch (err) {
         if (await this.wasCancelled(sessionId)) return;
-        await this.fail(sessionId, (err as Error).message);
+        // Transcription itself failed, so there is no transcript to retry from.
+        await this.fail(sessionId, this.failureMessage(err, false));
         return;
       }
 
@@ -383,7 +388,7 @@ export class ConsultationsService {
       if (await this.wasCancelled(sessionId)) return;
       // The transcript survives even when drafting fails, so the doctor can
       // still read what was said, retry, or write the prescription by hand.
-      await this.fail(sessionId, (err as Error).message);
+      await this.fail(sessionId, this.failureMessage(err, true));
     }
   }
 
@@ -498,6 +503,36 @@ export class ConsultationsService {
     const date = new Date();
     date.setDate(date.getDate() + days);
     return date.toISOString().slice(0, 10);
+  }
+
+  /**
+   * The sentence to store on a failed session, and the place the real reason
+   * is logged.
+   *
+   * `error` on the row is rendered verbatim — ConsultationRecorder prints it
+   * after "Couldn't process the recording" — so nothing that reaches it may be
+   * an exception message. A doctor mid-consultation was shown "Every backend
+   * failed for prescription: Could not reach the local LLM at
+   * http://127.0.0.1:11434", which names a host they have no business seeing
+   * and tells them nothing they can do about it.
+   *
+   * `transcriptSaved` is what separates the two stages: after drafting fails
+   * the doctor can read what was said and retry, and before transcription
+   * succeeds there is nothing to retry from.
+   */
+  private failureMessage(err: unknown, transcriptSaved: boolean): string {
+    const reason = (err as Error)?.message ?? String(err);
+    const cause =
+      err instanceof AiUnavailableError
+        ? 'The AI service is not available right now.'
+        : 'Something went wrong while processing this recording.';
+
+    if (err instanceof AiUnavailableError) this.logger.warn(`AI stage failed: ${reason}`);
+    else this.logger.error(`Consultation stage failed: ${reason}`);
+
+    return transcriptSaved
+      ? `${cause} What was said is saved — please try again, or write the prescription yourself.`
+      : `${cause} Please record again, or write the prescription yourself.`;
   }
 
   async fail(sessionId: string, message: string): Promise<void> {
