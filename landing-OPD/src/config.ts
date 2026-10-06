@@ -18,10 +18,10 @@ export const AppConfig = {
     patientPortal: 'https://patient.mydigitalopd.com',
   },
 
-  /** WhatsApp number, international format, digits only. Placeholder. */
-  whatsapp: '919999999999',
+  /** The single public contact address. Every "talk to us" link goes here. */
+  supportEmail: 'support@mydigitalopd.com',
 };
 
-export function whatsappUrl(message: string): string {
-  return `https://wa.me/${AppConfig.whatsapp}?text=${encodeURIComponent(message)}`;
+export function supportMailto(subject: string): string {
+  return `mailto:${AppConfig.supportEmail}?subject=${encodeURIComponent(subject)}`;
 }
