@@ -1,5 +1,5 @@
-import { ArrowRight, Check, FileCheck2, MessageCircle } from 'lucide-react';
-import { whatsappUrl } from '../config';
+import { ArrowRight, Check, FileCheck2, Mail } from 'lucide-react';
+import { supportMailto } from '../config';
 
 const TRUST = ['No per-booking fees', 'Phone, tablet & desktop', 'Pay online, start today'];
 
@@ -68,12 +68,10 @@ export function Hero() {
               See plans <ArrowRight size={18} />
             </a>
             <a
-              href={whatsappUrl('Hi, I would like a demo of myDigitalOPD for my clinic.')}
+              href={supportMailto('Demo request — myDigitalOPD')}
               className="btn btn-outline btn-lg"
-              target="_blank"
-              rel="noopener"
             >
-              <MessageCircle size={18} /> Chat on WhatsApp
+              <Mail size={18} /> Email us
             </a>
           </div>
           <ul className="trust-list" aria-label="Highlights">

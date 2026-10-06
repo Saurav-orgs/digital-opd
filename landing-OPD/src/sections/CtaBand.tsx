@@ -1,5 +1,5 @@
-import { ArrowRight, MessageCircle } from 'lucide-react';
-import { whatsappUrl } from '../config';
+import { ArrowRight, Mail } from 'lucide-react';
+import { supportMailto } from '../config';
 
 export function CtaBand() {
   return (
@@ -15,12 +15,10 @@ export function CtaBand() {
               See plans <ArrowRight size={18} />
             </a>
             <a
-              href={whatsappUrl('Hi, I have a question about myDigitalOPD plans.')}
+              href={supportMailto('Question about myDigitalOPD plans')}
               className="btn btn-ghost-inverse btn-lg"
-              target="_blank"
-              rel="noopener"
             >
-              <MessageCircle size={18} /> Ask on WhatsApp
+              <Mail size={18} /> Email us
             </a>
           </div>
         </div>

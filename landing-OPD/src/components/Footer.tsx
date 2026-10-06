@@ -1,5 +1,5 @@
 import { Logo, PoweredByIttitude } from './Brand';
-import { AppConfig, whatsappUrl } from '../config';
+import { AppConfig } from '../config';
 
 export function Footer() {
   return (
@@ -24,13 +24,11 @@ export function Footer() {
           <h4>Sign in</h4>
           <a href={AppConfig.links.doctorLogin}>Doctor login</a>
           <a href={AppConfig.links.patientPortal}>Patient portal</a>
-          <a
-            href={whatsappUrl('Hi, I would like to know more about myDigitalOPD for my clinic.')}
-            target="_blank"
-            rel="noopener"
-          >
-            Chat on WhatsApp
-          </a>
+        </nav>
+
+        <nav className="footer-col" aria-label="Contact">
+          <h4>Contact</h4>
+          <a href={`mailto:${AppConfig.supportEmail}`}>{AppConfig.supportEmail}</a>
         </nav>
       </div>
 

@@ -946,7 +946,7 @@ svg {
 }
 @media (min-width: 720px) {
   .footer-grid {
-    grid-template-columns: 1.4fr 1fr 1fr;
+    grid-template-columns: 1.4fr 1fr 1fr 1.1fr;
   }
 }
 
