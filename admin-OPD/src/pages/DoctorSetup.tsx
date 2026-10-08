@@ -123,21 +123,6 @@ const STATES = [
   'Puducherry',
 ];
 
-/** India first — nearly every clinic is here — then the rest of the common set. */
-const COUNTRIES = [
-  'India',
-  'Bangladesh',
-  'Bhutan',
-  'Nepal',
-  'Sri Lanka',
-  'United Arab Emirates',
-  'United Kingdom',
-  'United States',
-  'Canada',
-  'Australia',
-  'Singapore',
-];
-
 /** The state councils a registration number can belong to. */
 const COUNCILS = [
   'Andhra Pradesh Medical Council',
@@ -554,18 +539,18 @@ export default function DoctorSetupPage() {
                     ))}
                   </select>
                 </Field>
+                {/*
+                  Fixed, not chosen. myDigitalOPD is an Indian product — the
+                  State list above is the Indian states, the councils are the
+                  Indian councils, pincodes are six digits and the plans are
+                  priced in rupees on a GST invoice. The dropdown that used to
+                  be here offered ten other countries, every one of which made
+                  the rest of this form wrong. Shown rather than hidden because
+                  it is still part of the clinic's address, and the letterhead
+                  reads it.
+                */}
                 <Field label="Country">
-                  <select
-                    className="select"
-                    value={form.clinic_country}
-                    onChange={(e) => set('clinic_country', e.target.value)}
-                  >
-                    {COUNTRIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                  <input className="input" value={form.clinic_country} disabled readOnly />
                 </Field>
               </div>
             </>

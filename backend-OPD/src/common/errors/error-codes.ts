@@ -37,6 +37,15 @@ export enum ErrorCode {
   PATIENT_NOT_FOUND = 'PATIENT_NOT_FOUND',
   PATIENT_EXISTS = 'PATIENT_EXISTS',
 
+  // Prescriptions
+  /**
+   * A write to a prescription this visit has already handed to the patient.
+   * Issuing bakes the scans and the medicines into a PDF the patient holds, so
+   * adding or deleting one afterwards would leave their copy and ours saying
+   * different things. Withdraw first.
+   */
+  PRESCRIPTION_ALREADY_ISSUED = 'PRESCRIPTION_ALREADY_ISSUED',
+
   // Prescription templates
   /**
    * A template with neither a medicine nor advice. The rule spans two tables,
@@ -179,6 +188,11 @@ export const ERROR_CATALOG: Record<
   [ErrorCode.PATIENT_EXISTS]: {
     status: HttpStatus.CONFLICT,
     message: 'An account with this mobile number already exists. Please login instead.',
+  },
+  [ErrorCode.PRESCRIPTION_ALREADY_ISSUED]: {
+    status: HttpStatus.CONFLICT,
+    message:
+      "This visit's prescription has already been issued. Withdraw it first to make any changes.",
   },
   [ErrorCode.TEMPLATE_EMPTY]: {
     status: HttpStatus.BAD_REQUEST,

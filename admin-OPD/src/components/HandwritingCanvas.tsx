@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { DraftFlushRef } from '../lib/draftFlush';
 import { bodyHeightPt } from '../lib/letterhead';
 import { Loading } from './ui';
-import { PrintPrescriptionButton } from './PrescriptionPreview';
+import { IssuedActions } from './IssuedActions';
 
 /** How long the pad waits after the pen lifts before saving. */
 const AUTOSAVE_DELAY_MS = 2000;
@@ -350,16 +350,11 @@ export function HandwritingCanvas({
     const p = prescriptionQ.data;
     return (
       <div>
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-          <span className="badge badge-available">Issued</span>
-          <div className="row" style={{ gap: 8 }}>
-            <PrintPrescriptionButton appointmentId={appointmentId} />
-            {p.pdf_url && (
-              <a className="btn btn-sm" href={p.pdf_url} target="_blank" rel="noreferrer">
-                Download PDF
-              </a>
-            )}
-          </div>
+        {/* The same row Type and Upload show — this pad used to offer Print
+            and the PDF but no Withdraw, so correcting a handwritten
+            prescription meant finding Withdraw on another tab. */}
+        <div style={{ marginBottom: 10 }}>
+          <IssuedActions appointmentId={appointmentId} canEdit={canEdit} pdfUrl={p.pdf_url} />
         </div>
         {p.mode === 'handwritten' && p.handwriting_image_url && (
           <img

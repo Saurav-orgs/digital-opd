@@ -6,9 +6,8 @@ import { useToast } from './Toast';
 import type { DraftFlushRef } from '../lib/draftFlush';
 import { ConfirmDialog, Field } from './ui';
 import { TrashIcon } from './icons';
-import { PrintPrescriptionButton, WhatsAppPrescriptionButton } from './PrescriptionPreview';
+import { IssuedActions } from './IssuedActions';
 import { ApiError } from '../api/client';
-import { shareFile } from '../lib/shareFile';
 import { formatDuration } from '../lib/duration';
 import { MedicineHead, MedicineRow } from './MedicineRow';
 import { TemplatePicker } from './TemplatePicker';
@@ -24,51 +23,6 @@ import {
   validatePrescription,
   type PrescriptionErrors,
 } from '../lib/prescriptionValidation';
-
-/**
- * Sends the issued prescription out through the platform's share sheet as the
- * PDF itself — the doctor picks WhatsApp (or anything else the device offers)
- * and the patient receives the document, not a link that expires or needs a
- * login.
- *
- * The bytes come from the API rather than the presigned S3 URL next to this
- * button: that URL is fine for the browser to *navigate* to, but cannot be
- * read by script, because the bucket sends no CORS headers.
- */
-function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-
-  const onShare = async () => {
-    setBusy(true);
-    try {
-      const { blob, filename } = await consultationApi.prescriptionPdf(appointmentId);
-      const file = new File([blob], filename, { type: 'application/pdf' });
-      const outcome = await shareFile(file, {
-        title: 'Prescription',
-        text: 'Prescription from your visit.',
-      });
-      if (outcome === 'downloaded') {
-        toast.success(
-          'Prescription downloaded',
-          'This browser cannot open a share sheet — attach the saved PDF instead.',
-        );
-      }
-    } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : 'Could not share the prescription.',
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button className="btn btn-sm btn-primary" onClick={onShare} disabled={busy}>
-      {busy ? 'Preparing…' : '↗ Share'}
-    </button>
-  );
-}
 
 /*
  * See `lib/medicineName.ts` — shared with the template editor.
@@ -194,7 +148,6 @@ export function PrescriptionEditor({
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [errors, setErrors] = useState<PrescriptionErrors>(noErrors);
-  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const lastLoadedSessionRef = useRef<string | null>(null);
 
@@ -222,29 +175,6 @@ export function PrescriptionEditor({
     editVersionRef.current += 1;
     setDirty(true);
   };
-
-  const withdraw = useMutation({
-    mutationFn: () => consultationApi.withdrawPrescription(appointmentId),
-    onSuccess: () => {
-      setConfirmWithdraw(false);
-      // The editor reloads from the server as a draft; let the adopt effect
-      // pick the medicines back up rather than second-guessing them here.
-      lastLoadedSessionRef.current = null;
-      setDirty(false);
-      qc.invalidateQueries({ queryKey: ['prescription', appointmentId] });
-      qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
-      toast.success(
-        'Prescription withdrawn',
-        'It is a draft again and no longer visible to the patient. Correct it and issue again.',
-      );
-    },
-    onError: (err: unknown) => {
-      setConfirmWithdraw(false);
-      toast.error(
-        err instanceof ApiError ? err.message : 'Could not withdraw the prescription.',
-      );
-    },
-  });
 
   /*
    * Adopt server state when it says something the form does not already.
@@ -602,51 +532,18 @@ export function PrescriptionEditor({
   if (issued) {
     return (
       <div>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="badge badge-available">Issued</span>
-          <div className="row" style={{ gap: 8 }}>
-            {data?.pdf_url && (
-              <a className="btn btn-sm" href={data.pdf_url} target="_blank" rel="noreferrer">
-                Download PDF
-              </a>
-            )}
-            <PrintPrescriptionButton appointmentId={appointmentId} />
-            <SharePrescriptionButton appointmentId={appointmentId} />
-            <WhatsAppPrescriptionButton appointmentId={appointmentId} />
-            {canEdit && (
-              <button
-                className="btn btn-sm"
-                style={{ color: 'var(--state-error)' }}
-                onClick={() => setConfirmWithdraw(true)}
-                disabled={withdraw.isPending}
-                title="Take this prescription back so it can be corrected"
-              >
-                {withdraw.isPending ? 'Withdrawing…' : 'Withdraw'}
-              </button>
-            )}
-          </div>
-        </div>
-      {confirmWithdraw && (
-          <ConfirmDialog
-            title="Withdraw this prescription?"
-            destructive
-            busy={withdraw.isPending}
-            confirmLabel="Withdraw"
-            message={
-              <>
-                The patient can already see this prescription. Withdrawing it
-                removes their copy and the PDF, and clears the notification they
-                were sent.
-                <br />
-                <br />
-                The medicines stay here as a draft so you can correct them and
-                issue again.
-              </>
-            }
-            onConfirm={() => withdraw.mutate()}
-            onCancel={() => setConfirmWithdraw(false)}
-          />
-        )}
+        <IssuedActions
+          appointmentId={appointmentId}
+          canEdit={canEdit}
+          pdfUrl={data?.pdf_url}
+          /* The editor reloads from the server as a draft; let the adopt
+             effect pick the medicines back up rather than second-guessing
+             them here. */
+          onWithdrawn={() => {
+            lastLoadedSessionRef.current = null;
+            setDirty(false);
+          }}
+        />
 
         {data?.previous_history && (
           <p style={{ marginTop: 10 }}>
