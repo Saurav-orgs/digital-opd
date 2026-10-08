@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { format, addDays, isToday } from 'date-fns';
-import { Info, Clock, MapPin } from 'lucide-react';
+import { format, addDays, isSameMonth, isToday } from 'date-fns';
+import { Info, CalendarDays, Clock, MapPin } from 'lucide-react';
 import { api } from '../api';
 import { AppConfig } from '../config';
 import type { Slot, DaySlots } from '../types';
@@ -82,6 +82,37 @@ export const DoctorLanding: React.FC = () => {
   const [picked, setPicked] = useState<Slot | null>(null);
   useEffect(() => setPicked(null), [formattedSelectedDate]);
 
+  /*
+   * Bookings run three months out now, not a week, so the strip is ninety-odd
+   * pills long and the chosen day is routinely off-screen — picking 14 March
+   * from the calendar and being left looking at today's pills reads as if the
+   * tap was ignored. `block: 'nearest'` keeps the page where it is; only the
+   * strip moves.
+   */
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector(`[data-date="${formattedSelectedDate}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [formattedSelectedDate]);
+
+  /** The calendar, for jumping weeks ahead instead of scrolling to them. */
+  const jumpRef = useRef<HTMLInputElement>(null);
+  const openJump = (e: React.MouseEvent) => {
+    const el = jumpRef.current;
+    // No `showPicker` here means an older browser, where the label's own
+    // click-forwarding is the best on offer; leave it be.
+    if (!el?.showPicker) return;
+    // Otherwise stop it: a click landing on the input right after the picker
+    // opens closes it again.
+    e.preventDefault();
+    try {
+      el.showPicker();
+    } catch {
+      el.focus();
+    }
+  };
+
   const { data: daySlots, isLoading: isSlotsLoading, error: slotsError } = useQuery({
     queryKey: ['slots', doctor?.id, formattedSelectedDate],
     queryFn: () => api.getSlots(doctor!.id, formattedSelectedDate),
@@ -104,7 +135,7 @@ export const DoctorLanding: React.FC = () => {
     switch (reason) {
       case 'leave': return 'The doctor is on leave this day.';
       case 'no_opd': return 'No OPD hours on this day.';
-      case 'out_of_window': return 'Bookings open only for the next 7 days.';
+      case 'out_of_window': return 'Bookings open only for the next 3 months.';
       default: return 'Not available.';
     }
   };
@@ -138,21 +169,53 @@ export const DoctorLanding: React.FC = () => {
       <BookingSteps current={1} />
 
       <div className="screen">
-        <h2 className="section-title">Choose a date</h2>
-        <div className="date-scroll">
-          {dates.map((d) => {
+        <div className="date-head">
+          <h2 className="section-title">Choose a date</h2>
+          {/* The whole chip opens the calendar: a click on a date input's text
+              does not open the picker in Chrome, only its icon does. */}
+          <label className="date-jump" onClick={openJump}>
+            <CalendarDays size={15} aria-hidden />
+            <span>{format(selectedDate, 'd MMM yyyy')}</span>
+            <input
+              ref={jumpRef}
+              type="date"
+              value={formattedSelectedDate}
+              min={format(dates[0], 'yyyy-MM-dd')}
+              max={format(dates[dates.length - 1], 'yyyy-MM-dd')}
+              aria-label="Pick a date"
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const [y, m, d] = e.target.value.split('-').map(Number);
+                setSelectedDate(new Date(y, m - 1, d));
+              }}
+            />
+          </label>
+        </div>
+        <div className="date-scroll" ref={stripRef}>
+          {dates.map((d, i) => {
             const isSelected = format(d, 'yyyy-MM-dd') === formattedSelectedDate;
             return (
-              <button
-                type="button"
-                key={d.toISOString()}
-                className={'date-pill' + (isSelected ? ' selected' : '')}
-                onClick={() => setSelectedDate(d)}
-                aria-pressed={isSelected}
-              >
-                <span className="dow">{isToday(d) ? 'Today' : format(d, 'EEE')}</span>
-                <span className="dnum">{format(d, 'd')}</span>
-              </button>
+              <React.Fragment key={d.toISOString()}>
+                {/* Ninety pills cross two month boundaries, and "1" on its own
+                    is the one date nobody can read — so each new month names
+                    itself once, where it starts. */}
+                {i > 0 && !isSameMonth(d, dates[i - 1]) && (
+                  <span className="date-month" aria-hidden>
+                    {format(d, 'MMM')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  data-date={format(d, 'yyyy-MM-dd')}
+                  className={'date-pill' + (isSelected ? ' selected' : '')}
+                  onClick={() => setSelectedDate(d)}
+                  aria-pressed={isSelected}
+                  aria-label={format(d, 'EEEE, d MMMM yyyy')}
+                >
+                  <span className="dow">{isToday(d) ? 'Today' : format(d, 'EEE')}</span>
+                  <span className="dnum">{format(d, 'd')}</span>
+                </button>
+              </React.Fragment>
             );
           })}
         </div>

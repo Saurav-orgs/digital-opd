@@ -57,7 +57,7 @@ export class SlotsService {
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
   ) {
     this.tz = this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata';
-    this.windowDays = this.config.get<number>('bookingWindowDays') ?? 7;
+    this.windowDays = this.config.get<number>('bookingWindowDays') ?? 90;
   }
 
   /** Public slot grid for a doctor on a date. Never throws for leave/no-opd —
@@ -109,7 +109,9 @@ export class SlotsService {
 
     const reason = this.windowReason(date, now.date);
     if (reason === 'out_of_window')
-      throw new AppException(ErrorCode.DATE_OUT_OF_WINDOW);
+      throw new AppException(ErrorCode.DATE_OUT_OF_WINDOW, {
+        message: `Bookings are only open for the next ${this.windowLabel()}.`,
+      });
 
     const sessions = await this.resolveSessions(doctorId, date);
     if (sessions === 'leave') throw new AppException(ErrorCode.DOCTOR_ON_LEAVE);
@@ -186,6 +188,20 @@ export class SlotsService {
         message: 'Please provide a valid date (YYYY-MM-DD).',
       });
     }
+  }
+
+  /**
+   * "3 months", "30 days" — the window as a patient would say it.
+   *
+   * Whole months when it divides evenly, because "Bookings are only open for
+   * the next 90 days" is a sentence nobody writes on a clinic door.
+   */
+  private windowLabel(): string {
+    const months = this.windowDays / 30;
+    if (Number.isInteger(months) && months >= 2) {
+      return `${months} months`;
+    }
+    return `${this.windowDays} day${this.windowDays === 1 ? '' : 's'}`;
   }
 
   private windowReason(

@@ -7,6 +7,7 @@ import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
 import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
+import { AppointmentPrescription } from '../database/models/prescription.model';
 import { ConsultationsService } from './consultations.service';
 import { ConsultationsController } from './consultations.controller';
 import { ConsultationStreamService } from './consultation-stream.service';
@@ -37,6 +38,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
       // Read-only, and only to refuse writing a second prescription for a
       // visit whose IVF case-sheet is already issued.
       IvfCaseSheet,
+      // The visit's uploaded prescription photos: content for issuing, and
+      // pages of the PDF.
+      AppointmentPrescription,
     ]),
     // The prescription PDF prints the doctor's booking QR, and the URL it
     // encodes has exactly one definition — `DoctorsService.bookingUrl`. A

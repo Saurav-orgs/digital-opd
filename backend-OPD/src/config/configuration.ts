@@ -182,7 +182,12 @@ export default (): AppConfig => ({
   },
   gstRatePercent: parseFloat(process.env.GST_RATE_PERCENT || '18'),
   selfRegistrationOpen: process.env.SELF_REGISTRATION_OPEN === 'true',
-  bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '7', 10),
+  /*
+   * How far ahead a patient may book. Three months: patients ask for a
+   * follow-up "after my reports" or "next month", and a seven-day window sent
+   * them back to the clinic's phone for anything further out than that.
+   */
+  bookingWindowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '90', 10),
   maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
   jwt: {
     secret: process.env.JWT_SECRET || 'change-me',

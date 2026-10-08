@@ -105,7 +105,11 @@ export const ERROR_CATALOG: Record<
   },
   [ErrorCode.DATE_OUT_OF_WINDOW]: {
     status: HttpStatus.BAD_REQUEST,
-    message: 'Bookings are only open for the next 7 days.',
+    // How far ahead bookings are open is configurable (BOOKING_WINDOW_DAYS),
+    // so the number lives with the window — `SlotsService` overrides this
+    // message with the real one. This wording is the fallback and names no
+    // figure, because a wrong figure is worse than none.
+    message: 'That date is further ahead than bookings are open for.',
   },
   [ErrorCode.DOCTOR_ON_LEAVE]: {
     status: HttpStatus.BAD_REQUEST,

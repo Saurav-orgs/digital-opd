@@ -29,6 +29,25 @@ import {
   frameFor,
 } from './prescription-pdf.layout';
 
+/**
+ * Least vertical space a scan is given before it is moved to its own page.
+ * Below this it prints as a letterbox strip nobody can read.
+ */
+const MIN_SCAN_H = 220;
+
+/** Has the doctor written anything into the structured fields? */
+function hasWrittenBody(
+  p: EPrescription,
+  medicines: EPrescriptionMedicine[],
+): boolean {
+  return (
+    medicines.length > 0 ||
+    !!p.diagnosis?.trim() ||
+    !!p.previous_history?.trim() ||
+    !!p.advice?.trim()
+  );
+}
+
 @Injectable()
 export class PrescriptionPdfService {
   private readonly logger = new Logger(PrescriptionPdfService.name);
@@ -54,7 +73,7 @@ export class PrescriptionPdfService {
     medicines: EPrescriptionMedicine[],
     appointment: Appointment,
     doctor: Doctor,
-    opts: { letterhead?: boolean } = {},
+    opts: { letterhead?: boolean; scans?: Buffer[] } = {},
   ): Promise<Buffer> {
     const letterhead = opts.letterhead !== false;
     const frame = frameFor(!letterhead);
@@ -92,13 +111,22 @@ export class PrescriptionPdfService {
     // Render patient name & date row
     y = patientInfo(doc, appointment, y);
 
+    const scans = opts.scans ?? [];
     if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
       const drawing = await this.fetchHandwriting(prescription);
       y = this.handwritingBody(doc, drawing, y, frame);
-    } else {
+    } else if (hasWrittenBody(prescription, medicines) || scans.length === 0) {
       y = this.previousHistory(doc, prescription, y);
       y = this.diagnosis(doc, prescription, y);
       y = this.treatmentAdvice(doc, medicines, prescription, y, frame);
+    }
+
+    // The photographed pad, when the doctor's prescription for this visit is a
+    // scan rather than rows. It is the body on its own — the branch above is
+    // skipped — and it follows the typed body when there is one, because a
+    // doctor who both typed and photographed meant both to reach the patient.
+    if (scans.length) {
+      y = this.scanBody(doc, scans, y, frame, hasWrittenBody(prescription, medicines));
     }
 
     // The patient leaves with this sheet in hand — the QR is how the next
@@ -336,6 +364,49 @@ export class PrescriptionPdfService {
       y = doc.y + 10;
     }
 
+    return y;
+  }
+
+  // ── Uploaded scans ─────────────────────────────────────────
+  /**
+   * The prescription images the doctor uploaded for this visit, one per page,
+   * each scaled to the space above the rebook block.
+   *
+   * These used to reach the patient only as thumbnails in the clinic's own
+   * screen: issuing a visit whose prescription was a photo of the pad was
+   * refused outright ("add at least one medicine or some advice"), because
+   * nothing but the structured rows and the e-pen drawing counted as content.
+   * The scan is the prescription in that case, so it prints as one.
+   */
+  private scanBody(
+    doc: PDFKit.PDFDocument,
+    scans: Buffer[],
+    y: number,
+    frame: Frame,
+    labelled: boolean,
+  ): number {
+    scans.forEach((scan, idx) => {
+      // A page of its own for every scan after the first, and for the first
+      // one too when what was typed above has left no usable room.
+      if (idx > 0 || frame.bodyBottom - y < MIN_SCAN_H) y = continuationPage(doc);
+      if (labelled && idx === 0) {
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(12)
+          .fillColor(COLOR.ink)
+          .text('UPLOADED PRESCRIPTION', MARGIN, y, { characterSpacing: 0.5 });
+        y = doc.y + 8;
+      }
+      try {
+        doc.image(scan, MARGIN, y, {
+          fit: [CONTENT_W, frame.bodyBottom - y],
+          align: 'center',
+        });
+      } catch (err) {
+        this.logger.warn(`Could not embed a prescription scan: ${(err as Error).message}`);
+      }
+      y = frame.bodyBottom;
+    });
     return y;
   }
 

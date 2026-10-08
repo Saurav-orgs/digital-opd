@@ -9,7 +9,7 @@ import { TopbarPortal } from '../components/TopbarPortal';
 import { BookingQrModal } from '../components/BookingQr';
 import { Badge, ConfirmDialog, Empty, FloatingCta, Loading, SearchField } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
-import { displayStatus, isMissed } from '../lib/appointmentStatus';
+import { displayStatus, isCancelled, isMissed } from '../lib/appointmentStatus';
 import { avatarTone, initials } from '../lib/avatar';
 import { Download } from 'lucide-react';
 import { useToast } from '../components/Toast';
@@ -107,6 +107,24 @@ export default function Dashboard() {
   const canCreate = isDoctor;
   const isToday = day === todayISO();
   const filtersActive = !!search || status !== 'all';
+
+  const dayInputRef = useRef<HTMLInputElement>(null);
+  /** Open the native calendar from anywhere on the date chip. */
+  const openDayPicker = (e: React.MouseEvent) => {
+    const el = dayInputRef.current;
+    // Where `showPicker` does not exist, the label's own click-forwarding is
+    // left to do whatever it did before — which is all there ever was.
+    if (!el?.showPicker) return;
+    // And where it does, that forwarding is stopped: a click arriving at the
+    // input just after the picker opened closes it again.
+    e.preventDefault();
+    try {
+      el.showPicker();
+    } catch {
+      // Thrown when the browser does not count this as a user gesture.
+      el.focus();
+    }
+  };
 
   /*
    * The day's appointments, fetched here rather than inside the table: the
@@ -292,11 +310,23 @@ export default function Dashboard() {
             >
               Today
             </button>
-            <label className="day-pick">
+            {/*
+              The whole chip opens the calendar, not just the ▾ at its end.
+              The transparent `input` is stretched across the chip, but a
+              click on a date input's text area does not open its picker in
+              Chrome — only the calendar icon does, and that icon is invisible
+              and an eighth of the chip wide — so the date read as a button
+              that mostly did nothing. `showPicker` is asked for the one
+              behaviour we actually want; where it does not exist the click
+              still lands on the input underneath, which is the old behaviour
+              rather than none.
+            */}
+            <label className="day-pick" onClick={openDayPicker}>
               <span>{dayLabel(day)}</span>
               {/* The browser's own date picker rather than a popover of our
                   own: it is the one control every phone already knows. */}
               <input
+                ref={dayInputRef}
                 type="date"
                 value={day}
                 aria-label="Pick a date"
@@ -446,15 +476,6 @@ function fmtTime(t: string | null | undefined) {
 
 function isDone(status: ConsultationStatus) {
   return status === 'done';
-}
-
-/**
- * Called off, by either side: the clinic cancelling sets the consultation to
- * `rejected`; a patient withdrawing their own booking sets the appointment
- * itself to `cancelled`. Both read as "Cancelled" on the list.
- */
-function isCancelled(a: Appointment) {
-  return a.consultation_status === 'rejected' || a.status === 'cancelled';
 }
 
 /**

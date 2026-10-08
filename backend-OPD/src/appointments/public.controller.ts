@@ -29,9 +29,16 @@ export class PublicController {
   ) {}
 
   @Get('doctors')
-  @ApiOperation({ summary: 'List enabled doctors' })
-  listDoctors() {
-    return this.doctors.listEnabled();
+  @ApiOperation({
+    summary:
+      'List enabled doctors. `search` narrows by name, speciality, clinic or city.',
+  })
+  listDoctors(@Query('search') search?: string) {
+    // A search is a type-ahead and wants a dropdown's worth; no search is the
+    // directory, which the patient app has always read whole.
+    return this.doctors.listEnabled(
+      search?.trim() ? { search, limit: 10 } : {},
+    );
   }
 
   @Get('doctors/:slug')

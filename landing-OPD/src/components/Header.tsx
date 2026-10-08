@@ -5,6 +5,9 @@ import { Logo } from './Brand';
 import { AppConfig } from '../config';
 
 const NAV = [
+  // First, and the only patient-facing entry: a patient who lands here is
+  // looking for their doctor, not for our feature list.
+  { href: '#book', label: 'Book a doctor' },
   { href: '#features', label: 'Features' },
   { href: '#how', label: 'How it works' },
   { href: '#pricing', label: 'Pricing' },
