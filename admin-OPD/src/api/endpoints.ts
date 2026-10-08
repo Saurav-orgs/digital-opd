@@ -10,6 +10,7 @@ import type {
   CreateDoctorResult,
   DoctorProfile,
   EPrescription,
+  IssueMode,
   IvfCaseSheet,
   IvfCaseSheetData,
   IvfCaseSheetTemplate,
@@ -375,9 +376,15 @@ export const consultationApi = {
     api
       .patch<EPrescription>(`/appointments/${appointmentId}/prescription`, body)
       .then((r) => r.data),
-  issuePrescription: (appointmentId: string) =>
+  /**
+   * Issue the prescription the doctor is looking at. `mode` is the tab they
+   * pressed the button on, and only that tab's content reaches the patient —
+   * a visit that also holds an abandoned dictation or a photo of the pad does
+   * not send those too.
+   */
+  issuePrescription: (appointmentId: string, mode?: IssueMode) =>
     api
-      .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`)
+      .post<EPrescription>(`/appointments/${appointmentId}/prescription/issue`, { mode })
       .then((r) => r.data),
   /**
    * Withdraw an issued prescription back to a draft: the PDF goes, the
@@ -411,10 +418,13 @@ export const consultationApi = {
    * nothing reaches the patient — this is only the doctor looking at the page
    * before committing to it.
    */
-  prescriptionPreview: (appointmentId: string) =>
+  prescriptionPreview: (appointmentId: string, mode?: IssueMode) =>
     api
       .get(`/appointments/${appointmentId}/prescription/preview`, {
         responseType: 'blob',
+        // The page issuing *this* tab would produce. Without it the preview
+        // could show a document no Issue button will ever send.
+        params: mode ? { mode } : undefined,
       })
       .then((r) => r.data as Blob),
   /**
@@ -432,10 +442,10 @@ export const consultationApi = {
         `/appointments/${appointmentId}/prescription/whatsapp-link`,
       )
       .then((r) => r.data),
-  prescriptionPrintCopy: (appointmentId: string) =>
+  prescriptionPrintCopy: (appointmentId: string, mode?: IssueMode) =>
     api
       .get(`/appointments/${appointmentId}/prescription/preview`, {
-        params: { letterhead: 'false' },
+        params: mode ? { letterhead: 'false', mode } : { letterhead: 'false' },
         responseType: 'blob',
       })
       .then((r) => r.data as Blob),

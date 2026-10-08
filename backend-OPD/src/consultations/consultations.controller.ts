@@ -27,9 +27,12 @@ import {
 import { ConsultationsService } from './consultations.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { RawResponse } from '../common/decorators/raw-response.decorator';
-import { UpdatePrescriptionDto } from '../prescriptions/dto/prescription.dto';
+import {
+  IssuePrescriptionDto,
+  UpdatePrescriptionDto,
+} from '../prescriptions/dto/prescription.dto';
 import { Permissions } from '../common/decorators/permissions.decorator';
-import { PermissionAction, PermissionModule } from '../common/enums';
+import { PermissionAction, PermissionModule, PrescriptionMode } from '../common/enums';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Consultation & prescription')
@@ -195,6 +198,13 @@ export class ConsultationsController {
       '`letterhead=false` leaves the doctor header and footer blank, for printing onto a pre-printed pad.',
   })
   @ApiQuery({ name: 'letterhead', required: false, enum: ['true', 'false'] })
+  @ApiQuery({
+    name: 'mode',
+    required: false,
+    enum: PrescriptionMode,
+    description:
+      'Which tab is being previewed. The page is rendered as issuing from that tab would render it; omitted, it is inferred from the draft.',
+  })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.READ })
   @RawResponse()
   async prescriptionPreview(
@@ -202,9 +212,13 @@ export class ConsultationsController {
     @CurrentUser() user: AuthUser,
     @Res({ passthrough: true }) res: Response,
     @Query('letterhead') letterhead?: string,
+    @Query('mode') mode?: PrescriptionMode,
   ): Promise<StreamableFile> {
     const { buffer, filename } = await this.prescriptions.previewFile(id, user, {
       letterhead: letterhead !== 'false' && letterhead !== '0',
+      mode: Object.values(PrescriptionMode).includes(mode as PrescriptionMode)
+        ? (mode as PrescriptionMode)
+        : undefined,
     });
     res.set({
       'Content-Type': 'application/pdf',
@@ -256,12 +270,16 @@ export class ConsultationsController {
   @Post('prescription/issue')
   @ApiOperation({
     summary: 'Issue the prescription to the patient (renders the PDF and notifies)',
+    description:
+      'The body carries the tab the doctor issued from, and only that tab\'s content reaches the patient. ' +
+      'Omitted, it is inferred from the draft.',
   })
   @Permissions({ module: PermissionModule.APPOINTMENTS, action: PermissionAction.UPDATE })
   issuePrescription(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
+    @Body() dto: IssuePrescriptionDto,
   ) {
-    return this.prescriptions.issue(id, user);
+    return this.prescriptions.issue(id, user, dto?.mode);
   }
 }

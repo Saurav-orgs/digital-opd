@@ -44,6 +44,25 @@ const SHARE_LINK_RENEW_BELOW_MS = 24 * 60 * 60 * 1000;
  * explicit — an AI draft never becomes a real prescription without the doctor
  * pressing the button.
  */
+/**
+ * Has the doctor written anything into the structured fields?
+ *
+ * Only asked when nobody said which tab issued — an older client, or the share
+ * and print paths that issue a draft on the doctor's behalf. A visit with a
+ * photograph and nothing typed is the photograph.
+ */
+function hasWrittenBody(
+  p: EPrescription,
+  medicines: EPrescriptionMedicine[],
+): boolean {
+  return (
+    medicines.length > 0 ||
+    !!p.diagnosis?.trim() ||
+    !!p.previous_history?.trim() ||
+    !!p.advice?.trim()
+  );
+}
+
 @Injectable()
 export class PrescriptionsService {
   private readonly logger = new Logger(PrescriptionsService.name);
@@ -168,14 +187,15 @@ export class PrescriptionsService {
    * Issue the prescription: freeze it, render the PDF, tell the patient, and
    * record what the doctor changed so the model can learn from it.
    */
-  async issue(appointmentId: string, user: AuthUser) {
+  async issue(appointmentId: string, user: AuthUser, mode?: PrescriptionMode) {
     const appointment = await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
     await this.assertEditable(prescription);
 
     const medicines = await this.medicinesFor(prescription.id);
     const scans = await this.fetchScans(appointmentId);
-    this.assertIssuable(prescription, medicines, scans.length);
+    const issuedAs = this.resolveMode(prescription, medicines, scans.length, mode);
+    this.assertIssuable(prescription, medicines, scans.length, issuedAs);
 
     const doctor = await this.doctorModel.findByPk(appointment.doctor_id);
     if (!doctor) {
@@ -184,9 +204,10 @@ export class PrescriptionsService {
       });
     }
 
-    // 1. Render and store the PDF.
+    // 1. Render and store the PDF — the issuing tab's content, and only it.
     const buffer = await this.pdf.render(prescription, medicines, appointment, doctor, {
       scans,
+      mode: issuedAs,
     });
     const { key } = await this.storage.uploadDocument(
       {
@@ -224,6 +245,13 @@ export class PrescriptionsService {
           status: PrescriptionStatus.ISSUED,
           issued_at: new Date(),
           pdf_key: key,
+          // The tab that issued, kept on the row. `mode` used to be whatever
+          // was written to last — autosave set it on every keystroke — so a
+          // doctor who typed after photographing the pad left a prescription
+          // claiming to be structured whichever one they issued. From here it
+          // is the record of what the patient was handed, and every screen
+          // reads it to know which tab holds this visit's prescription.
+          mode: issuedAs,
         } as any,
         { transaction: t },
       );
@@ -365,7 +393,7 @@ export class PrescriptionsService {
   async previewFile(
     appointmentId: string,
     user: AuthUser,
-    opts: { letterhead?: boolean } = {},
+    opts: { letterhead?: boolean; mode?: PrescriptionMode } = {},
   ): Promise<{ buffer: Buffer; filename: string }> {
     const appointment = await this.assertAccess(appointmentId, user);
     const prescription = await this.findOrCreate(appointmentId);
@@ -378,12 +406,16 @@ export class PrescriptionsService {
       });
     }
 
+    const scans = await this.fetchScans(appointmentId);
     return {
       buffer: await this.pdf.render(prescription, medicines, appointment, doctor, {
         ...opts,
-        // Preview is the issued page or it is worth nothing — a doctor who
-        // uploaded a scan has to see the scan.
-        scans: await this.fetchScans(appointmentId),
+        // Preview is the issued page or it is worth nothing — so it is
+        // rendered for the tab the doctor is looking at, exactly as issuing
+        // from that tab would render it. A preview that showed the scan *and*
+        // the typed rows would be a page nobody can ever be issued.
+        scans,
+        mode: this.resolveMode(prescription, medicines, scans.length, opts.mode),
       }),
       filename: this.pdfFilename(appointment, opts.letterhead === false ? 'print' : 'preview'),
     };
@@ -884,22 +916,51 @@ export class PrescriptionsService {
   }
 
   /**
+   * Which of the three bodies this visit is being issued as.
+   *
+   * The caller says — it is the tab the doctor pressed Issue on, and nothing
+   * on the server can tell a typed draft the doctor abandoned from the one
+   * they mean. Without a caller (an older client, or the share and print paths
+   * that issue a draft on the doctor's behalf) the draft is read instead: what
+   * it was last written as, and failing that whichever content exists.
+   */
+  private resolveMode(
+    prescription: EPrescription,
+    medicines: EPrescriptionMedicine[],
+    scanCount: number,
+    asked?: PrescriptionMode,
+  ): PrescriptionMode {
+    if (asked) return asked;
+    if (prescription.mode === PrescriptionMode.HANDWRITTEN && prescription.handwriting_image_key) {
+      return PrescriptionMode.HANDWRITTEN;
+    }
+    if (prescription.mode === PrescriptionMode.UPLOADED && scanCount > 0) {
+      return PrescriptionMode.UPLOADED;
+    }
+    // A visit with nothing typed and a photograph on it is the photograph.
+    if (scanCount > 0 && !hasWrittenBody(prescription, medicines)) {
+      return PrescriptionMode.UPLOADED;
+    }
+    return PrescriptionMode.STRUCTURED;
+  }
+
+  /**
    * Nothing goes to a patient half-written.
    *
-   * `scanCount` is the photos of a paper prescription uploaded for this visit.
-   * They are the fourth way a prescription can carry content, and the only one
-   * this check used not to know about: the clinic's Upload tab let a doctor
-   * photograph the pad, offered Issue beside it, and then refused with "add at
-   * least one medicine or some advice" — advice they had no reason to type,
-   * because the prescription was already written, on paper, in the photo.
+   * Asked of the body actually being issued, not of the row's `mode`: a visit
+   * carries up to three drafts at once and only one of them is the
+   * prescription, so a photographed pad must not excuse an empty medicine list
+   * when the doctor is issuing from Type, and a typed draft must not let an
+   * Upload with no photograph through.
    */
   private assertIssuable(
     prescription: EPrescription,
     medicines: EPrescriptionMedicine[],
-    scanCount = 0,
+    scanCount: number,
+    mode: PrescriptionMode,
   ): void {
     // A handwritten prescription only needs the drawing.
-    if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
+    if (mode === PrescriptionMode.HANDWRITTEN) {
       if (!prescription.handwriting_image_key) {
         throw new AppException(ErrorCode.BAD_REQUEST, {
           message: 'Write the prescription before issuing it.',
@@ -907,7 +968,16 @@ export class PrescriptionsService {
       }
       return;
     }
-    if (scanCount === 0 && medicines.length === 0 && !prescription.advice?.trim()) {
+    // An uploaded one only needs the photograph; it was written on paper.
+    if (mode === PrescriptionMode.UPLOADED) {
+      if (scanCount === 0) {
+        throw new AppException(ErrorCode.BAD_REQUEST, {
+          message: 'Add a photo of the prescription before issuing it.',
+        });
+      }
+      return;
+    }
+    if (medicines.length === 0 && !prescription.advice?.trim()) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message:
           'Add at least one medicine or some advice before issuing this prescription.',

@@ -8,12 +8,20 @@ import {
   ivfCaseSheetApi,
   reportsApi,
 } from '../api/endpoints';
-import type { Appointment, ConsultationSession, EPrescription, PatientReport, Slot } from '../api/types';
+import type {
+  Appointment,
+  ConsultationSession,
+  EPrescription,
+  IssueMode,
+  PatientReport,
+  Slot,
+} from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog, Loading, Modal } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
+import { ISSUE_MODE_LABEL } from '../lib/issueMode';
 import { isIvfDoctor } from '../lib/ivfCaseSheet';
 import { isCancelled } from '../lib/appointmentStatus';
 import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
@@ -352,6 +360,15 @@ export default function AppointmentPage() {
   const pastVisits = historyQ.data?.length ?? 0;
   const [optsOpen, setOptsOpen] = useState(false);
   const flushRef = useRef<(() => Promise<void>) | null>(null);
+  /*
+   * Which tab the prescription card is showing, for Preview and Issue.
+   *
+   * Only that tab's content is issued — a visit can hold a typed draft, an
+   * e-pen page and photographs of the pad at once, and the patient gets the
+   * one the doctor pressed the button on. A ref, like `flushRef`, so the page
+   * does not re-render every time a doctor looks at another tab.
+   */
+  const issueModeRef = useRef<IssueMode | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['appointment', id] });
@@ -449,20 +466,32 @@ export default function AppointmentPage() {
 
 
   /*
-   * Is there anything to preview?
+   * Is there anything to issue — on the tab doing the issuing?
    *
-   * Four ways a prescription can carry content, and any one of them counts: a
-   * diagnosis or advice line, at least one medicine, a handwritten page, or an
-   * uploaded scan. Previewing with none of them renders an empty letterhead,
-   * which the doctor then issues by reflex — so the CTA refuses instead.
+   * Asked of that tab alone, because that is all the patient will get. It used
+   * to be "any of the four", which was right when the page gathered them all
+   * onto one sheet: a doctor on an empty Type tab, with a photo they had taken
+   * and then decided against, got past this check and met the server's refusal
+   * instead. Issuing with nothing renders an empty letterhead the doctor then
+   * sends by reflex, so the CTA has to catch it here.
+   *
+   * No tab registered — nothing is mounted yet — falls back to the old
+   * any-of-four, which is the server's own fallback too.
    */
-  const hasContent = (draft: EPrescription | undefined) =>
-    !!draft?.diagnosis?.trim() ||
-    !!draft?.previous_history?.trim() ||
-    !!draft?.advice?.trim() ||
-    (draft?.medicines?.length ?? 0) > 0 ||
-    !!draft?.handwriting_image_url ||
-    (a?.prescriptions?.length ?? 0) > 0;
+  const contentByMode = (draft: EPrescription | undefined): Record<IssueMode, boolean> => ({
+    structured:
+      !!draft?.diagnosis?.trim() ||
+      !!draft?.previous_history?.trim() ||
+      !!draft?.advice?.trim() ||
+      (draft?.medicines?.length ?? 0) > 0,
+    handwritten: !!draft?.handwriting_image_url,
+    uploaded: (a?.prescriptions?.length ?? 0) > 0,
+  });
+  const hasContent = (draft: EPrescription | undefined) => {
+    const held = contentByMode(draft);
+    const here = issueModeRef.current;
+    return here ? held[here] : Object.values(held).some(Boolean);
+  };
 
   /*
    * Some visits end without one. A reassurance, a referral, "come back if it
@@ -525,7 +554,7 @@ export default function AppointmentPage() {
   });
 
   const issue = useMutation({
-    mutationFn: () => consultationApi.issuePrescription(id!),
+    mutationFn: () => consultationApi.issuePrescription(id!, issueModeRef.current ?? undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['prescription', id] });
       invalidate();
@@ -602,6 +631,26 @@ export default function AppointmentPage() {
       return;
     }
     if (!hasContent(draft)) {
+      /*
+       * Empty tab, but the visit is not empty: the doctor photographed the pad
+       * and then pressed Issue from Type, or dictated and pressed it from
+       * Upload. Offering "finish without a prescription" there would be a lie,
+       * and issuing would send a blank page, so neither happens — they are
+       * told where the prescription they wrote actually is.
+       */
+      const held = contentByMode(draft);
+      const elsewhere = (Object.keys(held) as IssueMode[]).filter(
+        (m) => m !== issueModeRef.current && held[m],
+      );
+      if (elsewhere.length > 0) {
+        toast.push(
+          'error',
+          'Nothing on this tab to issue',
+          `This visit has ${elsewhere.map((m) => ISSUE_MODE_LABEL[m]).join(' and ')}. ` +
+            'Open that tab to issue it, or write the prescription here first.',
+        );
+        return;
+      }
       setConfirmingNoRx(true);
       return;
     }
@@ -867,6 +916,7 @@ export default function AppointmentPage() {
               canEdit={canUpdate}
               disabled={closed}
               flushRef={flushRef}
+              issueModeRef={issueModeRef}
               onRecorderBusy={setRecorderBusy}
               modes={isIvf ? ['ivf', 'handwrite', 'upload'] : undefined}
               issuedVia={issuedVia}
@@ -933,7 +983,9 @@ export default function AppointmentPage() {
           onClose={() => setPreviewOpen(false)}
           onIssue={canAct && !alreadyIssued ? onIssue : undefined}
           issuing={issue.isPending}
-          load={() => consultationApi.prescriptionPreview(id!)}
+          load={() =>
+            consultationApi.prescriptionPreview(id!, issueModeRef.current ?? undefined)
+          }
         />
       )}
 

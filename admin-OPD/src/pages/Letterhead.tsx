@@ -280,13 +280,13 @@ export default function LetterheadPage({ embedded = false }: { embedded?: boolea
                 onChange={(e) => setForm({ ...form, clinic_state: e.target.value })}
               />
             </Field>
+            {/* Fixed at India, like the onboarding form it mirrors — an
+                Indian product, and the only screen that could still have
+                disagreed with it. The stored value is what shows, so a clinic
+                set up before this keeps whatever it was given; it is left off
+                the printed header anyway when it reads India. */}
             <Field label="Country">
-              <input
-                className="input"
-                disabled={!canEdit}
-                value={form.clinic_country}
-                onChange={(e) => setForm({ ...form, clinic_country: e.target.value })}
-              />
+              <input className="input" value={form.clinic_country} disabled readOnly />
             </Field>
           </div>
           <Field label="Phone">

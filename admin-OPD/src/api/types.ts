@@ -349,6 +349,17 @@ export interface PrescriptionMedicine {
   was_edited?: boolean;
 }
 
+/**
+ * What the prescription for a visit *is* — the tab the doctor issued it from.
+ *
+ * One visit can hold three drafts at once: a typed or dictated form, an e-pen
+ * page, and photographs of a paper pad. Only one of them is the prescription,
+ * and only the screen knows which, so the tab goes up with the Issue call and
+ * comes back on the document. Type and Record are one mode: they are two ways
+ * of filling the same form.
+ */
+export type IssueMode = 'structured' | 'handwritten' | 'uploaded';
+
 export interface EPrescription {
   id: string;
   appointment_id: string;
@@ -360,7 +371,7 @@ export interface EPrescription {
    * same shape so every client renders it without knowing the difference. The
    * draft endpoints never return it — that document has its own.
    */
-  mode: 'structured' | 'handwritten' | 'ivf';
+  mode: IssueMode | 'ivf';
   diagnosis: string | null;
   /** The patient's background as the doctor put it on record. Usually null
    *  — the editor shows the field only when there is something in it. */

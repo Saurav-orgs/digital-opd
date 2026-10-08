@@ -661,6 +661,7 @@ export class AppointmentsService {
   ) {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
+    await this.assertScansEditable(id);
     if (!files || files.length === 0) {
       throw new AppException(ErrorCode.FILE_REQUIRED);
     }
@@ -691,6 +692,7 @@ export class AppointmentsService {
   async deletePrescription(id: string, prescriptionId: string, user: AuthUser) {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
+    await this.assertScansEditable(id);
     const row = await this.prescriptionModel.findOne({
       where: { id: prescriptionId, appointment_id: id },
     });
@@ -702,6 +704,25 @@ export class AppointmentsService {
     await this.storage.delete(row.image_key);
     await row.destroy();
     return this.findOne(id, user);
+  }
+
+  /**
+   * May this visit's prescription scans still be added to or removed?
+   *
+   * `issue` renders the scans *into* the PDF the patient is handed, so a photo
+   * deleted afterwards disappeared from our record while staying in their
+   * copy, and one added afterwards never reached them at all. The doctor's own
+   * screen offered both: the Upload tab stayed exactly as it was after
+   * issuing, delete crosses and all. The tab is frozen now, and so is this.
+   *
+   * `issuedRx` rather than the e-prescription alone, because an IVF doctor's
+   * case-sheet is the issued document for their visits and the scans ride on
+   * the same appointment.
+   */
+  private async assertScansEditable(appointmentId: string): Promise<void> {
+    if (await this.issuedRx(appointmentId)) {
+      throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_ISSUED);
+    }
   }
 
   /**

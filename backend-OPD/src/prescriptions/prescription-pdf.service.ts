@@ -14,6 +14,7 @@ import {
   EnvClinic,
   HEADER_TOP,
   MARGIN,
+  PAGE,
   continuationPage,
   doctorHeader,
   fetchHeaderImage,
@@ -30,23 +31,13 @@ import {
 } from './prescription-pdf.layout';
 
 /**
- * Least vertical space a scan is given before it is moved to its own page.
- * Below this it prints as a letterbox strip nobody can read.
+ * The white edge left around a scan that is the whole prescription (≈6 mm).
+ *
+ * Not nothing, because a page printed edge-to-edge loses whatever falls in the
+ * printer's unprintable margin — and on a photographed pad that is the part
+ * carrying the doctor's registration number.
  */
-const MIN_SCAN_H = 220;
-
-/** Has the doctor written anything into the structured fields? */
-function hasWrittenBody(
-  p: EPrescription,
-  medicines: EPrescriptionMedicine[],
-): boolean {
-  return (
-    medicines.length > 0 ||
-    !!p.diagnosis?.trim() ||
-    !!p.previous_history?.trim() ||
-    !!p.advice?.trim()
-  );
-}
+const SCAN_PAGE_PAD = 18;
 
 @Injectable()
 export class PrescriptionPdfService {
@@ -73,8 +64,34 @@ export class PrescriptionPdfService {
     medicines: EPrescriptionMedicine[],
     appointment: Appointment,
     doctor: Doctor,
-    opts: { letterhead?: boolean; scans?: Buffer[] } = {},
+    opts: { letterhead?: boolean; scans?: Buffer[]; mode?: PrescriptionMode } = {},
   ): Promise<Buffer> {
+    /*
+     * One visit, one prescription, one body on the page.
+     *
+     * A visit can hold three drafts at once — the typed rows, the e-pen page,
+     * the photographs of the pad — because a doctor who starts one way and
+     * finishes another leaves the first behind, saved. Only the tab they
+     * pressed Issue on is the prescription; `mode` is that tab. The page used
+     * to be assembled from whatever happened to exist, so a doctor who
+     * dictated badly, gave up and photographed their written pad issued both:
+     * the abandoned draft on our letterhead and the real prescription stapled
+     * under it.
+     */
+    const mode = opts.mode ?? prescription.mode;
+    const scans = opts.scans ?? [];
+
+    /*
+     * A photographed prescription is issued as the photograph — no letterhead,
+     * no patient row, no footer, no rebook QR. It is already a prescription on
+     * the doctor's own pad, with their header and their signature, so a page
+     * composed around it carried two letterheads, ours above theirs, and the
+     * part the patient had to read was the smallest thing on it.
+     */
+    if (mode === PrescriptionMode.UPLOADED) {
+      return this.scansAsIssued(scans);
+    }
+
     const letterhead = opts.letterhead !== false;
     const frame = frameFor(!letterhead);
     const doc = new PDFDocument({
@@ -111,22 +128,13 @@ export class PrescriptionPdfService {
     // Render patient name & date row
     y = patientInfo(doc, appointment, y);
 
-    const scans = opts.scans ?? [];
-    if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
+    if (mode === PrescriptionMode.HANDWRITTEN) {
       const drawing = await this.fetchHandwriting(prescription);
       y = this.handwritingBody(doc, drawing, y, frame);
-    } else if (hasWrittenBody(prescription, medicines) || scans.length === 0) {
+    } else {
       y = this.previousHistory(doc, prescription, y);
       y = this.diagnosis(doc, prescription, y);
       y = this.treatmentAdvice(doc, medicines, prescription, y, frame);
-    }
-
-    // The photographed pad, when the doctor's prescription for this visit is a
-    // scan rather than rows. It is the body on its own — the branch above is
-    // skipped — and it follows the typed body when there is one, because a
-    // doctor who both typed and photographed meant both to reach the patient.
-    if (scans.length) {
-      y = this.scanBody(doc, scans, y, frame, hasWrittenBody(prescription, medicines));
     }
 
     // The patient leaves with this sheet in hand — the QR is how the next
@@ -369,45 +377,40 @@ export class PrescriptionPdfService {
 
   // ── Uploaded scans ─────────────────────────────────────────
   /**
-   * The prescription images the doctor uploaded for this visit, one per page,
-   * each scaled to the space above the rebook block.
+   * The uploaded prescription, as it was uploaded: one page per scan, each
+   * scaled to the page and centred on it, and nothing else drawn.
    *
-   * These used to reach the patient only as thumbnails in the clinic's own
-   * screen: issuing a visit whose prescription was a photo of the pad was
-   * refused outright ("add at least one medicine or some advice"), because
-   * nothing but the structured rows and the e-pen drawing counted as content.
-   * The scan is the prescription in that case, so it prints as one.
+   * No header, no patient row, no footer and no rebook QR — all four belong to
+   * a sheet we compose, and this one was composed on paper before it was
+   * photographed. The print copy is the same page: there is no pad header to
+   * leave room for when the pad is in the picture.
    */
-  private scanBody(
-    doc: PDFKit.PDFDocument,
-    scans: Buffer[],
-    y: number,
-    frame: Frame,
-    labelled: boolean,
-  ): number {
+  private async scansAsIssued(scans: Buffer[]): Promise<Buffer> {
+    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c as Buffer));
+    const done = new Promise<Buffer>((resolve) =>
+      doc.on('end', () => resolve(Buffer.concat(chunks))),
+    );
+
     scans.forEach((scan, idx) => {
-      // A page of its own for every scan after the first, and for the first
-      // one too when what was typed above has left no usable room.
-      if (idx > 0 || frame.bodyBottom - y < MIN_SCAN_H) y = continuationPage(doc);
-      if (labelled && idx === 0) {
-        doc
-          .font('Helvetica-Bold')
-          .fontSize(12)
-          .fillColor(COLOR.ink)
-          .text('UPLOADED PRESCRIPTION', MARGIN, y, { characterSpacing: 0.5 });
-        y = doc.y + 8;
-      }
+      // PDFKit opens with a page already; every scan after the first adds one.
+      if (idx > 0) doc.addPage();
       try {
-        doc.image(scan, MARGIN, y, {
-          fit: [CONTENT_W, frame.bodyBottom - y],
+        doc.image(scan, SCAN_PAGE_PAD, SCAN_PAGE_PAD, {
+          fit: [PAGE.width - SCAN_PAGE_PAD * 2, PAGE.height - SCAN_PAGE_PAD * 2],
           align: 'center',
+          valign: 'center',
         });
       } catch (err) {
+        // One unreadable photo leaves its page blank rather than failing the
+        // issue — the others still reach the patient.
         this.logger.warn(`Could not embed a prescription scan: ${(err as Error).message}`);
       }
-      y = frame.bodyBottom;
     });
-    return y;
+
+    doc.end();
+    return done;
   }
 
   // ── Handwritten Body ───────────────────────────────────────

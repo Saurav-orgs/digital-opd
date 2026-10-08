@@ -9,7 +9,10 @@ import { HandwritingCanvas } from './HandwritingCanvas';
 import { CameraCapture, cameraAvailable } from './CameraCapture';
 import { DocumentIcon, KeyboardIcon, MicIcon, PenIcon, UploadIcon } from './icons';
 import { IvfCaseSheetEditor } from './IvfCaseSheetEditor';
+import { IssuedActions } from './IssuedActions';
 import type { DraftFlushRef } from '../lib/draftFlush';
+import type { IssueModeRef } from '../lib/issueMode';
+import type { IssueMode } from '../api/types';
 
 export type Mode = 'voice' | 'upload' | 'type' | 'handwrite' | 'ivf';
 
@@ -44,6 +47,47 @@ function writeMode(appointmentId: string, mode: Mode) {
 }
 
 /**
+ * The document a tab writes.
+ *
+ * Type and Record collapse to one: they are two ways of filling the same form,
+ * and a doctor who dictates and then corrects a dosage by hand has not changed
+ * what they are writing. `ivf` has no entry — the case-sheet is issued through
+ * its own endpoint, and its tab never shows the page's Issue button.
+ */
+/** How a tab is named in a sentence — the word on the tab, as the doctor reads it. */
+const TAB_LABEL: Record<Mode | 'ivf', string> = {
+  type: 'the Type tab',
+  voice: 'the Record tab',
+  handwrite: 'the Handwrite tab',
+  upload: 'the Upload tab',
+  ivf: 'the IVF form',
+};
+
+const ISSUE_MODE: Partial<Record<Mode, IssueMode>> = {
+  type: 'structured',
+  voice: 'structured',
+  handwrite: 'handwritten',
+  upload: 'uploaded',
+};
+
+/**
+ * What the Upload tab says once the prescription has gone out.
+ *
+ * Three cases, because the tab is reachable after issuing from any mode: the
+ * scans that were sent, or none — a prescription typed or dictated elsewhere,
+ * whose doctor then opened this tab looking for Withdraw.
+ */
+function issuedHint(scans: number): string {
+  if (scans === 0) {
+    return "This visit's prescription was issued without a scan. Withdraw it to attach one.";
+  }
+  if (scans === 1) {
+    return 'This scan was sent to the patient. Withdraw the prescription to change or replace it.';
+  }
+  return 'These scans were sent to the patient. Withdraw the prescription to change or replace them.';
+}
+
+/**
  * The ways a doctor/clinic can handle prescriptions for an appointment,
  * listed in the order they are actually reached for:
  *   🎙 Voice     — dictate/record; system drafts; doctor reviews
@@ -56,6 +100,7 @@ export function PrescriptionTabs({
   canEdit,
   disabled,
   flushRef,
+  issueModeRef,
   onRecorderBusy,
   footer,
   patientChip,
@@ -113,6 +158,14 @@ export function PrescriptionTabs({
    * nothing — a photo is already on the server the moment it is picked.
    */
   flushRef?: DraftFlushRef;
+  /**
+   * Kept pointing at the tab showing, for the page's Preview and Issue.
+   *
+   * Only that tab's content is issued, so the buttons have to know which one
+   * it is — and they are rendered by the page, which deliberately does not
+   * re-render when the doctor switches tabs.
+   */
+  issueModeRef?: IssueModeRef;
 }) {
   const [mode, setModeState] = useState<Mode>(() => {
     const remembered = readMode(appointmentId);
@@ -123,14 +176,51 @@ export function PrescriptionTabs({
   /** Only switch to a tab this card actually shows. */
   const offers = (m: Mode) => modes.includes(m);
   /**
-   * A writing tab that is not the document this visit was issued as.
+   * Has this visit's e-prescription gone to the patient?
    *
-   * Upload is left alone deliberately: it attaches a photo of a paper
-   * prescription rather than writing one, and it has never been closed off
-   * after issuing for any other doctor either.
+   * `PrescriptionEditor` and `HandwritingCanvas` each answer this for
+   * themselves from the same query. Upload and Record have no editor of their
+   * own to ask, so the tabs read it here.
    */
-  const frozen = (m: Mode) =>
-    m !== 'upload' && (issuedVia === 'ivf' ? m !== 'ivf' : issuedVia === 'prescription' && m === 'ivf');
+  const rxIssued = issuedVia === 'prescription';
+  /**
+   * The tabs that hold what the patient was actually handed.
+   *
+   * One visit can carry three drafts and the patient gets one of them, so the
+   * issued prescription records which tab it came from. Every other tab is
+   * showing working material that nobody has — it has to say so rather than
+   * sit there looking issued, or looking writable.
+   *
+   * A prescription issued before this change has no `uploaded` mode to record,
+   * so an old scan-only visit reads as structured and points at the typed tab.
+   * It is one line of text on a finished visit, and the alternative is
+   * guessing.
+   */
+  const issuedTabs = (): Mode[] => {
+    const held: Mode[] =
+      draft?.mode === 'handwritten'
+        ? ['handwrite']
+        : draft?.mode === 'uploaded'
+          ? ['upload']
+          : ['type', 'voice'];
+    // Never point a doctor at a tab their card does not show: an IVF card has
+    // no Type tab, and a structured prescription on one would otherwise send
+    // them to a panel that is not rendered.
+    const shown = held.filter(offers);
+    return shown.length > 0 ? shown : held;
+  };
+  /**
+   * A tab that is not the document this visit was issued as.
+   *
+   * Upload used to be excluded here, on the grounds that it attaches a photo
+   * of a paper prescription rather than writing one. It is one of the three
+   * now, like any other.
+   */
+  const frozen = (m: Mode) => {
+    if (issuedVia === 'ivf') return m !== 'ivf';
+    if (issuedVia === 'prescription') return m === 'ivf' || !issuedTabs().includes(m);
+    return false;
+  };
   /** Is `m` the tab showing, and not frozen behind an issued prescription? */
   const shows = (m: Mode) => mode === m && !frozen(m);
   const setMode = (m: Mode) => {
@@ -191,6 +281,19 @@ export function PrescriptionTabs({
     if (prefer && offers(prefer)) setModeState(prefer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, appointment]);
+
+  /*
+   * Keep the page's buttons pointed at the tab showing.
+   *
+   * No dependency array, like the pad's `flushRef` registration: the ref has
+   * to be right on every render, and writing one costs nothing. A ref rather
+   * than a callback because the alternative is `setState` in an effect in the
+   * page, which re-renders the whole visit each time a doctor glances at
+   * another tab.
+   */
+  useEffect(() => {
+    if (issueModeRef) issueModeRef.current = ISSUE_MODE[mode] ?? null;
+  });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['appointment', appointmentId] });
@@ -276,8 +379,8 @@ export function PrescriptionTabs({
 
       {frozen(mode) && (
         <IssuedElsewhere
-          issuedVia={issuedVia}
-          onGo={() => setMode(issuedVia === 'ivf' ? 'ivf' : offers('handwrite') ? 'handwrite' : 'type')}
+          where={issuedVia === 'ivf' ? 'ivf' : issuedTabs()[0]}
+          onGo={() => setMode(issuedVia === 'ivf' ? 'ivf' : issuedTabs()[0])}
         />
       )}
 
@@ -303,15 +406,27 @@ export function PrescriptionTabs({
 
       {shows('voice') && (
         <>
-          <div className="rx-panel-title">Record prescription</div>
-          <div className="rx-panel-sub">Dictate the diagnosis and medicines</div>
-          {canEdit && (
-            <ConsultationRecorder
-              appointmentId={appointmentId}
-              disabled={disabled}
-              onBusyChange={onRecorderBusy}
-              flushRef={flushRef}
-            />
+          {/*
+            The microphone goes away once the prescription is issued.
+            `PrescriptionEditor` below only renders when there is a draft, so a
+            visit issued from the Upload tab — no diagnosis, no medicines, just
+            a photo — left this tab showing a live "tap to record" and nothing
+            else saying the visit was over. The doctor could dictate a whole
+            prescription before the server refused to save it.
+          */}
+          {!rxIssued && (
+            <>
+              <div className="rx-panel-title">Record prescription</div>
+              <div className="rx-panel-sub">Dictate the diagnosis and medicines</div>
+              {canEdit && (
+                <ConsultationRecorder
+                  appointmentId={appointmentId}
+                  disabled={disabled}
+                  onBusyChange={onRecorderBusy}
+                  flushRef={flushRef}
+                />
+              )}
+            </>
           )}
 
           {/*
@@ -323,9 +438,9 @@ export function PrescriptionTabs({
             Once a draft is there it stays there, so correcting it never means
             switching tabs to find what the recording produced.
           */}
-          {hasDraft && (
+          {(hasDraft || rxIssued) && (
             <>
-              <div className="rx-panel-divider" />
+              {!rxIssued && <div className="rx-panel-divider" />}
               <PrescriptionEditor
                 appointmentId={appointmentId}
                 canEdit={canEdit}
@@ -351,11 +466,37 @@ export function PrescriptionTabs({
 
       {shows('upload') && (
         <div className="stack" style={{ gap: 14 }}>
-          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-            Photograph the prescription, or upload a scan you already have.
-          </p>
+          {/*
+            An issued upload tab is the issued prescription, shown the same way
+            Type shows it: the badge, the ways of handing it over, Withdraw.
+            Before this the tab looked identical to a draft one — the scans
+            still had their delete crosses and "Take photo" still sat under
+            them — so the only clue the visit had gone out was the footer
+            swapping its button for a line of text, and Withdraw was reachable
+            only from a tab the doctor had never opened.
+          */}
+          {rxIssued ? (
+            <>
+              <IssuedActions
+                appointmentId={appointmentId}
+                canEdit={canEdit}
+                pdfUrl={draft?.pdf_url}
+              />
+              <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+                {issuedHint(prescriptions.length)}
+              </p>
+            </>
+          ) : (
+            <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+              Photograph the prescription, or upload a scan you already have.
+            </p>
+          )}
 
-          {prescriptions.length === 0 ? (
+          {/* Two conditions rather than one either/or: an issued visit with no
+              scan — one issued from Type, whose doctor then opened this tab —
+              gets neither the gallery nor a dashed box inviting an upload it
+              will refuse. */}
+          {prescriptions.length === 0 && !rxIssued && (
             <div
               style={{
                 padding: '24px 16px',
@@ -371,7 +512,8 @@ export function PrescriptionTabs({
                 Upload photos of hand-written pads or previous prescriptions
               </div>
             </div>
-          ) : (
+          )}
+          {prescriptions.length > 0 && (
             <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
               {prescriptions.map((p) => (
                 <div
@@ -396,7 +538,7 @@ export function PrescriptionTabs({
                       }}
                     />
                   </a>
-                  {canEdit && (
+                  {canEdit && !rxIssued && (
                     <button
                       type="button"
                       title="Delete prescription image"
@@ -430,7 +572,7 @@ export function PrescriptionTabs({
             </div>
           )}
 
-          {canEdit && (
+          {canEdit && !rxIssued && (
             <div>
               <input
                 ref={fileInputRef}
@@ -485,8 +627,13 @@ export function PrescriptionTabs({
         their own. In Type and Record it is handed to the editor instead, so
         Clear, Save as template and Draft saved sit on the same line as
         Preview and Issue — one row, as the design has it.
+
+        Gone once the prescription is issued: `IssuedActions` is the row then,
+        in every mode. Keeping this one as well left Upload with a Preview
+        button and an "Issued to the patient" label underneath the badge that
+        had just said so.
       */}
-      {footer && (shows('handwrite') || shows('upload')) && (
+      {footer && !rxIssued && (shows('handwrite') || shows('upload')) && (
         <div className="vfoot">
           <div className="vfoot-grow" />
           {footer}
@@ -497,33 +644,39 @@ export function PrescriptionTabs({
 }
 
 /**
- * What a writing tab shows once this visit has been issued as the other
- * document — an IVF doctor's case-sheet, or their handwritten page.
+ * What a tab shows once this visit was issued from a different one.
  *
- * It names which one and offers the tab that can withdraw it, because the
- * doctor's next move is always the same: withdraw, then write. Before this,
- * the tab simply stayed writable and let them issue a second prescription for
- * one visit; the server refuses that now, but a refusal the doctor meets after
- * writing a page is a worse way to learn it.
+ * It names which, and offers to go there, because the doctor's next move is
+ * always the same: withdraw, then write. The alternative is a tab that sits
+ * there writable and lets them issue a second prescription for one visit; the
+ * server refuses that, but a refusal met after writing a page is a worse way
+ * to learn it.
+ *
+ * It used to appear only for an IVF doctor's case-sheet, because every other
+ * tab was assumed to hold the same document. They do not: a visit holds a
+ * typed draft, an e-pen page and photographs independently, and the patient
+ * was handed exactly one of them.
  */
 function IssuedElsewhere({
-  issuedVia,
+  where,
   onGo,
 }: {
-  issuedVia: 'prescription' | 'ivf' | null;
+  /** The tab that holds it — `ivf` for the case-sheet, otherwise a mode. */
+  where: Mode | 'ivf';
   onGo: () => void;
 }) {
-  const where = issuedVia === 'ivf' ? 'IVF form' : 'prescription';
+  const label = TAB_LABEL[where];
   return (
     <div className="rx-frozen">
       <div>
         <b>This visit's prescription has been issued.</b>
         <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-          It was issued from the {where}. Withdraw it there to make any changes.
+          It was issued from {label}, and that is what the patient has. Withdraw
+          it there to make any changes.
         </div>
       </div>
       <button type="button" className="btn btn-sm" onClick={onGo}>
-        {issuedVia === 'ivf' ? 'Open the IVF form' : 'Open the prescription'}
+        Open {label}
       </button>
     </div>
   );

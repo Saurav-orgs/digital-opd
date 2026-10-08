@@ -34,6 +34,19 @@ function pageCount(pdf: Buffer): number {
 }
 
 /**
+ * Does the document draw any text at all?
+ *
+ * The strings themselves are compressed in the stream, so looking for a name
+ * in the bytes finds nothing either way. A page with no `/Font` resource has
+ * no text on it — which is what "as it was uploaded" has to mean: every piece
+ * of furniture we compose (header, patient row, footer, rebook block) puts
+ * words on the page.
+ */
+function hasText(pdf: Buffer): boolean {
+  return pdf.toString('latin1').includes('/Font');
+}
+
+/**
  * The prescription body, rendered to bytes — no DB, no S3.
  *
  * The scan pages are what these lock down: a visit whose prescription is a
@@ -75,37 +88,91 @@ describe('PrescriptionPdfService', () => {
     instructions: 'after food',
   } as unknown as EPrescriptionMedicine;
 
-  it('renders a scan-only prescription, one page per scan', async () => {
+  const UPLOADED = { mode: PrescriptionMode.UPLOADED };
+
+  it('renders an uploaded prescription, one page per scan', async () => {
     const one = await service.render(draft(), [], appointment, doctor, {
+      ...UPLOADED,
       scans: [PNG],
     });
     expect(one.subarray(0, 5).toString('latin1')).toBe('%PDF-');
     expect(pageCount(one)).toBe(1);
 
     const three = await service.render(draft(), [], appointment, doctor, {
+      ...UPLOADED,
       scans: [PNG, PNG, PNG],
     });
     expect(pageCount(three)).toBe(3);
   });
 
-  it('keeps the typed body and adds the scan to it', async () => {
-    const written = draft({ diagnosis: 'Viral fever', advice: 'Rest and fluids' });
-    const typed = await service.render(written, [medicine], appointment, doctor);
-    const withScan = await service.render(written, [medicine], appointment, doctor, {
+  it('issues an uploaded prescription as the scan, with no letterhead', async () => {
+    const scanOnly = await service.render(draft(), [], appointment, doctor, {
+      ...UPLOADED,
       scans: [PNG],
     });
-    // Both carry the typed body — a doctor who photographed the pad *and*
-    // typed meant both to reach the patient — and the scan is extra bytes on
-    // top of it, not a replacement for it.
+    // The photograph is already a prescription on the doctor's own pad, so
+    // nothing of the sheet we compose is drawn over it.
+    expect(hasText(scanOnly)).toBe(false);
+
+    // And the print copy is the same page — there is no pad header to leave
+    // room for when the pad is in the picture.
+    const print = await service.render(draft(), [], appointment, doctor, {
+      ...UPLOADED,
+      scans: [PNG],
+      letterhead: false,
+    });
+    expect(pageCount(print)).toBe(1);
+    expect(hasText(print)).toBe(false);
+  });
+
+  /*
+   * The rule the whole mode argument exists for. A visit can hold a typed
+   * draft, an e-pen page and photographs of the pad all at once — a doctor who
+   * starts one way and finishes another leaves the first behind, saved — and
+   * the page used to be assembled from whatever existed. Issuing from Type
+   * sent the abandoned photograph too; issuing from Upload stapled the
+   * half-dictated draft above it.
+   */
+  it('issues only the tab that issued, when the visit holds more than one draft', async () => {
+    const everything = draft({
+      diagnosis: 'Viral fever',
+      advice: 'Rest and fluids',
+      handwriting_image_key: 'hw/1.png',
+    });
+
+    // Issued from Type or Record: our letterhead and the typed rows. The
+    // photographs are not in it — the same visit with no scans renders the
+    // same bytes.
+    const typed = await service.render(everything, [medicine], appointment, doctor, {
+      mode: PrescriptionMode.STRUCTURED,
+      scans: [PNG, PNG],
+    });
+    const typedAlone = await service.render(everything, [medicine], appointment, doctor, {
+      mode: PrescriptionMode.STRUCTURED,
+    });
+    expect(hasText(typed)).toBe(true);
     expect(pageCount(typed)).toBe(1);
-    expect(withScan.length).toBeGreaterThan(typed.length);
+    expect(typed.length).toBe(typedAlone.length);
+
+    // Issued from Upload: the photographs, and not a word of the typed draft
+    // sitting beside them.
+    const uploaded = await service.render(everything, [medicine], appointment, doctor, {
+      ...UPLOADED,
+      scans: [PNG, PNG],
+    });
+    expect(hasText(uploaded)).toBe(false);
+    expect(pageCount(uploaded)).toBe(2);
   });
 
   it('survives a scan that is not a readable image', async () => {
     const buf = await service.render(draft(), [], appointment, doctor, {
-      scans: [Buffer.from('not an image')],
+      ...UPLOADED,
+      scans: [Buffer.from('not an image'), PNG],
     });
+    // The unreadable one leaves its page blank; the other still reaches the
+    // patient, because a bad photo must not cost them the prescription.
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(pageCount(buf)).toBe(2);
   });
 
   it('still renders an empty prescription as an empty prescription', async () => {

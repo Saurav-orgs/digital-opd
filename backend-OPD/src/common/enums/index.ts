@@ -156,6 +156,8 @@ export enum PrescriptionMode {
   STRUCTURED = 'structured',
   /** A handwritten image the doctor drew, composited onto the letterhead. */
   HANDWRITTEN = 'handwritten',
+  /** Photographs of a paper prescription, issued as they were uploaded. */
+  UPLOADED = 'uploaded',
 }
 
 /** Whether a medicine row was suggested by the AI or typed by the doctor. */
