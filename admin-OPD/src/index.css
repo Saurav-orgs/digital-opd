@@ -4226,6 +4226,8 @@ tr.appt-row.upcoming td:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Reads as the action it is — the row head is a button and this is the part
+   of it the eye lands on — rather than as a status pill. */
 .dr-badge {
   flex-shrink: 0;
   font-size: 9.5px;
@@ -4236,6 +4238,12 @@ tr.appt-row.upcoming td:first-child {
   border-radius: 7px;
   background: var(--sage-tint);
   color: var(--teal-dark);
+  border: 1px solid var(--teal-dark);
+  cursor: pointer;
+}
+.day-row-head:hover .dr-badge {
+  background: var(--teal-dark);
+  color: #fff;
 }
 .dr-chevron {
   flex-shrink: 0;

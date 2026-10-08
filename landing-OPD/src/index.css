@@ -594,6 +594,147 @@ svg {
   }
 }
 
+/* ── Find a doctor (patient type-ahead) ─────────────────────── */
+.find-doctor {
+  background: #fff;
+  border-top: var(--hairline);
+  border-bottom: var(--hairline);
+}
+.finder {
+  max-width: 640px;
+  margin: 0 auto;
+}
+/* The dropdown is anchored to the field, not to the section: the hint below
+   it is a sibling, and hanging the list off the section put the two on top of
+   each other. */
+.finder-anchor {
+  position: relative;
+}
+.finder-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.finder-icon {
+  position: absolute;
+  left: 16px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+/* Two classes, because `.input` is defined further down this file and a
+   single-class selector here loses the tie to it. */
+.finder-field .finder-input {
+  min-height: 56px;
+  padding-left: 46px;
+  font-size: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+/* Safari paints its own clear button inside a type=search; the field already
+   has one affordance and does not need two. */
+.finder-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Over the content below rather than pushing it down — a list that reflows
+   the page as it loads moves the row out from under the cursor. */
+.finder-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--sage-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lg);
+}
+.finder-note {
+  padding: 14px 12px;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+.finder-note.is-error {
+  color: var(--danger);
+}
+.finder-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.finder-row.is-active,
+.finder-row:focus-visible {
+  background: var(--sage-tint);
+  outline: none;
+}
+.finder-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--neutral-tint);
+  color: var(--teal-dark);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.finder-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.finder-who strong {
+  font-size: 0.98rem;
+}
+.finder-who span {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finder-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--teal);
+}
+.finder-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+/* The row's "Book →" is a desktop nicety; on a phone the whole row is the tap
+   target and the name needs the width. */
+@media (max-width: 520px) {
+  .finder-go {
+    display: none;
+  }
+}
+
 /* ── Features ───────────────────────────────────────────────── */
 .feature-grid {
   display: grid;

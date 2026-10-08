@@ -196,7 +196,14 @@ export function DayAvailabilityEditor({
                     ))
                   : 'Day off — no timings set'}
               </span>
-              {isSet && <span className="dr-badge">Saved</span>}
+              {/*
+                "Saved" described the state and offered nothing; doctors came
+                here to change their hours and read it as a label, so the only
+                way in that looked like one was the chevron at the far right.
+                It is the same button either way — the whole row head opens the
+                day — so this just says what a click does.
+              */}
+              {isSet && <span className="dr-badge">{isOpen ? 'Close' : 'Edit'}</span>}
               <span className="dr-chevron" aria-hidden>
                 ⌄
               </span>

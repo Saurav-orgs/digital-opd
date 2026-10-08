@@ -9,6 +9,23 @@ function todayIso() {
 }
 
 /**
+ * Has this visit been called off, by either side?
+ *
+ * Two columns can say so and they are written by different doors: the clinic
+ * cancelling sets `consultation_status = 'rejected'`, a patient withdrawing
+ * their own booking sets `status = 'cancelled'`, and the clinic's cancel sets
+ * both (it has to, or the slot stays held). Every screen means the same thing
+ * by "cancelled", so the question is asked in one place.
+ */
+export function isCancelled(a: Appointment): boolean {
+  return (
+    a.status === 'cancelled' ||
+    a.status === 'rejected' ||
+    a.consultation_status === 'rejected'
+  );
+}
+
+/**
  * A visit whose day has passed with nobody pressing anything.
  *
  * The doctor can mark a no-show, but on a busy day most missed visits are
@@ -18,7 +35,7 @@ function todayIso() {
  * no-show still overrides it.
  */
 export function isMissed(a: Appointment): boolean {
-  if (a.status === 'cancelled') return false;
+  if (isCancelled(a)) return false;
   if (a.consultation_status !== 'pending' && a.consultation_status !== 'on_hold') return false;
   return a.appointment_date < todayIso();
 }
@@ -26,6 +43,6 @@ export function isMissed(a: Appointment): boolean {
 /** The status value to render for a visit, `missed` standing in for a stale
  *  `pending`. Only a display value — never send it back to the server. */
 export function displayStatus(a: Appointment): string {
-  if (a.status === 'cancelled') return 'rejected';
+  if (isCancelled(a)) return 'rejected';
   return isMissed(a) ? 'missed' : a.consultation_status;
 }

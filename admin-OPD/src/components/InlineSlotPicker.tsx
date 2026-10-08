@@ -4,7 +4,8 @@ import { schedulesApi } from '../api/endpoints';
 import type { Slot } from '../api/types';
 import { Loading } from './ui';
 
-const WINDOW_DAYS = 7;
+/** Must match the server's BOOKING_WINDOW_DAYS — three months. */
+const WINDOW_DAYS = 90;
 
 function today() {
   return new Date().toISOString().slice(0, 10);

@@ -11,6 +11,7 @@ import { EPrescription } from '../database/models/e-prescription.model';
 import { EPrescriptionMedicine } from '../database/models/e-prescription-medicine.model';
 import { AiTrainingSample } from '../database/models/ai-training-sample.model';
 import { IvfCaseSheet } from '../database/models/ivf-case-sheet.model';
+import { AppointmentPrescription } from '../database/models/prescription.model';
 import { PrescriptionPdfService } from './prescription-pdf.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { StorageService } from '../uploads/storage.service';
@@ -64,6 +65,11 @@ export class PrescriptionsService {
     // asking each other questions is a dependency cycle Nest refuses to boot.
     @InjectModel(IvfCaseSheet)
     private readonly ivfSheetModel: typeof IvfCaseSheet,
+    // The photos of a paper prescription the clinic uploaded for the visit.
+    // They are content like any other: a visit can be prescribed entirely by
+    // scan, and the issued PDF has to carry it.
+    @InjectModel(AppointmentPrescription)
+    private readonly scanModel: typeof AppointmentPrescription,
     private readonly pdf: PrescriptionPdfService,
     private readonly medicines: MedicinesService,
     private readonly storage: StorageService,
@@ -168,7 +174,8 @@ export class PrescriptionsService {
     await this.assertEditable(prescription);
 
     const medicines = await this.medicinesFor(prescription.id);
-    this.assertIssuable(prescription, medicines);
+    const scans = await this.fetchScans(appointmentId);
+    this.assertIssuable(prescription, medicines, scans.length);
 
     const doctor = await this.doctorModel.findByPk(appointment.doctor_id);
     if (!doctor) {
@@ -178,7 +185,9 @@ export class PrescriptionsService {
     }
 
     // 1. Render and store the PDF.
-    const buffer = await this.pdf.render(prescription, medicines, appointment, doctor);
+    const buffer = await this.pdf.render(prescription, medicines, appointment, doctor, {
+      scans,
+    });
     const { key } = await this.storage.uploadDocument(
       {
         buffer,
@@ -370,7 +379,12 @@ export class PrescriptionsService {
     }
 
     return {
-      buffer: await this.pdf.render(prescription, medicines, appointment, doctor, opts),
+      buffer: await this.pdf.render(prescription, medicines, appointment, doctor, {
+        ...opts,
+        // Preview is the issued page or it is worth nothing — a doctor who
+        // uploaded a scan has to see the scan.
+        scans: await this.fetchScans(appointmentId),
+      }),
       filename: this.pdfFilename(appointment, opts.letterhead === false ? 'print' : 'preview'),
     };
   }
@@ -869,10 +883,20 @@ export class PrescriptionsService {
     }
   }
 
-  /** Nothing goes to a patient half-written. */
+  /**
+   * Nothing goes to a patient half-written.
+   *
+   * `scanCount` is the photos of a paper prescription uploaded for this visit.
+   * They are the fourth way a prescription can carry content, and the only one
+   * this check used not to know about: the clinic's Upload tab let a doctor
+   * photograph the pad, offered Issue beside it, and then refused with "add at
+   * least one medicine or some advice" — advice they had no reason to type,
+   * because the prescription was already written, on paper, in the photo.
+   */
   private assertIssuable(
     prescription: EPrescription,
     medicines: EPrescriptionMedicine[],
+    scanCount = 0,
   ): void {
     // A handwritten prescription only needs the drawing.
     if (prescription.mode === PrescriptionMode.HANDWRITTEN) {
@@ -883,7 +907,7 @@ export class PrescriptionsService {
       }
       return;
     }
-    if (medicines.length === 0 && !prescription.advice?.trim()) {
+    if (scanCount === 0 && medicines.length === 0 && !prescription.advice?.trim()) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
         message:
           'Add at least one medicine or some advice before issuing this prescription.',
@@ -895,6 +919,32 @@ export class PrescriptionsService {
         message: `Please set the frequency for "${incomplete.medicine_name}" before issuing.`,
       });
     }
+  }
+
+  /**
+   * The uploaded prescription images for a visit, oldest first, as bytes.
+   *
+   * Best-effort per image: one object that cannot be fetched must not cost the
+   * patient the rest of their prescription, so it is logged and skipped.
+   */
+  private async fetchScans(appointmentId: string): Promise<Buffer[]> {
+    const rows = await this.scanModel.findAll({
+      where: { appointment_id: appointmentId },
+      order: [['created_at', 'ASC']],
+    });
+    // Fetched together, kept in the order they were uploaded in: the second
+    // page of a two-page pad is the second page on the PDF too.
+    const downloads = await Promise.all(
+      rows.map((row) =>
+        this.storage.download(row.image_key).catch((err: Error) => {
+          this.logger.warn(
+            `Could not fetch prescription scan ${row.image_key}: ${err.message}`,
+          );
+          return null;
+        }),
+      ),
+    );
+    return downloads.filter((b): b is Buffer => b !== null);
   }
 
   private async assertAccess(

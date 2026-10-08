@@ -579,9 +579,13 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
-    if (appointment.status === AppointmentStatus.REJECTED) {
+    // Neither of the two non-confirmed states holds a slot, so moving one
+    // would write a date it does not occupy — a booking that shows nowhere.
+    if (appointment.status !== AppointmentStatus.CONFIRMED) {
       throw new AppException(ErrorCode.BAD_REQUEST, {
-        message: 'A rejected appointment cannot be rescheduled.',
+        message:
+          'This appointment has been cancelled, so it cannot be rescheduled. ' +
+          'Book a new appointment instead.',
       });
     }
 
@@ -795,7 +799,38 @@ export class AppointmentsService {
     const appointment = await this.findRaw(id);
     this.assertOwnership(appointment, user);
     const previous = appointment.consultation_status;
-    await appointment.update({ consultation_status: dto.status } as any);
+
+    /*
+     * `rejected` is the clinic calling the visit off — the Cancel button on
+     * the visit screen and on the appointment list both land here — so it has
+     * to free the slot as well as mark the visit.
+     *
+     * It did not. Only `consultation_status` moved; the appointment stayed
+     * `confirmed`, and `confirmed` is precisely what the partial unique index
+     * and the slot grid read, so the hour the clinic had just given up still
+     * showed as booked and could not be re-booked. The list even promised
+     * "the slot is free to book again" while it was not.
+     */
+    const calledOff = dto.status === ConsultationStatus.REJECTED;
+    await appointment.update({
+      consultation_status: dto.status,
+      ...(calledOff ? { status: AppointmentStatus.CANCELLED } : {}),
+    } as any);
+
+    // The patient planned their day around this. Only on the transition, so
+    // marking an already-cancelled visit cancelled again sends nothing.
+    if (calledOff && previous !== ConsultationStatus.REJECTED) {
+      await this.notifications.create(
+        appointment.patient_mobile,
+        NotificationType.APPOINTMENT_CANCELLED,
+        'Appointment cancelled',
+        `Your appointment on ${appointment.appointment_date} at ` +
+          `${appointment.start_time.slice(0, 5)} has been cancelled by the clinic.`,
+        { appointmentId: appointment.id },
+        appointment.doctor_id,
+        appointment.patient_profile_id,
+      );
+    }
 
     this.activity.recordForUser(user, {
       action: ActivityAction.APPOINTMENT_CONSULTATION_SET,

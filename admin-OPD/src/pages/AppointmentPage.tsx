@@ -15,6 +15,7 @@ import { ConfirmDialog, Loading, Modal } from '../components/ui';
 import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
 import { isIvfDoctor } from '../lib/ivfCaseSheet';
+import { isCancelled } from '../lib/appointmentStatus';
 import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
 import { flushDraft } from '../lib/draftFlush';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
@@ -121,8 +122,8 @@ function VisitHeaderCard({
         <p>{meta}</p>
       </div>
       <div className="vh-when">
-        <strong className={a.status === 'rejected' ? 'cancelled' : ''}>
-          {a.status === 'rejected' ? 'Cancelled' : prettyTime(a.start_time)}
+        <strong className={isCancelled(a) ? 'cancelled' : ''}>
+          {isCancelled(a) ? 'Cancelled' : prettyTime(a.start_time)}
         </strong>
         <span>{prettyDate(a.appointment_date)}</span>
       </div>
@@ -156,7 +157,7 @@ function RxPatient({ appointment: a }: { appointment: Appointment }) {
           {[genderAge, a.patient_mobile].filter(Boolean).join(' · ')}
         </span>
       </div>
-      {a.status === 'rejected' && (
+      {isCancelled(a) && (
         <div className="rxp-cond">
           <span className="chip-warn">Cancelled</span>
         </div>
@@ -545,7 +546,10 @@ export default function AppointmentPage() {
     );
   }
 
-  const closed = !a || a.status === 'rejected';
+  // A cancelled visit is closed to writing whichever door cancelled it — the
+  // clinic's Cancel now frees the slot by marking the appointment itself
+  // cancelled, so this cannot read `status === 'rejected'` alone any more.
+  const closed = !a || isCancelled(a);
   const canAct = !!a && canUpdate && !closed;
 
   /**

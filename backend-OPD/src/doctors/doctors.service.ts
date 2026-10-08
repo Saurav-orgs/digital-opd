@@ -6,7 +6,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
 import * as QRCode from 'qrcode';
 import { Sequelize } from 'sequelize-typescript';
-import type { Transaction } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import { Doctor } from '../database/models/doctor.model';
 import { Permission } from '../database/models/permission.model';
 import { Role } from '../database/models/role.model';
@@ -1071,10 +1071,33 @@ export class DoctorsService {
 
   // ── Public (patient app) ───────────────────────────────────
 
-  async listEnabled(): Promise<any[]> {
+  /**
+   * The doctors a patient may book, optionally narrowed by what they typed.
+   *
+   * `search` is for the type-ahead on the marketing site: a patient who knows
+   * their doctor's name but not their booking link had no way in at all, so
+   * the name, the speciality and the clinic are all matched — people search
+   * for "Shah", for "dentist" and for "Apollo" in roughly equal measure.
+   * `limit` keeps the dropdown a dropdown.
+   */
+  async listEnabled(
+    opts: { search?: string; limit?: number } = {},
+  ): Promise<any[]> {
+    const search = opts.search?.trim();
+    const where: Record<string | symbol, unknown> = { is_enabled: true };
+    if (search) {
+      const like = `%${search}%`;
+      where[Op.or] = [
+        { name: { [Op.iLike]: like } },
+        { specialization: { [Op.iLike]: like } },
+        { clinic_name: { [Op.iLike]: like } },
+        { clinic_city: { [Op.iLike]: like } },
+      ];
+    }
     const doctors = await this.doctorModel.findAll({
-      where: { is_enabled: true },
+      where: where as any,
       order: [['name', 'ASC']],
+      ...(opts.limit ? { limit: opts.limit } : {}),
     });
     return doctors.map((d) => this.toPublic(d));
   }
