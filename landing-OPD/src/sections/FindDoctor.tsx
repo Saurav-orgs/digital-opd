@@ -148,7 +148,7 @@ export function FindDoctor() {
           <h2>Find your doctor and book a slot</h2>
           <p>
             Type your doctor’s name, their speciality or their clinic. Pick them
-            from the list and choose a time — no app to install, no account
+            from the list and choose a time. No app to install, no account
             needed to start.
           </p>
         </div>

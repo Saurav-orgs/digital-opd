@@ -531,6 +531,18 @@ function DayTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
+  /*
+   * Marking a visit done is asked about first.
+   *
+   * The tick sits one column away from the row that opens the visit, in a
+   * table the desk scans quickly, and it writes a status the patient's own
+   * screen reads — a mis-tap closed the wrong person's visit silently. One
+   * row, or the whole selection.
+   */
+  const [confirmDone, setConfirmDone] = useState<Appointment | 'bulk' | null>(null);
+  // The batch is a loop of requests rather than one mutation, so it reports
+  // its own progress to the dialog.
+  const [bulkBusy, setBulkBusy] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setMenuFor(null), []);
   const { menuRef, style } = useAnchoredMenu(!!menuFor, menuBtn, closeMenu);
@@ -541,14 +553,46 @@ function DayTable({
     qc.invalidateQueries({ queryKey: ['appointments'] });
   };
 
+  /**
+   * Putting a visit back the way it was.
+   *
+   * `pending` rather than whatever it held before: the tick is only offered on
+   * an open visit, so the only thing it can have overwritten is `pending`.
+   * (A visit parked `on_hold` by the old button would come back pending —
+   * nothing sets `on_hold` any more, and the doctor can park it again.)
+   */
+  const undoDone = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) {
+        await appointmentsApi.setConsultation(id, 'pending');
+      }
+    },
+    onSuccess: (_void, ids) => {
+      refresh();
+      toast.success(
+        ids.length === 1
+          ? 'Moved back to pending'
+          : `${ids.length} appointments moved back to pending`,
+      );
+    },
+    onError: (e) => toast.error(e),
+  });
+
   /** Marking a visit done from the list, without opening it. */
   const markDone = useMutation({
     mutationFn: (id: string) => appointmentsApi.setConsultation(id, 'done'),
-    onSuccess: () => {
+    onSuccess: (_appointment, id) => {
       refresh();
-      toast.success('Marked as completed');
+      setConfirmDone(null);
+      toast.success('Marked as completed', undefined, {
+        label: 'Undo',
+        run: () => undoDone.mutate([id]),
+      });
     },
-    onError: (e) => toast.error(e),
+    onError: (e) => {
+      setConfirmDone(null);
+      toast.error(e);
+    },
   });
 
   /*
@@ -571,16 +615,29 @@ function DayTable({
 
   const bulkDone = async () => {
     const ids = [...selected];
+    setBulkBusy(true);
+    // Only the ones that actually moved can be put back, so the undo does not
+    // reopen a visit whose write was refused.
+    const marked: string[] = [];
     for (const id of ids) {
       try {
         await appointmentsApi.setConsultation(id, 'done');
+        marked.push(id);
       } catch {
         // Keep going: one refusal should not strand the rest of the batch.
       }
     }
+    setBulkBusy(false);
     setSelected(new Set());
+    setConfirmDone(null);
     refresh();
-    toast.success(`${ids.length} appointment${ids.length === 1 ? '' : 's'} marked as completed`);
+    toast.success(
+      `${marked.length} appointment${marked.length === 1 ? '' : 's'} marked as completed`,
+      undefined,
+      marked.length
+        ? { label: 'Undo', run: () => undoDone.mutate(marked) }
+        : undefined,
+    );
   };
 
   /*
@@ -594,6 +651,9 @@ function DayTable({
       filtered.find((a) => isOpen(a.consultation_status) && !isCancelled(a))?.id ?? null
     );
   }, [filtered, isToday]);
+
+  // The row the open menu belongs to — its items are about that appointment.
+  const menuRow = menuFor ? filtered.find((x) => x.id === menuFor) ?? null : null;
 
   if (loading) return <Loading />;
   if (!filtered.length) {
@@ -645,7 +705,7 @@ function DayTable({
             {selected.size} selected
           </span>
           {canAct && (
-            <button className="btn btn-sm" onClick={bulkDone}>
+            <button className="btn btn-sm" onClick={() => setConfirmDone('bulk')}>
               Mark as completed
             </button>
           )}
@@ -696,7 +756,7 @@ function DayTable({
                 else s.delete(a.id);
                 setSelected(s);
               }}
-              onMarkDone={() => markDone.mutate(a.id)}
+              onMarkDone={() => setConfirmDone(a)}
               markingDone={markDone.isPending}
               menuOpen={menuFor === a.id}
               onMenu={() => setMenuFor((v) => (v === a.id ? null : a.id))}
@@ -709,17 +769,67 @@ function DayTable({
 
       {menuFor && (
         <div ref={menuRef} className="action-menu-dropdown" style={{ ...style, zIndex: 70 }}>
+          {/*
+            The undo the toast offered, after the toast has gone. A visit
+            marked done at 11:00 and noticed at 15:00 needs somewhere to be
+            put back, and the tick itself is greyed out by then.
+          */}
+          {menuRow && isDone(menuRow.consultation_status) && (
+            <button
+              className="action-menu-item"
+              disabled={undoDone.isPending}
+              onClick={() => {
+                const id = menuFor;
+                setMenuFor(null);
+                undoDone.mutate([id]);
+              }}
+            >
+              Move back to pending
+            </button>
+          )}
           <button
             className="action-menu-item danger"
             onClick={() => {
-              const row = filtered.find((x) => x.id === menuFor) ?? null;
               setMenuFor(null);
-              setCancelling(row);
+              setCancelling(menuRow);
             }}
           >
             Cancel appointment
           </button>
         </div>
+      )}
+
+      {confirmDone && (
+        <ConfirmDialog
+          title={
+            confirmDone === 'bulk'
+              ? `Mark ${selected.size} appointment${selected.size === 1 ? '' : 's'} as completed?`
+              : 'Mark this visit as completed?'
+          }
+          message={
+            confirmDone === 'bulk' ? (
+              <>
+                Every selected visit is recorded as seen. The patients see it on
+                their own visit list. You can move any of them back from the row
+                menu.
+              </>
+            ) : (
+              <>
+                {confirmDone.patient_name}'s {confirmDone.start_time?.slice(0, 5)} visit
+                is recorded as seen, and the patient sees it on their visit list.
+                You can move it back from the row menu.
+              </>
+            )
+          }
+          confirmLabel="Mark as completed"
+          cancelLabel="Not yet"
+          busy={markDone.isPending || bulkBusy}
+          onConfirm={() => {
+            if (confirmDone === 'bulk') void bulkDone();
+            else markDone.mutate(confirmDone.id);
+          }}
+          onCancel={() => setConfirmDone(null)}
+        />
       )}
 
       {cancelling && (

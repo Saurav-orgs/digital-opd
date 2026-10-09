@@ -771,6 +771,15 @@ img {
 .action-menu-item:hover {
   background: var(--page);
 }
+/* The menu stays open while a write it started is in flight, so a disabled
+   item has to look disabled rather than merely ignore the press. */
+.action-menu-item:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+.action-menu-item:disabled:hover {
+  background: transparent;
+}
 .action-menu-item.danger {
   color: var(--state-error);
 }
@@ -2819,6 +2828,25 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text-secondary);
   font-size: 13px;
 }
+/* "Undo", on the toast that reported the write. A link rather than a button:
+   it sits inside a card the whole of which is already clickable, and a second
+   filled button in there reads as the primary action of the screen. */
+.toast .t-action {
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.toast .t-action:hover {
+  color: var(--primary-hover);
+}
 
 /* ── Auth / login ──────────────────────────────────────────── */
 .center-screen {
@@ -4562,6 +4590,22 @@ tr.appt-row.upcoming td:first-child {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
+/*
+ * From and To stack, they do not sit side by side.
+ *
+ * The Vacation & leave panel lives in the 260–320px right column of My time
+ * slots, and a native `type="date"` is 150px wide and will not shrink: in two
+ * equal tracks of that column the To field rendered 87px outside the card.
+ * Forcing it narrower (`min-width: 0`) only clips "dd/mm/yyyy" to "dd/mm/y",
+ * which is worse. Below 768px the panel is full width and the rest of it —
+ * Reason, and the Mark-as-leave button — is a stack of full-width controls
+ * anyway, so these two join it.
+ */
+.leave-dates {
+  display: grid;
+  gap: 10px;
+}
+
 .vacation-row {
   border: 1px dashed var(--border);
   border-radius: 14px;

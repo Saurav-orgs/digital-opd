@@ -142,7 +142,7 @@ export const Login: React.FC = () => {
           {mode === 'login'
             ? 'Use the mobile number you booked your OPD appointment with.'
             : regStage === 'mobile'
-              ? 'Enter your WhatsApp mobile number — we will send a code to verify it.'
+              ? 'Enter your WhatsApp mobile number. We will send a code to verify it.'
               : regStage === 'otp'
                 ? 'Type the code we sent on WhatsApp.'
                 : "Choose a password and add the patient's details to register."}

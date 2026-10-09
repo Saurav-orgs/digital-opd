@@ -7,7 +7,7 @@ const FAQS = [
   },
   {
     q: 'What happens after I pay?',
-    a: 'You get access to the doctor login right away. On your first login we ask for your practice details — name, registration number, specialisation, qualifications and OPD timings — and your booking page goes live.',
+    a: 'You get access to the doctor login right away. On your first login we ask for your practice details (name, registration number, specialisation, qualifications and OPD timings), and your booking page goes live.',
   },
   {
     q: 'Do patients pay anything?',
@@ -19,7 +19,7 @@ const FAQS = [
   },
   {
     q: 'Does it work on a tablet for handwriting?',
-    a: 'Yes. Open it in the browser on any tablet with a stylus — the strokes are composited onto your letterhead so the prescription looks handwritten.',
+    a: 'Yes. Open it in the browser on any tablet with a stylus. The strokes are composited onto your letterhead so the prescription looks handwritten.',
   },
   {
     q: 'Is my patient data safe?',

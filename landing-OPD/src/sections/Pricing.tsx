@@ -24,7 +24,7 @@ export function Pricing() {
           <h2>One price per doctor. Pick how long you commit.</h2>
           <p>
             Every plan includes every feature. The longer the cycle, the lower
-            the monthly rate — nothing else changes.
+            the monthly rate. Nothing else changes.
           </p>
         </div>
 
@@ -112,8 +112,8 @@ export function Pricing() {
         </div>
 
         <p className="pricing-note">
-          Prices are per doctor, in INR, exclusive of GST. Pay securely online — UPI, cards and net
-          banking — and start the same day.
+          Prices are per doctor, in INR, exclusive of GST. Pay securely online by UPI, card or net
+          banking and start the same day.
         </p>
       </div>
     </section>

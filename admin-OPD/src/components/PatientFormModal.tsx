@@ -135,6 +135,11 @@ export function PatientFormModal({
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['patients'] });
       qc.invalidateQueries({ queryKey: ['patient-overview', saved.id] });
+      // The family picker on the booking modal and the family card on the
+      // profile both read this, and this is the call that changed who is on
+      // the number — without it the patient just registered is missing from
+      // the booking the desk goes on to make.
+      qc.invalidateQueries({ queryKey: ['patients-by-mobile'] });
       toast.success(
         isEdit ? `${saved.name} updated` : `${saved.name} registered`,
         isEdit ? undefined : 'No appointment booked.',

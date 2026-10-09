@@ -52,13 +52,36 @@ export default function Signup() {
 
   const email = form.email.trim().toLowerCase();
   const mobile = form.mobile.trim();
-  const accountValid =
-    EMAIL_RE.test(email) &&
-    form.password.length >= 8 &&
-    form.password === form.confirm &&
-    MOBILE_RE.test(mobile);
 
-  const mismatch = form.confirm.length > 0 && form.password !== form.confirm;
+  /*
+   * What is wrong with each box, whether or not it is being shown yet.
+   *
+   * "Continue" used to be disabled until all four were right, and nothing said
+   * which one was not. A doctor who chose a 6-character password got a dead
+   * button and no reason for it, which is the point in the sign-up where they
+   * leave. The button is live now: pressing it with something wrong marks the
+   * form as submitted and every box says what it needs.
+   */
+  const fieldError = {
+    email: EMAIL_RE.test(email) ? null : 'Enter a valid email address.',
+    mobile: MOBILE_RE.test(mobile) ? null : 'Enter your 10-digit mobile number.',
+    password:
+      form.password.length >= 8 ? null : 'Your password needs at least 8 characters.',
+    confirm: form.password === form.confirm ? null : 'Both passwords must match.',
+  };
+  const accountValid = !Object.values(fieldError).some(Boolean);
+
+  /*
+   * A box is only told off once it has been left, or once Continue has been
+   * pressed. Flagging an email as invalid while it is still being typed is
+   * noise, and it trains people to ignore the red.
+   */
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const touch = (field: string) => () =>
+    setTouched((t) => (t[field] ? t : { ...t, [field]: true }));
+  const errorFor = (field: keyof typeof fieldError) =>
+    submitted || touched[field] ? fieldError[field] : null;
 
   const stepState = useMemo(
     () =>
@@ -215,6 +238,9 @@ export default function Signup() {
                 <PasswordField
                   label="Password"
                   autoComplete="current-password"
+                  error={
+                    submitted && !form.password ? 'Enter the password for this account.' : null
+                  }
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                 />
@@ -224,7 +250,9 @@ export default function Signup() {
                   autoComplete="tel"
                   maxLength={10}
                   hint="Used for the payment receipt."
+                  error={errorFor('mobile')}
                   value={form.mobile}
+                  onBlur={touch('mobile')}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, mobile: e.target.value.replace(/\D/g, '') }))
                   }
@@ -244,8 +272,11 @@ export default function Signup() {
                 <button
                   type="button"
                   className="btn btn-primary btn-lg"
-                  disabled={!form.password || !MOBILE_RE.test(mobile) || busy !== null}
-                  onClick={resume}
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setSubmitted(true);
+                    if (form.password && MOBILE_RE.test(mobile)) void resume();
+                  }}
                 >
                   {busy === 'pay' ? <Loader2 size={18} className="spin" /> : <Lock size={18} />}
                   Continue to payment
@@ -262,6 +293,7 @@ export default function Signup() {
                 className="form-grid"
                 onSubmit={(e) => {
                   e.preventDefault();
+                  setSubmitted(true);
                   if (accountValid) void sendCode();
                 }}
               >
@@ -270,7 +302,9 @@ export default function Signup() {
                   type="email"
                   autoComplete="email"
                   placeholder="you@clinic.com"
+                  error={errorFor('email')}
                   value={form.email}
+                  onBlur={touch('email')}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                 />
                 <Field
@@ -280,7 +314,9 @@ export default function Signup() {
                   maxLength={10}
                   placeholder="10-digit number"
                   hint="For the payment receipt and account recovery."
+                  error={errorFor('mobile')}
                   value={form.mobile}
+                  onBlur={touch('mobile')}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, mobile: e.target.value.replace(/\D/g, '') }))
                   }
@@ -289,21 +325,28 @@ export default function Signup() {
                   label="Password"
                   autoComplete="new-password"
                   hint="At least 8 characters."
+                  error={errorFor('password')}
                   value={form.password}
+                  onBlur={touch('password')}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                 />
                 <PasswordField
                   label="Confirm password"
                   autoComplete="new-password"
-                  error={mismatch ? 'Both passwords must match.' : null}
+                  // Typed and different is wrong straight away; waiting for a
+                  // blur to say so just means typing the rest of it twice.
+                  error={form.confirm.length > 0 ? fieldError.confirm : errorFor('confirm')}
                   value={form.confirm}
+                  onBlur={touch('confirm')}
                   onChange={(e) => setForm((f) => ({ ...f, confirm: e.target.value }))}
                 />
                 <div className="form-actions">
+                  {/* Live, not disabled: the press is what asks the form to
+                      explain itself. */}
                   <button
                     type="submit"
                     className="btn btn-primary btn-lg"
-                    disabled={!accountValid || busy !== null}
+                    disabled={busy !== null}
                   >
                     {busy === 'code' ? (
                       <Loader2 size={18} className="spin" />

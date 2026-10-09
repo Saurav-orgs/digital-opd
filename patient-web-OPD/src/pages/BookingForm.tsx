@@ -111,7 +111,7 @@ const ReportsStep: React.FC<{
           <input
             type="text"
             className="form-input"
-            placeholder="e.g. Blood Test — CBC"
+            placeholder="e.g. Blood Test (CBC)"
             value={title}
             onChange={(e) => onTitleChange(e.target.value)}
           />
@@ -143,7 +143,7 @@ const ReportsStep: React.FC<{
         {pending && (
           <div className="report-pending-hint">
             <ArrowUp size={14} />
-            <span>Not attached yet — tap “Add this report” to include it.</span>
+            <span>Not attached yet. Tap “Add this report” to include it.</span>
           </div>
         )}
       </div>
@@ -873,7 +873,7 @@ export const BookingForm: React.FC = () => {
                   <div>
                     <div style={{ fontWeight: 600 }}>+ New patient</div>
                     <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                      Someone not listed above — a family member on this number
+                      Someone not listed above, such as a family member on this number
                     </div>
                   </div>
                 </button>
@@ -1122,7 +1122,7 @@ export const BookingForm: React.FC = () => {
                     textAlign: 'center',
                   }}
                 >
-                  Reports are optional — you can also add them later from My Visits.
+                  Reports are optional. You can also add them later from My Visits.
                 </p>
               )}
             </div>
