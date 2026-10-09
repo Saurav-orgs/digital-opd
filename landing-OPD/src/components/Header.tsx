@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { CalendarCheck, Menu, X } from 'lucide-react';
 import { Logo } from './Brand';
 import { AppConfig } from '../config';
 
+/*
+ * Section anchors only — everything a doctor reads on the way to a plan.
+ *
+ * "Book an appointment" used to be the first of these, and it disappeared: a
+ * patient's one task on this page, set in the same weight, colour and shape as
+ * four marketing anchors, and wrapping onto two lines at 1024px. It is an
+ * action, not a section, and it belongs with the other actions on the right —
+ * see `site-header-actions` below.
+ */
 const NAV = [
-  // First, and the only patient-facing entry: a patient who lands here is
-  // looking for their doctor, not for our feature list.
-  { href: '#book', label: 'Book an appointment' },
   { href: '#features', label: 'Features' },
   { href: '#how', label: 'How it works' },
   { href: '#pricing', label: 'Pricing' },
@@ -48,6 +54,12 @@ export function Header() {
           ))}
         </nav>
 
+        {/*
+          The doctor's two, and only those. Booking is a patient's action and
+          it now sits in the hero beside See plans and Email us, where it is
+          read rather than scanned past — a third button up here crowded the
+          row and pushed the whole header into a layout it did not want.
+        */}
         <div className="site-header-actions">
           <a href={AppConfig.links.doctorLogin} className="btn btn-ghost">
             Doctor login
@@ -82,6 +94,15 @@ export function Header() {
             </a>
           ))}
           <div className="mobile-nav-actions">
+            {/* First in the drawer too: a patient who opened the menu is
+                looking for this, not for the pricing table. */}
+            {/* <a
+              href="#book"
+              className="btn btn-outline btn-book"
+              onClick={() => setOpen(false)}
+            >
+              <CalendarCheck size={17} aria-hidden /> Book a Doctor
+            </a> */}
             <a href={AppConfig.links.doctorLogin} className="btn btn-ghost">
               Doctor login
             </a>
