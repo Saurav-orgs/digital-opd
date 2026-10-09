@@ -1,3 +1,4 @@
+import * as zlib from 'zlib';
 import { ConfigService } from '@nestjs/config';
 import { PrescriptionPdfService } from './prescription-pdf.service';
 import { StorageService } from '../uploads/storage.service';
@@ -44,6 +45,63 @@ function pageCount(pdf: Buffer): number {
  */
 function hasText(pdf: Buffer): boolean {
   return pdf.toString('latin1').includes('/Font');
+}
+
+/**
+ * Every word the document draws, in page order.
+ *
+ * `hasText` above only asks whether there is text at all, because the strings
+ * live inside Flate-compressed content streams. The column headers need more
+ * than that — "is FREQUENCY drawn, and is it drawn again on page two" — so
+ * this inflates each stream and reads the text-showing operators out of it.
+ *
+ * PDFKit kerns, so a line arrives as a `TJ` array of hex strings with the
+ * kern offsets between them (`[<4472> 60 <2e> ...] TJ`); the offsets are
+ * dropped and the pieces joined back into the line as drawn. A plain `(…) Tj`
+ * is read too, for anything written without kerning.
+ */
+function drawnText(pdf: Buffer): string {
+  const raw = pdf.toString('latin1');
+  const lines: string[] = [];
+  const unescapeLiteral = (lit: string) => lit.replace(/\\([()\\])/g, '$1');
+
+  const stream = /stream\r?\n/g;
+  let found: RegExpExecArray | null;
+  while ((found = stream.exec(raw))) {
+    const start = found.index + found[0].length;
+    const end = raw.indexOf('endstream', start);
+    if (end < 0) continue;
+    let inflated: string;
+    try {
+      inflated = zlib
+        .inflateSync(Buffer.from(raw.slice(start, end), 'latin1'))
+        .toString('latin1');
+    } catch {
+      continue; // Not a Flate stream — an embedded image, or a font file.
+    }
+    for (const show of inflated.matchAll(
+      /\[([^\]]*)\]\s*TJ|\(((?:\\.|[^\\)])*)\)\s*Tj/g,
+    )) {
+      if (show[1] === undefined) {
+        lines.push(unescapeLiteral(show[2]));
+        continue;
+      }
+      let line = '';
+      for (const piece of show[1].matchAll(/<([0-9A-Fa-f]*)>|\(((?:\\.|[^\\)])*)\)/g)) {
+        line +=
+          piece[1] === undefined
+            ? unescapeLiteral(piece[2])
+            : Buffer.from(piece[1], 'hex').toString('latin1');
+      }
+      lines.push(line);
+    }
+  }
+  return lines.join('\n');
+}
+
+/** How many times a word is drawn — once per page for a repeated header. */
+function countDrawn(pdf: Buffer, word: string): number {
+  return drawnText(pdf).split('\n').filter((line) => line === word).length;
 }
 
 /**
@@ -173,6 +231,39 @@ describe('PrescriptionPdfService', () => {
     // patient, because a bad photo must not cost them the prescription.
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
     expect(pageCount(buf)).toBe(2);
+  });
+
+  /*
+   * The frequency and the duration used to print as two bare values under
+   * TREATMENT ADVICE — "× Twice a day   × 3 days" — with nothing saying
+   * which column was which.
+   */
+  it('labels the medicine columns, and labels them again overleaf', async () => {
+    const one = await service.render(draft(), [medicine], appointment, doctor);
+    expect(countDrawn(one, 'MEDICINE')).toBe(1);
+    expect(countDrawn(one, 'FREQUENCY')).toBe(1);
+    expect(countDrawn(one, 'DURATION')).toBe(1);
+
+    // Enough rows to run onto a second page: a page of unlabelled columns is
+    // the bug, so the headers come with them.
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...medicine,
+      medicine_name: `Medicine ${i + 1}`,
+    })) as unknown as EPrescriptionMedicine[];
+    const long = await service.render(draft(), many, appointment, doctor);
+    expect(pageCount(long)).toBeGreaterThan(1);
+    expect(countDrawn(long, 'FREQUENCY')).toBe(pageCount(long));
+    expect(countDrawn(long, 'DURATION')).toBe(pageCount(long));
+  });
+
+  it('draws no column headers when there are no medicines', async () => {
+    const adviceOnly = await service.render(
+      draft({ advice: 'Rest and fluids' }),
+      [],
+      appointment,
+      doctor,
+    );
+    expect(countDrawn(adviceOnly, 'FREQUENCY')).toBe(0);
   });
 
   it('still renders an empty prescription as an empty prescription', async () => {

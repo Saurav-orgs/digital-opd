@@ -158,40 +158,54 @@ export class AppointmentsService {
     }
 
     /*
-     * No slot check at all, deliberately.
+     * No slot check at all, deliberately — unless the caller asks for one.
      *
      * A walk-in is booked with the patient already in the clinic, and the
      * doctor is the one deciding when to see them — after hours, between
      * slots, or squeezed alongside an existing booking. Holding that to the
      * published grid rejected bookings the doctor had already agreed to make,
      * so only the visit's length is derived here.
+     *
+     * `enforceSlot` is the one exception: the doctor picked the slot off the
+     * grid on My time slots, so the grid is exactly what they meant.
      */
     /*
      * The desk no longer picks a date or a time — the patient is in the room,
      * so the visit is now. Both are still honoured when sent, which keeps the
-     * endpoint usable for a correction and for any older caller.
+     * endpoint usable for a correction, for a booking made off the slot grid,
+     * and for any older caller.
      */
     const clinicNow = nowInClinic(
       this.config.get<string>('clinicTimezone') ?? 'Asia/Kolkata',
     );
     const date = dto.appointment_date ?? clinicNow.date;
+    const wanted = dto.start_time ?? clinicNow.time;
 
-    /*
-     * Two people can walk in together, and the desk books both at "now" — the
-     * same minute for the same doctor, which the one-appointment-per-minute
-     * index rejects. That index is worth keeping for online booking, where a
-     * clash really is two patients claiming one slot; here it is just the
-     * clock being coarse. So the second one moves to the next free minute
-     * rather than failing at the desk with "this slot was just taken".
-     */
-    const startTime = await this.firstFreeMinute(
-      doctorId,
-      date,
-      dto.start_time ?? clinicNow.time,
-    );
-    // Derived from the minute actually used, so a nudged start does not
-    // silently shorten the visit.
-    const endTime = await this.slots.walkInEndTime(doctorId, date, startTime);
+    let startTime: string;
+    let endTime: string;
+    if (dto.enforceSlot) {
+      // Throws SLOT_NOT_FOUND / SLOT_IN_PAST for a slot the grid does not
+      // offer; a slot taken between the grid rendering and this call trips
+      // the one-appointment-per-minute index below and comes back as
+      // SLOT_ALREADY_BOOKED. Both are better than a silent nudge: the doctor
+      // is looking at the grid and can pick the next slot themselves.
+      ({ endTime } = await this.slots.assertBookableSlot(doctorId, date, wanted));
+      startTime = wanted;
+    } else {
+      /*
+       * Two people can walk in together, and the desk books both at "now" —
+       * the same minute for the same doctor, which the one-appointment-per-
+       * minute index rejects. That index is worth keeping for online booking,
+       * where a clash really is two patients claiming one slot; here it is
+       * just the clock being coarse. So the second one moves to the next free
+       * minute rather than failing at the desk with "this slot was just
+       * taken".
+       */
+      startTime = await this.firstFreeMinute(doctorId, date, wanted);
+      // Derived from the minute actually used, so a nudged start does not
+      // silently shorten the visit.
+      endTime = await this.slots.walkInEndTime(doctorId, date, startTime);
+    }
 
     // A walk-in is a full registration: it creates the account and the patient
     // exactly as a self-booking would, so the patient can log in with this

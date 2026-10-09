@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError, lockoutStore } from '../api/client';
+import { startPracticeUrl } from '../config';
 import { Field, PasswordInput } from '../components/ui';
 import { LogoFull, PoweredByIttitude } from '../components/Brand';
 import {
@@ -179,14 +180,23 @@ export default function Login() {
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
               {/*
-                No "Register your practice" here. A practice is opened on the
-                landing site (plan → sign-up → payment) or set up by the
-                platform admin; a doctor who has paid signs in with the email
-                and password they chose and is routed into profile setup if the
-                clinic is not yet complete. Self-serve registration from the
-                login screen would create an unpaid account that the server
-                refuses anyway.
+                Out to the landing site, never to this app's own /register.
+                A practice is opened by choosing a plan and paying (plan →
+                sign-up → payment) or set up by the platform admin; a doctor
+                who has paid signs in here with the email and password they
+                chose and is routed into profile setup if the clinic is not yet
+                complete. Self-serve registration from this screen would create
+                an unpaid account the server refuses anyway — but a doctor who
+                lands here without one was being left at a dead end, with no
+                sign of where an account comes from. So: the same destination
+                the landing site's own "Start your practice" button has.
               */}
+              <p className="login-signup">
+                Don’t have an account?{' '}
+                <a className="link-btn" href={startPracticeUrl()}>
+                  Start practice
+                </a>
+              </p>
             </form>
           </>
         )}

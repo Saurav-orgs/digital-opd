@@ -253,14 +253,48 @@ export class PrescriptionPdfService {
     const col1W = 230;
     const col2W = 140;
     const col3W = CONTENT_W - col1W - col2W;
+    /** Label line plus the rule under it, before the first row. */
+    const HEAD_H = 18;
 
     const col1X = MARGIN;
     const col2X = MARGIN + col1W;
     const col3X = MARGIN + col1W + col2W;
 
+    /**
+     * The column labels, and the rule under them.
+     *
+     * Without these the second and third columns are bare values — a patient
+     * reading "× Twice daily   × 5 days" has to work out which is which, and
+     * a pharmacist reading it in a hurry can get it wrong. Returns the `y` the
+     * first row starts at.
+     */
+    const columnHeaders = (top: number): number => {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(COLOR.muted);
+      doc.text('MEDICINE', col1X, top, { width: col1W - 10, characterSpacing: 0.5 });
+      doc.text('FREQUENCY', col2X, top, { width: col2W - 10, characterSpacing: 0.5 });
+      doc.text('DURATION', col3X, top, { width: col3W, characterSpacing: 0.5 });
+      const ruleY = top + HEAD_H - 6;
+      doc
+        .moveTo(MARGIN, ruleY)
+        .lineTo(MARGIN + CONTENT_W, ruleY)
+        .lineWidth(0.5)
+        .strokeColor(COLOR.line)
+        .stroke();
+      return top + HEAD_H;
+    };
+
+    if (meds.length) {
+      // Headers with no room for a row under them would print at the foot of
+      // the page and leave the rows orphaned overleaf, so they move together.
+      if (y > frame.bodyBottom - (HEAD_H + 40)) y = continuationPage(doc);
+      y = columnHeaders(y);
+    }
+
     meds.forEach((m, idx) => {
-      // Check for page overflow before rendering row
-      if (y > frame.bodyBottom - 40) y = continuationPage(doc);
+      // Check for page overflow before rendering row. The headers repeat on
+      // the page the rows continue onto — the alternative is a page of
+      // unlabelled columns, which is the bug this header set out to fix.
+      if (y > frame.bodyBottom - 40) y = columnHeaders(continuationPage(doc));
 
       const medicineName = [m.medicine_name, m.strength].filter(Boolean).join(' ');
       const title = `${idx + 1}. ${medicineName.toUpperCase()}`;

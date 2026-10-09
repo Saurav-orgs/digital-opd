@@ -13,6 +13,14 @@ export { MIN_RATIO } from '../lib/letterhead';
 export const HEADER_MIN_W = 1000;
 export const HEADER_BEST_W = 2000;
 
+/**
+ * The upload cap, as the server enforces it (`imageUpload` in
+ * `doctors.controller.ts`). The letterhead screen quoted 5 MB against a 6 MB
+ * server, so a doctor with a 5.4 MB scan was told to shrink a file that would
+ * have gone through.
+ */
+export const HEADER_MAX_MB = 6;
+
 /** What the file input accepts: any image, or the printer's PDF of the pad. */
 export const HEADER_ACCEPT = 'image/*,application/pdf';
 

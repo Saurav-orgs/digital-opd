@@ -1256,6 +1256,17 @@ tr.appt-row.upcoming td:first-child {
   text-align: center;
   font-size: 12px;
   border: 0.5px solid var(--border);
+  /* A free slot is a <button> now (the grid on My time slots books it), and a
+     button brings its own font and chrome; the booked and past ones are
+     disabled buttons, which some browsers grey out on their own. The status
+     classes below set the colours, so only the furniture is reset here. */
+  font-family: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  appearance: none;
+  width: 100%;
+  cursor: default;
+  opacity: 1;
 }
 .slot-available {
   color: var(--primary);
@@ -2905,6 +2916,14 @@ tr.appt-row.upcoming td:first-child {
 }
 .link-btn:hover {
   text-decoration: underline;
+}
+/* The way out for someone who has no account yet: a quiet line under the
+   sign-in button, not a second button competing with it. */
+.login-signup {
+  margin: 16px 0 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
 }
 
 /* ── Dashboard ───────────────────────────────────────────────

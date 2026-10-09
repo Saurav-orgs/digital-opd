@@ -56,6 +56,20 @@ const TENANT_PATHLAB_PERMS = [
 ];
 
 
+/**
+ * The hours a clinic opens with when nobody chose any — see `seedDefaultHours`.
+ * Mirrored in `DayAvailabilityEditor.blankDay()` on the web, which offers the
+ * same window as the first thing a doctor sees when they open a fresh day.
+ */
+const DEFAULT_OPD_HOURS = {
+  start_time: '10:00',
+  end_time: '14:00',
+  slot_duration_min: 15,
+};
+
+/** Monday … Saturday. `day_of_week` is 0 = Sunday, so Sunday is simply absent. */
+const DEFAULT_OPD_DAYS = [1, 2, 3, 4, 5, 6];
+
 /*
  * Sign-up sends availability and leave as JSON strings, because the request is
  * multipart/form-data and has nowhere to put a nested object. These parse and
@@ -617,6 +631,8 @@ export class DoctorsService {
         })) as any,
         { transaction: t },
       );
+    } else {
+      await this.seedDefaultHours(doctor.id, t);
     }
 
     // Leave is stored a date at a time, so a range is expanded here rather
@@ -638,6 +654,40 @@ export class DoctorsService {
     }
 
     return { doctor, doctorRole };
+  }
+
+  /**
+   * Monday-to-Saturday morning OPD, for a doctor who was never asked.
+   *
+   * Hours are optional at sign-up, and the paid flow's first-login wizard does
+   * not ask for them at all — so a doctor who bought a plan on the landing
+   * site used to end up with no `opd_schedules` rows, which the slot engine
+   * reads as "no OPD on any date". Their booking page took nothing and the QR
+   * on their desk led to an empty grid, with nothing on screen to say why.
+   *
+   * So a clinic opens with the client's usual morning hours and the doctor
+   * changes them on My time slots. Written as real rows rather than faked in
+   * `SlotsService`, so the editor, the slot grid, the walk-in length and the
+   * public booking page all read the same one source — and so a doctor who
+   * then clears a day stays closed on it, which a runtime fallback could not
+   * tell apart from never having set it.
+   *
+   * Sunday is left off: it is the day a clinic is least likely to open, and
+   * the cost of guessing wrong is a patient booking a slot the doctor will not
+   * be there for.
+   */
+  private async seedDefaultHours(doctorId: string, t: Transaction): Promise<void> {
+    await this.scheduleModel.bulkCreate(
+      DEFAULT_OPD_DAYS.map((day) => ({
+        doctor_id: doctorId,
+        day_of_week: day,
+        start_time: DEFAULT_OPD_HOURS.start_time,
+        end_time: DEFAULT_OPD_HOURS.end_time,
+        slot_duration_min: DEFAULT_OPD_HOURS.slot_duration_min,
+        is_active: true,
+      })) as any,
+      { transaction: t },
+    );
   }
 
   /** Registrations waiting on the super admin, with a link to the licence. */
@@ -816,8 +866,9 @@ export class DoctorsService {
   /**
    * Creates a new doctor tenant in a single transaction:
    *   1. Doctor profile + public QR slug.
-   *   2. Two tenant roles: Doctor (all clinical) and Pathlab (reports only).
-   *   3. The doctor's own login User (type=doctor).
+   *   2. Default opening hours, because this form does not collect any.
+   *   3. Two tenant roles: Doctor (all clinical) and Pathlab (reports only).
+   *   4. The doctor's own login User (type=doctor).
    *
    * Returns everything the super-admin needs to hand to the new doctor,
    * including the one-time credentials (never stored again) and the QR URL.
@@ -869,7 +920,11 @@ export class DoctorsService {
         { transaction: t },
       );
 
-      // 2 — Tenant roles
+      // 2 — Opening hours. This form never asks for them, so the clinic opens
+      // on the default week and the doctor adjusts it on My time slots.
+      await this.seedDefaultHours(doctor.id, t);
+
+      // 3 — Tenant roles
       const doctorRole = await this.createTenantRole(
         'Doctor',
         'Full clinical access for this tenant.',
@@ -885,7 +940,7 @@ export class DoctorsService {
         t,
       );
 
-      // 3 — Doctor login
+      // 4 — Doctor login
       const password_hash = await bcrypt.hash(dto.password, 10);
       await this.userModel.create(
         {

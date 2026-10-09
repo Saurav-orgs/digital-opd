@@ -13,6 +13,7 @@ import { StateView } from '../../components/StateView';
 import { PatientSwitcher, RequirePatient } from '../../components/PatientSwitcher';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
+import { AppConfig } from '../../config';
 
 export const MyVisits: React.FC = () => (
   <RequirePatient>
@@ -567,7 +568,7 @@ const ReportUploader: React.FC<{ appointmentId: string }> = ({ appointmentId }) 
       </div>
       {uploadError && <div className="error-text" style={{ marginTop: '10px' }}>{uploadError}</div>}
       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-        JPG, PNG, WebP or PDF · up to 5 MB.
+        PDF or image (JPG, PNG, WebP) · up to {AppConfig.maxUploadMb} MB.
       </div>
     </div>
   );

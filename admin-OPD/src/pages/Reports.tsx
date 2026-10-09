@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
 import { DocumentIcon, EyeIcon } from '../components/icons';
+import { MAX_REPORT_MB } from '../components/ReportUpload';
 
 /**
  * Upload + view patient reports by mobile number. For a pathlab login (whose
@@ -152,7 +153,7 @@ export default function Reports() {
             {upload.isPending ? 'Uploading…' : 'Upload report'}
           </button>
           <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
-            JPG, PNG, WebP or PDF · up to 5 MB.
+            PDF or image (JPG, PNG, WebP) · up to {MAX_REPORT_MB} MB.
           </p>
         </div>
       )}

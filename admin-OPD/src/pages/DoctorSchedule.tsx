@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { schedulesApi } from '../api/endpoints';
-import type { ScheduleEntry } from '../api/types';
+import type { ScheduleEntry, Slot } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
+import { WalkInModal } from '../components/WalkInModal';
 import {
   DayAvailabilityEditor,
   workingDays,
@@ -28,6 +29,9 @@ export default function DoctorSchedule() {
   const { can, user, isDoctor } = useAuth();
   const toast = useToast();
   const canEdit = can('opd_schedules', 'update');
+  // Booking a slot off the grid is a booking, not a schedule edit — a role
+  // that may set hours but not take appointments gets the read-only grid.
+  const canBook = can('appointments', 'create');
   const id = user?.doctorId ?? '';
 
   const schedQ = useQuery({
@@ -135,7 +139,7 @@ export default function DoctorSchedule() {
 
         <div className="stack">
           <LeavePanel doctorId={id} canEdit={canEdit} />
-          <SlotPreview doctorId={id} />
+          <SlotPreview doctorId={id} canBook={canBook} />
         </div>
       </div>
     </>
@@ -343,8 +347,23 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
   );
 }
 
-function SlotPreview({ doctorId }: { doctorId: string }) {
+/**
+ * The day's slots as the patient would see them — and a way to take one.
+ *
+ * It was a read-only preview: the doctor could see that 11:30 was free on
+ * Thursday but had no way to give it to the patient on the phone, because the
+ * only booking in the panel is Walk-in, which is always "now". Tapping a free
+ * slot here opens the same registration form with that date and time attached,
+ * held to the grid (see `WalkInModal`'s `slot` prop) so a slot someone took in
+ * the meantime is refused rather than quietly moved.
+ *
+ * Booked and past slots stay inert: a past slot cannot be given away, and a
+ * booked one belongs to a patient — double-booking is a walk-in's job, from
+ * the appointment list, where the doctor can see who is already in it.
+ */
+function SlotPreview({ doctorId, canBook }: { doctorId: string; canBook: boolean }) {
   const [date, setDate] = useState('');
+  const [booking, setBooking] = useState<Slot | null>(null);
   const slotsQ = useQuery({
     queryKey: ['slots', doctorId, date],
     queryFn: () => schedulesApi.slots(doctorId, date),
@@ -367,13 +386,40 @@ function SlotPreview({ doctorId }: { doctorId: string }) {
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
             {slotsQ.data.slots.length} slots
+            {canBook && ' · tap a free slot to book it'}
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(66px, 1fr))', gap: 6 }}>
-            {slotsQ.data.slots.map((s) => (
-              <div key={s.start_time} className={`slot slot-${s.status}`}>{s.start_time}</div>
-            ))}
+            {slotsQ.data.slots.map((s) => {
+              const pickable = canBook && s.status === 'available';
+              return (
+                <button
+                  key={s.start_time}
+                  type="button"
+                  className={`slot slot-${s.status}${pickable ? ' slot-pickable' : ''}`}
+                  disabled={!pickable}
+                  title={
+                    pickable
+                      ? `Book ${s.start_time}`
+                      : s.status === 'booked'
+                        ? 'Already booked'
+                        : undefined
+                  }
+                  onClick={() => pickable && setBooking(s)}
+                >
+                  {s.start_time}
+                </button>
+              );
+            })}
           </div>
         </>
+      )}
+
+      {booking && (
+        <WalkInModal
+          doctorId={doctorId}
+          slot={{ date, startTime: booking.start_time }}
+          onClose={() => setBooking(null)}
+        />
       )}
     </div>
   );

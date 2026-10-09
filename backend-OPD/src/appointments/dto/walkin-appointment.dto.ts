@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -51,6 +52,29 @@ export class WalkInAppointmentDto {
     message: 'Please choose a valid time slot (HH:mm).',
   })
   start_time?: string;
+
+  /**
+   * Hold this booking to the published slot grid.
+   *
+   * A walk-in skips every slot check on purpose — the patient is in the room
+   * and the doctor sees them between slots and after hours — and a clash is
+   * nudged to the next free minute rather than refused, because two people
+   * walking in together is the clock being coarse, not a double booking.
+   *
+   * Neither is right when the desk picked the slot off the grid on **My time
+   * slots**: a slot taken a second earlier should say so, not quietly become
+   * 11:31. Sending this true validates the slot (`SLOT_NOT_FOUND`,
+   * `SLOT_IN_PAST`, `SLOT_ALREADY_BOOKED`) and leaves the minute alone.
+   *
+   * camelCase, per CLAUDE.md: existing request fields stay snake_case, new
+   * ones do not add to them.
+   */
+  @ApiPropertyOptional({
+    description: 'Validate the slot against the published grid instead of nudging a clash.',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'enforceSlot must be true or false.' })
+  enforceSlot?: boolean;
 
   /**
    * The patient this visit is for, chosen from the pick-list at booking step 2.
