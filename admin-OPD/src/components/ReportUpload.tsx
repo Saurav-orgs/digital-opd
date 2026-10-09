@@ -9,6 +9,14 @@ import { CameraIcon, UploadIcon } from './icons';
 /** What the report endpoint accepts — images plus PDF. */
 const ACCEPT = 'image/png,image/jpeg,image/webp,application/pdf';
 
+/**
+ * The upload cap, as the server enforces it (`reports.controller.ts`, 6 MB on
+ * both report routes). Exported so the Upload reports screen quotes the same
+ * number — it said 5 MB against a 6 MB server, which is the kind of mismatch
+ * that has somebody shrinking a file that would have gone through.
+ */
+export const MAX_REPORT_MB = 6;
+
 /** "CBC report (1).pdf" -> "CBC report (1)", as a first draft of the title. */
 function titleFromFile(name: string): string {
   return name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 120);
@@ -97,6 +105,13 @@ export function ReportUpload({
           </button>
         )}
       </div>
+
+      {/* A lab hands over a PDF as often as a printed sheet, and the tiles gave
+          no reason to think a PDF would be taken — so one was photographed on
+          screen instead. The cap is the server's (`reports.controller.ts`). */}
+      <p className="hint" style={{ marginTop: 8 }}>
+        PDF or image (JPG, PNG) · up to {MAX_REPORT_MB} MB
+      </p>
 
       {cameraOpen && (
         <CameraCapture onCapture={take} onClose={() => setCameraOpen(false)} />

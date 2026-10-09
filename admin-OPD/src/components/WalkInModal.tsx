@@ -5,6 +5,8 @@ import type { PatientProfile } from '../api/types';
 import { useToast } from './Toast';
 import { Field, Modal } from './ui';
 import { initials } from '../lib/avatar';
+import { prettyDate } from '../lib/patientFormat';
+import { prettyTime } from './DayAvailabilityEditor';
 
 /**
  * How many people one number may register. Mirrors the server's own cap — the
@@ -52,6 +54,7 @@ function describe(p: PatientProfile): string {
 export function WalkInModal({
   doctorId,
   initialMobile,
+  slot,
   onClose,
 }: {
   doctorId: string;
@@ -61,6 +64,17 @@ export function WalkInModal({
    * already knows.
    */
   initialMobile?: string;
+  /**
+   * A slot the doctor picked off the grid on My time slots, instead of "now".
+   *
+   * With it this stops being a walk-in in all but the endpoint: the visit is
+   * on that date at that time, the booking is held to the published grid
+   * (`enforceSlot`), and a slot taken in the meantime is refused rather than
+   * nudged to the next free minute — the doctor is looking at the grid and
+   * can pick again. Everything else about the form is the same four
+   * questions, because it is the same registration.
+   */
+  slot?: { date: string; startTime: string };
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -107,14 +121,32 @@ export function WalkInModal({
         patient_mobile: lookedUp,
         patient_gender: (selected?.gender ?? gender).toLowerCase(),
         description: description.trim() || undefined,
+        ...(slot
+          ? {
+              appointment_date: slot.date,
+              start_time: slot.startTime,
+              enforceSlot: true,
+            }
+          : {}),
       }),
     onSuccess: (appointment) => {
       qc.invalidateQueries({ queryKey: ['appointments'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['patients'] });
+      // The slot grid on My time slots has to show the slot as taken without
+      // the doctor reloading the screen they are standing on.
+      if (slot) qc.invalidateQueries({ queryKey: ['slots', doctorId] });
       toast.success(
-        `Walk-in booked for ${appointment.patient_name}`,
-        appointment.start_time ? `Today at ${appointment.start_time.slice(0, 5)}` : undefined,
+        slot
+          ? `Appointment booked for ${appointment.patient_name}`
+          : `Walk-in booked for ${appointment.patient_name}`,
+        appointment.start_time
+          ? slot
+            ? `${prettyDate(appointment.appointment_date)} at ${prettyTime(
+                appointment.start_time,
+              )}`
+            : `Today at ${appointment.start_time.slice(0, 5)}`
+          : undefined,
       );
       onClose();
     },
@@ -158,7 +190,11 @@ export function WalkInModal({
 
   return (
     <Modal
-      title="Walk-in appointment"
+      title={
+        slot
+          ? `Book ${prettyTime(slot.startTime)} · ${prettyDate(slot.date)}`
+          : 'Walk-in appointment'
+      }
       onClose={onClose}
       footer={
         <button

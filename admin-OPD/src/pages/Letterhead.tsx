@@ -7,6 +7,7 @@ import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
 import {
   HEADER_BEST_W,
+  HEADER_MAX_MB,
   HEADER_MIN_W,
   LetterheadHeaderPicker,
   LetterheadPreview,
@@ -168,7 +169,7 @@ export default function LetterheadPage({ embedded = false }: { embedded?: boolea
             Upload your prescription pad — a scan, a photo or the printer's PDF —
             and mark where the header ends; that strip prints at the top of every
             prescription, as tall as it needs to be. Any image format or PDF,
-            at least {HEADER_MIN_W} px wide ({HEADER_BEST_W} px is ideal), under 5 MB.
+            at least {HEADER_MIN_W} px wide ({HEADER_BEST_W} px is ideal), under {HEADER_MAX_MB} MB.
             Leave it empty to print your name and details instead.
           </p>
           <div

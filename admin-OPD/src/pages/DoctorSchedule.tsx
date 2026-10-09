@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { CalendarClock, ChevronDown, Timer, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { schedulesApi } from '../api/endpoints';
-import type { ScheduleEntry } from '../api/types';
+import type { ScheduleEntry, Slot } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
+import { WalkInModal } from '../components/WalkInModal';
 import {
   DayAvailabilityEditor,
   workingDays,
@@ -26,8 +29,21 @@ const hhmm = (t: string) => t.slice(0, 5);
  */
 export default function DoctorSchedule() {
   const { can, user, isDoctor } = useAuth();
+  /*
+   * Set by the first-login wizard, which sends the doctor straight here. The
+   * account already has a week of hours by then — nobody chose them, so the
+   * screen says so once rather than letting a doctor find out from a patient
+   * who booked 10:30 on a day the clinic is shut.
+   */
+  const location = useLocation();
+  const [showWelcome, setShowWelcome] = useState(
+    !!(location.state as { fresh?: boolean } | null)?.fresh,
+  );
   const toast = useToast();
   const canEdit = can('opd_schedules', 'update');
+  // Booking a slot off the grid is a booking, not a schedule edit — a role
+  // that may set hours but not take appointments gets the read-only grid.
+  const canBook = can('appointments', 'create');
   const id = user?.doctorId ?? '';
 
   const schedQ = useQuery({
@@ -100,12 +116,60 @@ export default function DoctorSchedule() {
         </div>
       </div>
 
+      {showWelcome && (
+        <div className="tg-welcome" role="status">
+          <span className="tg-welcome-icon" aria-hidden>
+            <CalendarClock size={18} />
+          </span>
+          <div>
+            <b>Your clinic is open Monday to Saturday, 10:00 AM – 2:00 PM.</b>
+            <span>
+              That is our starting point, not your decision — change any day
+              below and press Save schedule. Leave it as it is and patients can
+              book these hours straight away.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="tg-welcome-x"
+            aria-label="Dismiss"
+            onClick={() => setShowWelcome(false)}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+      )}
+
       <div className="grid cols-2-1">
         <div className="card">
-          <div className="card-title">Weekly hours</div>
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>
-            Open a day to add its time slots, then save it. A day can have more
-            than one slot. Days you leave unset are days off.
+          {/*
+            Slot length sits in the card's header, as a pill, rather than as a
+            labelled select under the seven days. It applies to the whole week
+            — not to the day you happen to have open — and at the bottom of the
+            list it read like a property of the last row.
+          */}
+          <div className="tg-card-head">
+            <div className="tg-card-head-text">
+              <div className="card-title">Weekly hours</div>
+              <div className="tg-sub">
+                Open a day to add its time slots, then save it. A day can have
+                more than one slot. Days left unset are days off.
+              </div>
+            </div>
+            <label className="tg-slotlen" title="How long one appointment is">
+              <Timer size={15} aria-hidden />
+              <span className="sr-only">Length of one appointment slot</span>
+              <select
+                value={slotMins}
+                disabled={!canEdit}
+                onChange={(e) => setSlotMins(Number(e.target.value))}
+              >
+                {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+                  <option key={m} value={m}>{m} min slots</option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden />
+            </label>
           </div>
 
           <DayAvailabilityEditor
@@ -114,19 +178,6 @@ export default function DoctorSchedule() {
             onNotify={(m) => toast.success(m)}
           />
 
-          <label className="form-label" style={{ marginTop: 14 }}>
-            Each appointment slot
-          </label>
-          <select
-            className="select"
-            value={slotMins}
-            disabled={!canEdit}
-            onChange={(e) => setSlotMins(Number(e.target.value))}
-          >
-            {[5, 10, 15, 20, 30, 45, 60].map((m) => (
-              <option key={m} value={m}>{m} min</option>
-            ))}
-          </select>
           <span className="hint">
             Saving a day here records it; the schedule reaches the server when
             you press Save schedule.
@@ -135,7 +186,7 @@ export default function DoctorSchedule() {
 
         <div className="stack">
           <LeavePanel doctorId={id} canEdit={canEdit} />
-          <SlotPreview doctorId={id} />
+          <SlotPreview doctorId={id} canBook={canBook} />
         </div>
       </div>
     </>
@@ -343,8 +394,23 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
   );
 }
 
-function SlotPreview({ doctorId }: { doctorId: string }) {
+/**
+ * The day's slots as the patient would see them — and a way to take one.
+ *
+ * It was a read-only preview: the doctor could see that 11:30 was free on
+ * Thursday but had no way to give it to the patient on the phone, because the
+ * only booking in the panel is Walk-in, which is always "now". Tapping a free
+ * slot here opens the same registration form with that date and time attached,
+ * held to the grid (see `WalkInModal`'s `slot` prop) so a slot someone took in
+ * the meantime is refused rather than quietly moved.
+ *
+ * Booked and past slots stay inert: a past slot cannot be given away, and a
+ * booked one belongs to a patient — double-booking is a walk-in's job, from
+ * the appointment list, where the doctor can see who is already in it.
+ */
+function SlotPreview({ doctorId, canBook }: { doctorId: string; canBook: boolean }) {
   const [date, setDate] = useState('');
+  const [booking, setBooking] = useState<Slot | null>(null);
   const slotsQ = useQuery({
     queryKey: ['slots', doctorId, date],
     queryFn: () => schedulesApi.slots(doctorId, date),
@@ -367,13 +433,40 @@ function SlotPreview({ doctorId }: { doctorId: string }) {
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
             {slotsQ.data.slots.length} slots
+            {canBook && ' · tap a free slot to book it'}
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(66px, 1fr))', gap: 6 }}>
-            {slotsQ.data.slots.map((s) => (
-              <div key={s.start_time} className={`slot slot-${s.status}`}>{s.start_time}</div>
-            ))}
+            {slotsQ.data.slots.map((s) => {
+              const pickable = canBook && s.status === 'available';
+              return (
+                <button
+                  key={s.start_time}
+                  type="button"
+                  className={`slot slot-${s.status}${pickable ? ' slot-pickable' : ''}`}
+                  disabled={!pickable}
+                  title={
+                    pickable
+                      ? `Book ${s.start_time}`
+                      : s.status === 'booked'
+                        ? 'Already booked'
+                        : undefined
+                  }
+                  onClick={() => pickable && setBooking(s)}
+                >
+                  {s.start_time}
+                </button>
+              );
+            })}
           </div>
         </>
+      )}
+
+      {booking && (
+        <WalkInModal
+          doctorId={doctorId}
+          slot={{ date, startTime: booking.start_time }}
+          onClose={() => setBooking(null)}
+        />
       )}
     </div>
   );

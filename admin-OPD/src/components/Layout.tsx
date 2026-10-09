@@ -207,10 +207,12 @@ export default function Layout() {
 /**
  * One sidebar row.
  *
- * Lit for the item's own path and for anything nested under it, so Settings
- * stays lit while a tab is open and Appointments stays lit inside a
- * consultation. `NavLink`'s own `end`-less matching would light `/` for
- * everything, which is why the check is written out.
+ * Lit for the item's own path, for anything nested under it, and for the extra
+ * prefixes the item claims (`match` in `nav.ts`) — so Settings stays lit
+ * while a tab is open and Appointments stays lit inside a consultation, which
+ * lives under `/appointments/:id` rather than under its own `/dashboard`.
+ * `NavLink`'s own `end`-less matching would light `/` for everything, which is
+ * why the check is written out.
  */
 function NavItemLink({
   item,
@@ -224,8 +226,9 @@ function NavItemLink({
 }) {
   const location = useLocation();
   const Icon = NAV_ICON[item.icon];
-  const active =
-    location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+  const covers = (prefix: string) =>
+    location.pathname === prefix || location.pathname.startsWith(prefix + '/');
+  const active = covers(item.path) || (item.match?.some(covers) ?? false);
   return (
     <NavLink
       to={item.path}

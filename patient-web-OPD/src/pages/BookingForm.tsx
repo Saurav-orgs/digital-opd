@@ -16,6 +16,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { api } from '../api';
+import { AppConfig } from '../config';
 import { patientApi, patientTokenStore } from '../patientApi';
 import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
@@ -33,7 +34,7 @@ interface StagedReport {
   file: File;
 }
 
-const MAX_REPORT_BYTES = 5 * 1024 * 1024;
+const MAX_REPORT_BYTES = AppConfig.maxUploadMb * 1024 * 1024;
 const ACCEPTED_TYPES = 'image/png,image/jpeg,image/webp,application/pdf';
 
 /**
@@ -150,7 +151,7 @@ const ReportsStep: React.FC<{
       {warning && <div className="error-text" style={{ marginTop: 10 }}>{warning}</div>}
 
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-        JPG, PNG, WebP or PDF · up to 5 MB each.
+        PDF or image (JPG, PNG, WebP) · up to {AppConfig.maxUploadMb} MB each.
       </div>
     </div>
   );
@@ -273,7 +274,9 @@ export const BookingForm: React.FC = () => {
     if (!draftFile) return { error: 'Please choose a file to add.' };
     if (!draftTitle.trim()) return { error: 'Please enter a title for this report.' };
     if (draftFile.size > MAX_REPORT_BYTES) {
-      return { error: 'That file is larger than 5 MB. Please choose a smaller one.' };
+      return {
+        error: `That file is larger than ${AppConfig.maxUploadMb} MB. Please choose a smaller one.`,
+      };
     }
 
     const list = [

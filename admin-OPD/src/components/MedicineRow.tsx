@@ -8,7 +8,7 @@ import type { MedicineField } from '../lib/prescriptionValidation';
  * One medicine line, shared by the prescription editor and the template
  * editor.
  *
- * Five columns — Medicine · Dose · Frequency · Duration · Remark — matching
+ * Five columns — Medicine · Dose · Frequency · Duration · Remarks — matching
  * the design's own grid, with the labels in a header row above rather than
  * repeated on every line. Below 768px the grid collapses and each row becomes
  * a card, which is where the labels come back as placeholders.
@@ -36,7 +36,9 @@ export function MedicineHead() {
       <div>Dose</div>
       <div>Frequency</div>
       <div>Duration</div>
-      <div>Remark</div>
+      {/* "(if any)" because it is the one column a doctor can leave empty —
+          the grid gave no hint of that, so it read as a field to fill. */}
+      <div>Remarks (if any)</div>
       <div />
     </div>
   );
@@ -198,7 +200,7 @@ export function MedicineRow({
         <input
           className="input"
           placeholder="After food"
-          aria-label="Remark"
+          aria-label="Remarks (if any)"
           disabled={!canEdit}
           value={row.instructions ?? ''}
           onChange={(e) => onChange({ instructions: e.target.value })}

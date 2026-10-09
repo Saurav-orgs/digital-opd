@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { LoginResponse } from '../api/types';
 import { LogoFull } from '../components/Brand';
 import { Field } from '../components/ui';
-import { LetterheadPreview } from '../components/Letterhead';
+import { HEADER_BEST_W, LetterheadHeaderPicker, LetterheadPreview } from '../components/Letterhead';
 
 /**
  * First sign-in for a doctor whose account was created and paid for on the
@@ -144,6 +144,16 @@ const COUNCILS = [
 
 const OTHER = '\u0000other';
 
+/**
+ * The placeholder name sign-up leaves on an account: the mailbox, left of the
+ * @. Mirrors `SubscriptionsService.startSignup`, which sets it because an
+ * activity row reading "opened an account" needs *something* to name the
+ * person before they have told us who they are.
+ */
+function mailboxName(email: string): string {
+  return email.split('@')[0];
+}
+
 export default function DoctorSetupPage() {
   const navigate = useNavigate();
   const { user, setSession } = useAuth();
@@ -153,11 +163,26 @@ export default function DoctorSetupPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    name: user?.name ?? '',
+    /*
+     * Blank, not the account's `name`.
+     *
+     * Sign-up has no name field — the pricing page asks for an email, a
+     * password and a mobile — so `users.name` is the mailbox left of the @,
+     * set to keep activity rows readable until a real name arrives. Prefilling
+     * the wizard with it put "sweta.rao91" in the doctor's name box, which is
+     * worse than an empty field: it has to be noticed before it can be
+     * cleared, and it is the name that would print on every prescription. A
+     * name that is anything other than that stub is a real one and is kept.
+     */
+    name: user && user.name !== mailboxName(user.email) ? user.name : '',
     license_number: '',
     medical_council: '',
     specialization: '',
-    contact_mobile: '',
+    // The number from the sign-up that paid for this account — the same
+    // person typed it minutes ago on the pricing page, and being asked for it
+    // twice is the first thing the product does wrong. Editable: it is a
+    // suggestion, not a fact about the practice.
+    contact_mobile: user?.mobile ?? '',
     clinic_name: '',
     clinic_phone: '',
     clinic_address: '',
@@ -185,6 +210,9 @@ export default function DoctorSetupPage() {
   // The pad header is optional here — the Letterhead screen takes it just as
   // well — but a doctor who has the file to hand should not come back for it.
   const [header, setHeader] = useState<File | null>(null);
+  // Width ÷ height of the strip the picker handed back, so the preview below
+  // is the shape that will print rather than a fixed box.
+  const [headerRatio, setHeaderRatio] = useState<number | null>(null);
   const [headerPreview, setHeaderPreview] = useState<string | null>(null);
   useEffect(() => {
     if (!header) return setHeaderPreview(null);
@@ -242,7 +270,16 @@ export default function DoctorSetupPage() {
        * back here.
        */
       if (res.accessToken && res.user) setSession(res as LoginResponse);
-      navigate('/dashboard', { replace: true });
+      /*
+       * To My time slots, not the dashboard.
+       *
+       * The account now has a week of default hours (Mon–Sat, 10–2) and a
+       * live booking page, which is the one thing a new clinic is most likely
+       * to want different — and the dashboard, which opens empty on day one,
+       * says nothing about either. `fresh` makes that screen explain itself
+       * once; leaving the hours as they are is a legitimate answer.
+       */
+      navigate('/time-slots', { replace: true, state: { fresh: true } });
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not save your profile.'),
   });
@@ -563,17 +600,25 @@ export default function DoctorSetupPage() {
                 answers above, or the doctor's own printed pad. Picking "Upload
                 my own" opens the file dialog straight away; the preview below
                 then shows whichever one is chosen, as it will print.
+
+                The shared picker, not a file input of its own. This screen
+                used to take `image/*` and send the file as it came, so a
+                doctor holding the printer's PDF of their pad — which is what
+                a printer hands over — had nothing to upload, and a photo of
+                the whole sheet was sent as the header. The picker accepts a
+                PDF, draws page 1, and lets the doctor mark where the header
+                ends; `/register` and the Letterhead screen have worked this
+                way since the cropper landed.
               */}
-              <input
-                ref={headerRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setHeader(f);
-                  if (f) setLhMode('custom');
+              <LetterheadHeaderPicker
+                inputRef={headerRef}
+                onPick={(file, ratio) => {
+                  setHeader(file);
+                  setHeaderRatio(ratio);
+                  setLhMode('custom');
+                  setError(null);
                 }}
+                onReject={(problem) => setError(problem)}
               />
               <div className="lh-choice">
                 <button
@@ -602,7 +647,7 @@ export default function DoctorSetupPage() {
                     <b>
                       Upload my own <small>· optional</small>
                     </b>
-                    <span>PNG or JPG · A4</span>
+                    <span>A scan, photo or the printer's PDF</span>
                   </div>
                 </button>
               </div>
@@ -615,7 +660,7 @@ export default function DoctorSetupPage() {
                     className="btn btn-sm btn-ghost"
                     onClick={() => {
                       setHeader(null);
-                      if (headerRef.current) headerRef.current.value = '';
+                      setHeaderRatio(null);
                     }}
                   >
                     Remove
@@ -623,8 +668,16 @@ export default function DoctorSetupPage() {
                 </div>
               )}
 
+              {lhMode === 'custom' && !header && (
+                <p className="muted" style={{ fontSize: 12.5, margin: '10px 0 0' }}>
+                  Upload your pad — a scan, a photo or the printer's PDF — and mark
+                  where the header ends. At least {HEADER_BEST_W} px wide prints best.
+                </p>
+              )}
+
               <LetterheadPreview
                 headerUrl={lhMode === 'custom' ? headerPreview : null}
+                headerRatio={headerRatio}
                 doctorName={form.name || 'Your name'}
                 qualifications={qualifications || 'Qualifications'}
                 specialization={form.specialization || form.clinic_name || ''}

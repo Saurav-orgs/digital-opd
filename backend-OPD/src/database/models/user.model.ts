@@ -65,6 +65,16 @@ export class User extends Model<User> {
   subscription_required: boolean;
 
   /**
+   * The mobile number given at sign-up, before there was a doctor profile to
+   * hold one. It pre-fills the first-login wizard — the same person typed it
+   * minutes earlier — and stands in at a later checkout. Null for an account
+   * opened any other way; `doctors.contact_mobile` is the number of record
+   * once the practice exists.
+   */
+  @Column({ type: DataType.STRING(10), allowNull: true })
+  mobile: string | null;
+
+  /**
    * The super admin who opened this account from the Doctors screen, if it
    * was not opened by the doctor paying for it. It is what lets the sign-in
    * screen say "ask us for a plan" rather than "finish paying" to somebody

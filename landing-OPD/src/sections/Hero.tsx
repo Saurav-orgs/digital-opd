@@ -1,4 +1,4 @@
-import { ArrowRight, Check, FileCheck2, Mail } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Check, FileCheck2, Mail } from 'lucide-react';
 import { supportMailto } from '../config';
 
 const TRUST = ['No per-booking fees', 'Phone, tablet & desktop', 'Pay online, start today'];
@@ -73,7 +73,24 @@ export function Hero() {
             >
               <Mail size={18} /> Email us
             </a>
+            {/*
+              The patient's way in, beside the doctor's two rather than up in
+              the header: this row is where a first-time reader's eye stops,
+              and the tinted fill marks it as the one button on the page that
+              is not addressed to a doctor.
+            */}
+            <a href="#book" className="btn btn-outline btn-lg btn-book">
+              <CalendarCheck size={18} /> Book a Doctor
+            </a>
           </div>
+          {/*
+            Who that third button is for. The headline, the lead and the other
+            two buttons are all addressed to a doctor, so a patient needs one
+            line that says they are in the right place.
+          */}
+          <p className="hero-patient">
+            Patients: find your doctor, pick a slot — no app, no account.
+          </p>
           <ul className="trust-list" aria-label="Highlights">
             {TRUST.map((t) => (
               <li key={t}>

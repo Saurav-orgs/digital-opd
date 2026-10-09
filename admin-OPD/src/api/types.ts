@@ -21,6 +21,12 @@ export interface AuthUser {
   /** The role's name, shown beside the user's own on the header. */
   roleName: string | null;
   doctorId: string | null;
+  /**
+   * The number typed on the pricing page at sign-up, kept so the first-login
+   * wizard does not ask the same person for it again. Null for an account
+   * opened another way.
+   */
+  mobile: string | null;
   /** Opened through the paid sign-up — a null doctorId then means "profile not set up yet". */
   subscriptionRequired: boolean;
   /**

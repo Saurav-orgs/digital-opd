@@ -346,6 +346,9 @@ svg {
   font-weight: 500;
   padding: 8px 12px;
   border-radius: 8px;
+  /* "How it works" broke over two lines once the actions grew, which is half
+     of why the old booking link looked like body text rather than a link. */
+  white-space: nowrap;
   transition: background-color 160ms var(--ease);
 }
 .site-nav-link:hover {
@@ -393,6 +396,20 @@ svg {
   margin-top: 16px;
 }
 
+/* The patient's action, told apart from the doctor's two by fill rather than
+   by size: tinted so it is found at a glance, outlined so it does not outrank
+   "Start your practice", which is what this page is for. */
+.btn-book {
+  background: var(--sage-tint);
+  border-color: var(--sage-line);
+  color: var(--teal-dark);
+  white-space: nowrap;
+}
+.btn-book:hover {
+  background: #fff;
+  border-color: var(--teal);
+}
+
 @media (min-width: 900px) {
   .site-nav {
     display: flex;
@@ -407,7 +424,6 @@ svg {
     display: none;
   }
 }
-
 /* ── Hero ───────────────────────────────────────────────────── */
 .hero {
   padding: 40px 0 48px;
@@ -454,6 +470,13 @@ svg {
 }
 .trust-list svg {
   color: var(--teal);
+}
+/* Says who the third button in the row is for; the button is the action, so
+   this is a caption, not a link. */
+.hero-patient {
+  margin: -6px 0 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
 }
 
 /* CSS-only product sketch — the doctor booking page. */

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Copy, Pencil, Plus, X } from 'lucide-react';
 
 /** One session on one day. */
 export interface DaySlot {
@@ -45,7 +46,13 @@ export function prettyTime(t: string) {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
-/** One line per session: "10:00 AM – 2:00 PM", "5:00 PM – 7:00 PM". */
+/**
+ * One entry per session: "10:00 AM – 2:00 PM", "5:00 PM – 7:00 PM".
+ *
+ * The row head joins them with a comma, as the design has it. They were
+ * stacked one per line for a while; the design team's own screen puts a split
+ * day on a single line, and the rows are tighter for it.
+ */
 export function summariseSlots(slots: DaySlot[]): string[] {
   return slots.map((s) => `${prettyTime(s.start_time)} – ${prettyTime(s.end_time)}`);
 }
@@ -179,7 +186,14 @@ export function DayAvailabilityEditor({
         const isOpen = openDay === day;
         const isSet = !!timings[day]?.saved;
         return (
-          <div key={day} className={`day-row ${isOpen ? 'open' : ''} ${isSet ? 'is-set' : ''}`}>
+          <div key={day} className={`day-row ${isOpen ? 'open' : ''}`}>
+            {/*
+              The whole head opens the day, with the Edit button drawn inside
+              it rather than beside it — a button inside a button is invalid
+              markup, and splitting them would leave the row's own 44px of
+              target doing nothing. It reads and behaves as the design's Edit
+              button; the row around it is a larger target for the same thing.
+            */}
             <button
               type="button"
               className="day-row-head"
@@ -187,78 +201,78 @@ export function DayAvailabilityEditor({
               aria-expanded={isOpen}
             >
               <span className="dr-day">{DAY_LABEL[day]}</span>
-              {/* A split day reads as two lines — morning above evening — rather
-                  than one comma-joined line the eye has to parse. */}
+              {/*
+                While a day is open its own draft is the summary, even before
+                it is saved — editing a saved day flips it to unsaved, and the
+                head then read "Day off" over a form full of times. Only the
+                colour distinguishes the two: a day that is really set is in
+                full ink, a draft stays muted until Save.
+              */}
               <span className={`dr-summary ${isSet ? 'set' : ''}`}>
-                {isSet
-                  ? summariseSlots(e.slots).map((line) => (
-                      <span key={line} className="dr-session">{line}</span>
-                    ))
+                {isSet || isOpen
+                  ? summariseSlots(e.slots).join(', ')
                   : 'Day off — no timings set'}
               </span>
-              {/*
-                "Saved" described the state and offered nothing; doctors came
-                here to change their hours and read it as a label, so the only
-                way in that looked like one was the chevron at the far right.
-                It is the same button either way — the whole row head opens the
-                day — so this just says what a click does.
-              */}
-              {isSet && <span className="dr-badge">{isOpen ? 'Close' : 'Edit'}</span>}
-              <span className="dr-chevron" aria-hidden>
-                ⌄
+              <span className="dr-edit">
+                <Pencil size={13} aria-hidden /> Edit
               </span>
             </button>
 
             {isOpen && (
               <div className="day-row-body">
                 {e.slots.map((slot, i) => (
-                  <div key={i} className="slot-row">
-                    <div className="time-row">
-                      <div>
-                        <label className="form-label">Opens at</label>
-                        <input
-                          className="input"
-                          type="time"
-                          value={slot.start_time}
-                          onChange={(ev) => setSlot(day, i, 'start_time', ev.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label">Closes at</label>
-                        <input
-                          className="input"
-                          type="time"
-                          value={slot.end_time}
-                          onChange={(ev) => setSlot(day, i, 'end_time', ev.target.value)}
-                        />
-                      </div>
+                  <div key={i} className="tg-slot">
+                    <div className="tg-field">
+                      <label className="form-label">Opens</label>
+                      <input
+                        className="input"
+                        type="time"
+                        value={slot.start_time}
+                        onChange={(ev) => setSlot(day, i, 'start_time', ev.target.value)}
+                      />
                     </div>
-                    {e.slots.length > 1 && (
-                      <button
-                        type="button"
-                        className="slot-remove-link"
-                        onClick={() => removeSlot(day, i)}
-                      >
-                        Remove this slot
-                      </button>
-                    )}
+                    <div className="tg-field">
+                      <label className="form-label">Closes</label>
+                      <input
+                        className="input"
+                        type="time"
+                        value={slot.end_time}
+                        onChange={(ev) => setSlot(day, i, 'end_time', ev.target.value)}
+                      />
+                    </div>
+                    {/* Rendered even when there is only one session, disabled:
+                        the column has to hold its width or the two time fields
+                        jump sideways as sessions come and go. */}
+                    <button
+                      type="button"
+                      className="tg-rm"
+                      disabled={e.slots.length < 2}
+                      title="Remove this time slot"
+                      aria-label={`Remove time slot ${i + 1} on ${DAY_LABEL[day]}`}
+                      onClick={() => removeSlot(day, i)}
+                    >
+                      <X size={16} aria-hidden />
+                    </button>
                   </div>
                 ))}
 
-                <button type="button" className="add-slot-toggle" onClick={() => addSlot(day)}>
-                  + Add another time slot
-                </button>
-
                 {errors[day] && <div className="field-err">{errors[day]}</div>}
 
-                <button type="button" className="tg-save" onClick={() => saveDay(day)}>
-                  Save {DAY_LABEL[day]}
-                </button>
-
-                <div className="day-row-links">
-                  <button type="button" className="dr-apply-all" onClick={() => applyToAll(day)}>
-                    Apply these timings to all days
+                <div className="tg-acts">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => saveDay(day)}
+                  >
+                    Save {DAY_LABEL[day]}
                   </button>
+                  <button type="button" className="btn btn-sm" onClick={() => applyToAll(day)}>
+                    <Copy size={14} aria-hidden /> Apply to all days
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => addSlot(day)}>
+                    <Plus size={14} aria-hidden /> Add another time slot
+                  </button>
+                  <span className="tg-acts-gap" />
                   {isSet && (
                     <button type="button" className="dr-clear" onClick={() => clearDay(day)}>
                       Clear {DAY_LABEL[day]}

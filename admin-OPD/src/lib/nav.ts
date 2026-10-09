@@ -70,6 +70,17 @@ export interface NavItem {
    * showing it again is a one-line change.
    */
   hidden?: boolean;
+  /**
+   * Extra route prefixes that belong to this item, for the lit state.
+   *
+   * `Layout` lights an item for its own `path` and anything nested under it,
+   * which covers `/patients` → `/patients/:id` but not a screen that lives
+   * somewhere else entirely: Appointments is `/dashboard`, and opening a visit
+   * goes to `/appointments/:id`, so the sidebar used to go dark on the screen
+   * the doctor spends the consultation on — nothing lit, and no way to tell
+   * where you were.
+   */
+  match?: string[];
 }
 
 /**
@@ -93,7 +104,16 @@ export const NAV: NavItem[] = [
   // One screen, one permission: the counters on top of the list are not a
   // separate ability, so the item and the API behind it both ask for
   // `appointments`. `dashboard` stays in the catalogue for old grants only.
-  { path: '/dashboard', label: 'Appointments', module: 'appointments', icon: 'calendar', doctorOnly: true, section: 'main' },
+  {
+    path: '/dashboard',
+    label: 'Appointments',
+    module: 'appointments',
+    icon: 'calendar',
+    doctorOnly: true,
+    section: 'main',
+    // The visit and the patient-history screen behind it are this item's own.
+    match: ['/appointments'],
+  },
   // Everyone this clinic has seen, as people rather than as appointments.
   { path: '/patients', label: 'Patients', module: 'patients', icon: 'people', doctorOnly: true, section: 'main' },
   // The doctor's own consulting hours. It lived at /profile/schedule, two
