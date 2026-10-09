@@ -12,6 +12,7 @@ import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
 import { useCollapsible } from '../lib/collapsePreference';
 import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
 import { TOPBAR_SLOT_ID } from './TopbarPortal';
+import { ConfirmDialog } from './ui';
 import { Clock3, Settings, Zap } from 'lucide-react';
 import {
   BlockIcon,
@@ -67,6 +68,16 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /*
+   * Sign out is asked about first.
+   *
+   * It sits at the foot of a rail the doctor is otherwise tapping all day to
+   * get between screens, and at 72px wide it is an unlabelled ⏻ one slot
+   * below Settings. Pressing it mid-consultation drops the prescription being
+   * written and costs a re-login at the desk — and nothing on the way out
+   * said so.
+   */
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [collapsed, toggleCollapsed] = useCollapsible('sidebar', true);
   const railMode = useMediaQuery(RAIL);
 
@@ -164,10 +175,7 @@ export default function Layout() {
         <button
           className="btn btn-logout"
           title={expanded ? undefined : 'Sign out'}
-          onClick={() => {
-            logout();
-            navigate('/login');
-          }}
+          onClick={() => setConfirmingLogout(true)}
         >
           <span className="nav-label">Sign out</span>
           <span className="logout-short" aria-hidden>
@@ -200,6 +208,26 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {confirmingLogout && (
+        <ConfirmDialog
+          title="Sign out?"
+          message={
+            <>
+              Anything you have not saved on this screen is lost, and you will
+              need your password to get back in.
+            </>
+          }
+          confirmLabel="Sign out"
+          cancelLabel="Stay signed in"
+          onConfirm={() => {
+            setConfirmingLogout(false);
+            logout();
+            navigate('/login');
+          }}
+          onCancel={() => setConfirmingLogout(false)}
+        />
+      )}
     </div>
   );
 }
