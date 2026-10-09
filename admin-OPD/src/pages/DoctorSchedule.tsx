@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { CalendarClock, ChevronDown, Timer, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { schedulesApi } from '../api/endpoints';
 import type { ScheduleEntry, Slot } from '../api/types';
@@ -27,6 +29,16 @@ const hhmm = (t: string) => t.slice(0, 5);
  */
 export default function DoctorSchedule() {
   const { can, user, isDoctor } = useAuth();
+  /*
+   * Set by the first-login wizard, which sends the doctor straight here. The
+   * account already has a week of hours by then — nobody chose them, so the
+   * screen says so once rather than letting a doctor find out from a patient
+   * who booked 10:30 on a day the clinic is shut.
+   */
+  const location = useLocation();
+  const [showWelcome, setShowWelcome] = useState(
+    !!(location.state as { fresh?: boolean } | null)?.fresh,
+  );
   const toast = useToast();
   const canEdit = can('opd_schedules', 'update');
   // Booking a slot off the grid is a booking, not a schedule edit — a role
@@ -104,12 +116,60 @@ export default function DoctorSchedule() {
         </div>
       </div>
 
+      {showWelcome && (
+        <div className="tg-welcome" role="status">
+          <span className="tg-welcome-icon" aria-hidden>
+            <CalendarClock size={18} />
+          </span>
+          <div>
+            <b>Your clinic is open Monday to Saturday, 10:00 AM – 2:00 PM.</b>
+            <span>
+              That is our starting point, not your decision — change any day
+              below and press Save schedule. Leave it as it is and patients can
+              book these hours straight away.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="tg-welcome-x"
+            aria-label="Dismiss"
+            onClick={() => setShowWelcome(false)}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+      )}
+
       <div className="grid cols-2-1">
         <div className="card">
-          <div className="card-title">Weekly hours</div>
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>
-            Open a day to add its time slots, then save it. A day can have more
-            than one slot. Days you leave unset are days off.
+          {/*
+            Slot length sits in the card's header, as a pill, rather than as a
+            labelled select under the seven days. It applies to the whole week
+            — not to the day you happen to have open — and at the bottom of the
+            list it read like a property of the last row.
+          */}
+          <div className="tg-card-head">
+            <div className="tg-card-head-text">
+              <div className="card-title">Weekly hours</div>
+              <div className="tg-sub">
+                Open a day to add its time slots, then save it. A day can have
+                more than one slot. Days left unset are days off.
+              </div>
+            </div>
+            <label className="tg-slotlen" title="How long one appointment is">
+              <Timer size={15} aria-hidden />
+              <span className="sr-only">Length of one appointment slot</span>
+              <select
+                value={slotMins}
+                disabled={!canEdit}
+                onChange={(e) => setSlotMins(Number(e.target.value))}
+              >
+                {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+                  <option key={m} value={m}>{m} min slots</option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden />
+            </label>
           </div>
 
           <DayAvailabilityEditor
@@ -118,19 +178,6 @@ export default function DoctorSchedule() {
             onNotify={(m) => toast.success(m)}
           />
 
-          <label className="form-label" style={{ marginTop: 14 }}>
-            Each appointment slot
-          </label>
-          <select
-            className="select"
-            value={slotMins}
-            disabled={!canEdit}
-            onChange={(e) => setSlotMins(Number(e.target.value))}
-          >
-            {[5, 10, 15, 20, 30, 45, 60].map((m) => (
-              <option key={m} value={m}>{m} min</option>
-            ))}
-          </select>
           <span className="hint">
             Saving a day here records it; the schedule reaches the server when
             you press Save schedule.

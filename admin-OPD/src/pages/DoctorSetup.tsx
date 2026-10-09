@@ -144,6 +144,16 @@ const COUNCILS = [
 
 const OTHER = '\u0000other';
 
+/**
+ * The placeholder name sign-up leaves on an account: the mailbox, left of the
+ * @. Mirrors `SubscriptionsService.startSignup`, which sets it because an
+ * activity row reading "opened an account" needs *something* to name the
+ * person before they have told us who they are.
+ */
+function mailboxName(email: string): string {
+  return email.split('@')[0];
+}
+
 export default function DoctorSetupPage() {
   const navigate = useNavigate();
   const { user, setSession } = useAuth();
@@ -153,11 +163,26 @@ export default function DoctorSetupPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    name: user?.name ?? '',
+    /*
+     * Blank, not the account's `name`.
+     *
+     * Sign-up has no name field — the pricing page asks for an email, a
+     * password and a mobile — so `users.name` is the mailbox left of the @,
+     * set to keep activity rows readable until a real name arrives. Prefilling
+     * the wizard with it put "sweta.rao91" in the doctor's name box, which is
+     * worse than an empty field: it has to be noticed before it can be
+     * cleared, and it is the name that would print on every prescription. A
+     * name that is anything other than that stub is a real one and is kept.
+     */
+    name: user && user.name !== mailboxName(user.email) ? user.name : '',
     license_number: '',
     medical_council: '',
     specialization: '',
-    contact_mobile: '',
+    // The number from the sign-up that paid for this account — the same
+    // person typed it minutes ago on the pricing page, and being asked for it
+    // twice is the first thing the product does wrong. Editable: it is a
+    // suggestion, not a fact about the practice.
+    contact_mobile: user?.mobile ?? '',
     clinic_name: '',
     clinic_phone: '',
     clinic_address: '',
@@ -245,7 +270,16 @@ export default function DoctorSetupPage() {
        * back here.
        */
       if (res.accessToken && res.user) setSession(res as LoginResponse);
-      navigate('/dashboard', { replace: true });
+      /*
+       * To My time slots, not the dashboard.
+       *
+       * The account now has a week of default hours (Mon–Sat, 10–2) and a
+       * live booking page, which is the one thing a new clinic is most likely
+       * to want different — and the dashboard, which opens empty on day one,
+       * says nothing about either. `fresh` makes that screen explain itself
+       * once; leaving the hours as they are is a legitimate answer.
+       */
+      navigate('/time-slots', { replace: true, state: { fresh: true } });
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not save your profile.'),
   });

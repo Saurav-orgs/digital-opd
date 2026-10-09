@@ -4192,27 +4192,137 @@ tr.appt-row.upcoming td:first-child {
    One row per weekday, opened one at a time. A row that has never been saved
    says so in words rather than leaving the doctor to infer it from an empty
    summary — "day off" is a real answer, not a missing one. */
+/* Shown once, when the first-login wizard lands the doctor here: the hours
+   below were seeded, not chosen, and that is worth one sentence. */
+.tg-welcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 13px 14px;
+  border: var(--hairline);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-card);
+  background: var(--primary-tint);
+}
+.tg-welcome-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+.tg-welcome b {
+  display: block;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.tg-welcome span:not(.tg-welcome-icon) {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.tg-welcome-x {
+  flex-shrink: 0;
+  border: 0;
+  background: none;
+  padding: 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tg-welcome-x:hover {
+  color: var(--text);
+}
+
+/* ── Weekly hours (My time slots, and the same editor at sign-up) ──
+   The design team's screen: a slot-length pill in the card header, one row
+   per day with its sessions on a single line and an Edit button at the right,
+   and an open day showing Opens / Closes pairs over one row of actions. */
+.tg-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tg-card-head-text {
+  min-width: 0;
+}
+.tg-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+/* A pill that is really a select: the native arrow is dropped for the
+   chevron, so it matches the chips elsewhere instead of looking like a form
+   control that wandered into a header. */
+.tg-slotlen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tg-slotlen select {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.tg-slotlen select:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+.tg-slotlen:focus-within {
+  border-color: var(--primary);
+}
+
+/* The list runs to its container's own edge. Inside a card that means
+   cancelling the card's 18px padding; inside the sign-up form's `.box`, whose
+   left edge carries a coloured rail, it means not bleeding at all — hence the
+   variable rather than a hardcoded -18px that would look wrong in one of the
+   two places this editor is used. */
 .day-rows {
+  --tg-bleed: 0px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+  margin: 14px calc(-1 * var(--tg-bleed)) 0;
+  border-top: var(--hairline);
 }
+.card .day-rows {
+  --tg-bleed: 18px;
+}
+.day-row-body {
+  padding-left: var(--tg-bleed);
+  padding-right: var(--tg-bleed);
+}
+/* List rows, not seven little cards: the design runs them edge to edge inside
+   the card with a hairline between, so the open day reads as the list opening
+   rather than as a box growing. */
 .day-row {
-  border: 1.5px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--card);
+  border-bottom: var(--hairline);
 }
-.day-row.is-set {
-  border-color: var(--sage-line);
+/* Only the head is tinted while the day is open — the fields below stay on
+   the card's own white, as the design has them. */
+.day-row.open .day-row-head {
+  background: var(--surface-2);
 }
 .day-row-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 13px var(--tg-bleed);
   background: none;
   border: 0;
   font-family: inherit;
@@ -4220,134 +4330,102 @@ tr.appt-row.upcoming td:first-child {
   cursor: pointer;
 }
 .dr-day {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--text);
-  flex: 0 0 38px;
+  flex: 0 0 34px;
 }
 .dr-summary {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .dr-summary.set {
-  color: var(--teal-dark);
+  color: var(--text);
+}
+/* Looks like the button the design draws, but is a span: the whole row head is
+   already the button, and the larger target is worth keeping. */
+.dr-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: 12px;
   font-weight: 600;
-  white-space: normal;
+  color: var(--text);
 }
-.dr-session {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Reads as the action it is — the row head is a button and this is the part
-   of it the eye lands on — rather than as a status pill. */
-.dr-badge {
-  flex-shrink: 0;
-  font-size: 9.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 2px 7px;
-  border-radius: 7px;
-  background: var(--sage-tint);
-  color: var(--teal-dark);
-  border: 1px solid var(--teal-dark);
-  cursor: pointer;
-}
-.day-row-head:hover .dr-badge {
-  background: var(--teal-dark);
-  color: #fff;
-}
-.dr-chevron {
-  flex-shrink: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-  transition: transform 0.15s ease;
-}
-.day-row.open .dr-chevron {
-  transform: rotate(180deg);
+.day-row-head:hover .dr-edit {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
 }
 .day-row-body {
-  padding: 4px 14px 14px;
-  border-top: 1px dashed var(--border);
+  padding-top: 2px;
+  padding-bottom: 14px;
 }
-.slot-row {
+/* Opens | Closes | remove. The remove column keeps its width whether or not
+   the button is live, so a second session does not shift the first one. */
+.tg-slot {
+  display: grid;
+  grid-template-columns: 1fr 1fr 28px;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tg-field {
+  min-width: 0;
+}
+.tg-rm {
+  height: 38px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-control);
+}
+.tg-rm:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.tg-rm:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.tg-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 12px;
 }
-.slot-remove-link {
-  margin-top: 6px;
+.tg-acts-gap {
+  flex: 1;
+}
+.dr-clear {
   background: none;
   border: 0;
   padding: 0;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--danger);
-  cursor: pointer;
-}
-/* Adding a medicine and adding a slot are the same gesture in the design:
-   a dashed bar the width of what it adds to. Neutral edge, accent ink — it
-   was amber, which read as a warning about a button that only adds a row. */
-.add-slot-toggle {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  padding: 9px;
-  border-radius: var(--radius-control);
-  border: 1.5px dashed var(--border-strong);
-  background: transparent;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent-text);
-  cursor: pointer;
-}
-.tg-save {
-  display: block;
-  width: 100%;
-  margin-top: 10px;
-  padding: 11px;
-  border-radius: var(--radius-control);
-  border: 0;
-  background: var(--teal);
-  color: #fff;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.tg-save:hover {
-  background: var(--teal-dark);
-}
-.day-row-links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-}
-.dr-apply-all,
-.dr-clear {
-  background: none;
-  border: 0;
-  padding: 0;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.dr-apply-all {
-  color: var(--accent-text);
-}
-.dr-clear {
   color: var(--danger);
+  cursor: pointer;
 }
+@media (max-width: 520px) {
+  /* At phone width the three actions wrap; Clear goes under them rather than
+     squeezing onto a line of its own half-width. */
+  .tg-acts-gap {
+    flex-basis: 100%;
+  }
+}
+
 .form-notice {
   margin: 10px 0 0;
   font-size: 12px;

@@ -187,6 +187,10 @@ export class SubscriptionsService {
       doctor_id: null,
       is_active: true,
       subscription_required: true,
+      // Kept, not just passed to the gateway: the first-login wizard asks for
+      // the same number a few minutes later, and asking twice is the kind of
+      // thing a doctor notices on day one.
+      mobile: dto.mobile,
     } as any);
     await this.auth.markEmailVerificationUsed(email);
 
@@ -242,7 +246,11 @@ export class SubscriptionsService {
     plan: Plan,
     dto: CreateAccountDto,
   ): Promise<CheckoutSession> {
-    await user.update({ password_hash: await bcrypt.hash(dto.password, 10) } as any);
+    await user.update({
+      password_hash: await bcrypt.hash(dto.password, 10),
+      // Starting over may be starting over with a different number.
+      mobile: dto.mobile,
+    } as any);
     await this.auth.markEmailVerificationUsed(user.email);
 
     this.activity.record({
@@ -923,6 +931,9 @@ export class SubscriptionsService {
    */
   private async checkoutPhone(user: User, given?: string): Promise<string> {
     if (given && MOBILE_RE.test(given)) return given;
+    // The number from sign-up, for an account whose practice does not exist
+    // yet — it is the doctor's own, and better than the placeholder.
+    if (user.mobile && MOBILE_RE.test(user.mobile)) return user.mobile;
     if (user.doctor_id) {
       const doctor = await this.doctorModel.findByPk(user.doctor_id, {
         attributes: ['id', 'contact_mobile', 'clinic_phone'],

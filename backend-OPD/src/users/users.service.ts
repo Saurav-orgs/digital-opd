@@ -363,6 +363,7 @@ export class UsersService {
       roleId: user.role_id,
       roleName: user.role?.name ?? null,
       doctorId: user.doctor_id,
+      mobile: user.mobile ?? null,
       subscriptionRequired: !!user.subscription_required,
       mustChangePassword: !!user.must_change_password,
       permissions,
