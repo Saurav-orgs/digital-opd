@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { Logo } from './Brand';
 import { AppConfig } from '../config';
 
