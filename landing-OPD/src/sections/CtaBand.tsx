@@ -8,7 +8,7 @@ export function CtaBand() {
         <div className="cta-band reveal">
           <div>
             <h2>Your booking page can be live today.</h2>
-            <p>Pick a plan, verify your email, pay online — then set up your practice on first login.</p>
+            <p>Pick a plan, verify your email and pay online. Set up your practice on first login.</p>
           </div>
           <div className="cta-band-actions">
             <a href="#pricing" className="btn btn-inverse btn-lg">

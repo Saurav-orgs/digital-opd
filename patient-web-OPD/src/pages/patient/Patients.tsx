@@ -39,7 +39,7 @@ export const Patients: React.FC = () => {
       </h2>
       <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: 14 }}>
         Each person has their own visits, reports and summaries. Two people may
-        share a name — they are still separate records.
+        share a name and still be separate records.
       </p>
 
       {error && (

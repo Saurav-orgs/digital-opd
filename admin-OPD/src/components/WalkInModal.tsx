@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, patientProfilesApi } from '../api/endpoints';
 import type { PatientProfile } from '../api/types';
@@ -54,6 +54,7 @@ function describe(p: PatientProfile): string {
 export function WalkInModal({
   doctorId,
   initialMobile,
+  initialProfileId,
   slot,
   onClose,
 }: {
@@ -64,6 +65,17 @@ export function WalkInModal({
    * already knows.
    */
   initialMobile?: string;
+  /**
+   * The patient the desk actually pointed at, when it pointed at one.
+   *
+   * Book was pressed on *Priya's* row and the form opened on the picker with
+   * every patient on that number unchosen — including the four siblings who
+   * share it — so the desk had to find her again and could land on the wrong
+   * one. With this her card is already the selection and the form opens on
+   * the only question left, the reason for the visit. Needs `initialMobile`:
+   * the booking is still made against the number.
+   */
+  initialProfileId?: string;
   /**
    * A slot the doctor picked off the grid on My time slots, instead of "now".
    *
@@ -81,13 +93,17 @@ export function WalkInModal({
   const toast = useToast();
 
   const prefill = /^[6-9]\d{9}$/.test(initialMobile ?? '') ? initialMobile! : '';
-  const [step, setStep] = useState<Step>(prefill ? 'patients' : 'phone');
+  // Only meaningful alongside the number it belongs to.
+  const prefillId = prefill ? (initialProfileId ?? '') : '';
+  const [step, setStep] = useState<Step>(
+    prefillId ? 'reason' : prefill ? 'patients' : 'phone',
+  );
   const [mobile, setMobile] = useState(prefill);
   // The number actually looked up — not the box, which may have moved on.
   const [lookedUp, setLookedUp] = useState(prefill);
   // '' = a new patient. Never a name lookup: an identical name on the same
   // number is a different person unless the front desk picks their card.
-  const [profileId, setProfileId] = useState('');
+  const [profileId, setProfileId] = useState(prefillId);
   const [name, setName] = useState('');
   const [gender, setGender] = useState('female');
   const [dob, setDob] = useState('');
@@ -102,11 +118,6 @@ export function WalkInModal({
   });
   const patients = patientsQ.data ?? [];
   const atLimit = patients.length >= MAX_PATIENTS_PER_NUMBER;
-
-  // A different number means a different family; drop any stale selection.
-  useEffect(() => {
-    setProfileId('');
-  }, [lookedUp]);
 
   const selected = patients.find((p) => p.id === profileId) ?? null;
 
@@ -155,6 +166,12 @@ export function WalkInModal({
 
   const lookUp = () => {
     if (!mobileValid) return;
+    // A different number means a different family, so any selection carried
+    // over from the last one — including the row this was opened from — goes.
+    // Done here rather than in an effect on `lookedUp`, which is the only
+    // other place the number changes and which would also have wiped the
+    // preselection on the very first render.
+    setProfileId('');
     setLookedUp(mobile.trim());
     setStep('patients');
   };
@@ -180,9 +197,13 @@ export function WalkInModal({
           run: () => book.mutate(),
         };
       default:
+        // Opened straight onto this step from a patient's row, the card is
+        // chosen but not yet fetched: the name and gender the booking sends
+        // come off it, so pressing Book before it arrives would register a
+        // nameless patient.
         return {
           label: book.isPending ? 'Booking…' : 'Book appointment',
-          disabled: book.isPending,
+          disabled: book.isPending || !selected,
           run: () => book.mutate(),
         };
     }
@@ -339,26 +360,46 @@ export function WalkInModal({
         </>
       )}
 
-      {step === 'reason' && selected && (
+      {step === 'reason' && (
         <>
+          {/* "Someone else on this number" rather than "Back": reached from a
+              patient's row this is the first step, so there is nothing behind
+              it — but switching to a sibling is still what the picker is for. */}
           <button className="wizard-back" onClick={() => setStep('patients')}>
-            ← Back
+            ← Someone else on this number
           </button>
-          <div className="wizard-summary">
-            <b>{selected.name}</b>
-            <br />
-            {[describe(selected), lookedUp].filter(Boolean).join(' · ')}
-          </div>
 
-          <Field label="Reason for visit">
-            <input
-              className="input"
-              autoFocus
-              placeholder="e.g. Fever, follow-up, routine checkup"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Field>
+          {selected ? (
+            <>
+              <div className="wizard-summary">
+                <b>{selected.name}</b>
+                <br />
+                {[describe(selected), lookedUp].filter(Boolean).join(' · ')}
+              </div>
+
+              <Field label="Reason for visit">
+                <input
+                  className="input"
+                  autoFocus
+                  placeholder="e.g. Fever, follow-up, routine checkup"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
+            </>
+          ) : patientsQ.isFetching ? (
+            /* `isFetching`, not `isLoading`: a number the desk booked earlier
+               in the session has a cached list, and a patient registered
+               since is only in the refetch. */
+            <p className="muted" style={{ fontSize: 13 }}>Loading this patient…</p>
+          ) : (
+            /* The row was opened, then the patient was removed from the number
+               — or the number has no such patient. Nothing to book against. */
+            <p className="muted" style={{ fontSize: 13 }}>
+              That patient is no longer registered on {lookedUp}. Pick someone
+              else on this number above.
+            </p>
+          )}
         </>
       )}
 

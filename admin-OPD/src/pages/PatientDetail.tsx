@@ -399,6 +399,10 @@ export default function PatientDetailPage() {
         <WalkInModal
           doctorId={doctorId}
           initialMobile={mobile}
+          /* This screen is one patient. Book here means book *them*, not
+             whoever else on the number the desk picks next — the family card
+             below is where a sibling is booked from. */
+          initialProfileId={p.id}
           onClose={() => setBookOpen(false)}
         />
       )}

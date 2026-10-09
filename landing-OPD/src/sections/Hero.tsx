@@ -55,7 +55,7 @@ export function Hero() {
         <div className="hero-copy">
           <span className="eyebrow">OPD software for Indian clinics</span>
           <h1>
-            Run your OPD from booking to prescription —{' '}
+            Run your OPD from booking to prescription,{' '}
             <span className="accent">in one place.</span>
           </h1>
           <p className="lead">
@@ -68,7 +68,7 @@ export function Hero() {
               See plans <ArrowRight size={18} />
             </a>
             <a
-              href={supportMailto('Demo request — myDigitalOPD')}
+              href={supportMailto('Demo request for myDigitalOPD')}
               className="btn btn-outline btn-lg"
             >
               <Mail size={18} /> Email us
@@ -89,7 +89,7 @@ export function Hero() {
             line that says they are in the right place.
           */}
           <p className="hero-patient">
-            Patients: find your doctor, pick a slot — no app, no account.
+            Patients: find your doctor and pick a slot. No app, no account.
           </p>
           <ul className="trust-list" aria-label="Highlights">
             {TRUST.map((t) => (

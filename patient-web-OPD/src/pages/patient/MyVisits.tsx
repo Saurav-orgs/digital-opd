@@ -54,7 +54,7 @@ const MyVisitsForPatient: React.FC = () => {
         My Visits
       </h2>
       <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-        {selected!.name}'s consultation history — doctor's notes and prescriptions from
+        {selected!.name}'s consultation history: doctor's notes and prescriptions from
         each visit. You can upload reports to a visit until the doctor marks it done.
       </p>
 
@@ -343,7 +343,7 @@ const PrescriptionCard: React.FC<{ prescription: IssuedPrescription }> = ({
               ]
                 .filter(Boolean)
                 .join(' · ')}
-              {m.instructions ? ` — ${m.instructions}` : ''}
+              {m.instructions ? ` · ${m.instructions}` : ''}
             </div>
           </li>
         ))}
@@ -540,7 +540,7 @@ const ReportUploader: React.FC<{ appointmentId: string }> = ({ appointmentId }) 
         <input
           type="text"
           className="form-input"
-          placeholder="e.g. Blood Test — CBC"
+          placeholder="e.g. Blood Test (CBC)"
           value={title}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => setTitle(e.target.value)}

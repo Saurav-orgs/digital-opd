@@ -307,7 +307,7 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
   return (
     <div className="card">
       <div className="card-title">Vacation &amp; leave</div>
-      <div className="time-row">
+      <div className="leave-dates">
         <div>
           <label className="form-label">From</label>
           <input

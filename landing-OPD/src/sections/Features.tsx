@@ -21,7 +21,7 @@ const FEATURES: Feature[] = [
     tone: 'teal',
     title: 'Booking that mirrors your real schedule',
     body:
-      'Slots come from your session timings — split sessions like 11–2 and 5–7 included. Leave days blocked, past slots greyed, walk-ins at the desk.',
+      'Slots come from your session timings, including split sessions like 11–2 and 5–7. Leave days blocked, past slots greyed, walk-ins at the desk.',
   },
   {
     icon: Mic,
@@ -49,7 +49,7 @@ const FEATURES: Feature[] = [
     tone: 'teal',
     title: 'One mobile number, the whole family',
     body:
-      'Up to five patient profiles per number — self, spouse, child, parent — each with their own visits, reports and prescriptions.',
+      'Up to five patient profiles per number (self, spouse, child, parent), each with their own visits, reports and prescriptions.',
   },
   {
     icon: ShieldCheck,
@@ -68,7 +68,7 @@ export function Features() {
           <span className="eyebrow">Everything an OPD needs</span>
           <h2>Built around the consultation, not around billing.</h2>
           <p>
-            Every feature sits on the screen a doctor actually lives on — the
+            Every feature sits on the screen a doctor actually lives on: the
             day's appointments and the visit in front of you.
           </p>
         </div>

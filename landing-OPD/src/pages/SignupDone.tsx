@@ -138,7 +138,7 @@ export default function SignupDone() {
             </p>
             <ol className="next-steps">
               <li>Sign in with the email and password you just chose.</li>
-              <li>Tell us about your practice — name, registration number, timings.</li>
+              <li>Tell us about your practice: name, registration number, timings.</li>
               <li>Share your booking link and start taking appointments.</li>
             </ol>
             {redirecting && (
@@ -172,7 +172,7 @@ export default function SignupDone() {
             <h1>We could not confirm your payment</h1>
             <p className="muted">
               {error ?? 'The server could not be reached.'} If money left your
-              account, nothing is lost — your plan activates once the payment
+              account, nothing is lost. Your plan activates once the payment
               settles, and you can sign in then. You can also try again.
             </p>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -196,7 +196,7 @@ export default function SignupDone() {
             <h1>Still waiting on your bank</h1>
             <p className="muted">
               The payment has not been confirmed yet. If money left your account it will show up
-              shortly and we will email you — you do not need to pay again.
+              shortly and we will email you. You do not need to pay again.
             </p>
             <button
               type="button"

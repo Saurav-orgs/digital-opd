@@ -51,7 +51,17 @@ export default function PatientsPage() {
   const [form, setForm] = useState<{ editing?: ClinicPatient | null; mobile?: string } | null>(
     null,
   );
-  const [bookMobile, setBookMobile] = useState<string | null>(null);
+  /*
+   * Who the booking is for, not just which number it is on.
+   *
+   * It used to be the number alone, so Book on Priya's row opened the modal
+   * with all five patients registered to that phone unchosen — the desk had
+   * to find her again in a list of her own family, and could pick a sibling
+   * by mistake. The row knows which person was pressed; it says so.
+   */
+  const [booking, setBooking] = useState<{ mobile: string; profileId?: string } | null>(
+    null,
+  );
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['patients'],
@@ -119,7 +129,7 @@ export default function PatientsPage() {
   const exportCsv = () => downloadPatientsCsv(rows, blockedMobiles);
 
   const openProfile = (id: string) => navigate(`/patients/${id}`);
-  const book = (mobile: string) => setBookMobile(mobile);
+  const book = (p: ClinicPatient) => setBooking({ mobile: p.mobile, profileId: p.id });
 
   return (
     <>
@@ -232,7 +242,7 @@ export default function PatientsPage() {
                 p={p}
                 blocked={isBlocked(p.mobile)}
                 onOpen={() => openProfile(p.id)}
-                onBook={() => book(p.mobile)}
+                onBook={() => book(p)}
               />
             ))}
           </div>
@@ -293,17 +303,20 @@ export default function PatientsPage() {
           onClose={() => setForm(null)}
           onSaved={(saved, alsoBook) => {
             setForm(null);
-            if (alsoBook) setBookMobile(saved.mobile);
+            // Just registered, so they are who the booking is for — no reason
+            // to make the desk pick them out of the family again.
+            if (alsoBook) setBooking({ mobile: saved.mobile, profileId: saved.id });
             else openProfile(saved.id);
           }}
         />
       )}
 
-      {bookMobile && doctorId && (
+      {booking && doctorId && (
         <WalkInModal
           doctorId={doctorId}
-          initialMobile={bookMobile}
-          onClose={() => setBookMobile(null)}
+          initialMobile={booking.mobile}
+          initialProfileId={booking.profileId}
+          onClose={() => setBooking(null)}
         />
       )}
     </>
@@ -375,7 +388,7 @@ function PatientRow({
   p: ClinicPatient;
   blocked: boolean;
   onOpen: (id: string) => void;
-  onBook: (mobile: string) => void;
+  onBook: (p: ClinicPatient) => void;
 }) {
   return (
     <tr className="clickable-row" onClick={() => onOpen(p.id)}>
@@ -397,7 +410,7 @@ function PatientRow({
       </td>
       <td className="muted">{p.visit_count}</td>
       <td>
-        <RowActions onBook={() => onBook(p.mobile)} onOpen={() => onOpen(p.id)} />
+        <RowActions onBook={() => onBook(p)} onOpen={() => onOpen(p.id)} />
       </td>
     </tr>
   );
@@ -415,7 +428,7 @@ function FamilyGroup({
   members: ClinicPatient[];
   blocked: boolean;
   onOpen: (id: string) => void;
-  onBook: (mobile: string) => void;
+  onBook: (p: ClinicPatient) => void;
   onAddFamily?: () => void;
 }) {
   return (
