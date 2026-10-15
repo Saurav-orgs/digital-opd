@@ -6891,6 +6891,15 @@ tr.family-head td {
   .page-head.title-in-topbar h1 {
     display: none;
   }
+  /*
+     …and with the title gone, the Clinic QR moved into that bar and the
+     walk-in button floating, the head has nothing left in it. It measured 0px
+     tall and still spent its 18px bottom margin, which is the white band that
+     appeared above the date filter. An empty row keeps no spacing.
+  */
+  .page-head.title-in-topbar {
+    margin-bottom: 0;
+  }
 }
 
 /* ── An icon button in the top bar ──────────────────────────────
