@@ -2560,39 +2560,6 @@ h4 {
   }
 }
 
-/* The profile's three counts — visits, prescriptions, reports — as the way
-   into each. Three across on a phone, which is what fits without shrinking
-   the number to the size of its label. */
-.profile-tiles {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-.profile-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 14px 8px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--card, #fff);
-  text-decoration: none;
-  color: inherit;
-}
-.profile-tile:hover {
-  border-color: var(--primary);
-}
-.profile-tile-num {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--text);
-}
-.profile-tile-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 /* The date-or-age field needs more room than a third of a row: its two
    choices sit side by side and were wrapping inside a column shared with
    Gender and Relation. It takes the whole line on a phone and behaves as an
@@ -2606,3 +2573,4 @@ h4 {
     flex: 1 1 100%;
   }
 }
+

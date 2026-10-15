@@ -20,7 +20,8 @@ import { patientApi, patientTokenStore } from '../patientApi';
 import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
 import { DobField } from '../components/DobField';
-import { validateDobOrAge } from '../lib/dob';
+import { dobFromAge } from '../lib/dob';
+import { validateDob } from '../lib/dob';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
 import { OtpCodeField } from '../components/OtpCodeField';
@@ -213,8 +214,8 @@ export const BookingForm: React.FC = () => {
   const otp = useWhatsAppOtp(mobile.trim());
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
-  const [age, setAge] = useState('');
-  // The record stores a date of birth; `age` is the fallback answer. See DobField.
+  // One value: the date of birth. An age typed into the field is stored as
+  // the date it implies — see `DobField`.
   const [dob, setDob] = useState('');
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('');
@@ -325,7 +326,7 @@ export const BookingForm: React.FC = () => {
     check(name.trim().length >= 2, setNameError, 'Please enter the patient’s full name.');
     check(!!gender, setGenderError, 'Please select a gender.');
 
-    const dobError = validateDobOrAge(dob, age, true);
+    const dobError = validateDob(dob, true);
     check(!dobError, setAgeError, dobError ?? '');
 
     check(city.trim().length >= 2, setCityError, 'Please enter the city.');
@@ -445,9 +446,9 @@ export const BookingForm: React.FC = () => {
     setProfileId(p.id);
     setName(p.name);
     setGender(p.gender ?? '');
-    setDob(p.dob ?? '');
-    // Only when the record has no date — otherwise the date is the answer.
-    setAge(p.dob ? '' : p.last_age != null ? String(p.last_age) : '');
+    // The record's own date, or the date their last known age implies — so a
+    // returning patient is never asked for this twice.
+    setDob(p.dob ?? (p.last_age != null ? (dobFromAge(p.last_age) ?? '') : ''));
     setCity(p.city ?? '');
     setStateName(p.state ?? '');
     setPincode(p.pincode ?? '');
@@ -463,7 +464,6 @@ export const BookingForm: React.FC = () => {
     setProfileId(null);
     setName('');
     setGender('');
-    setAge('');
     setDob('');
     setCity('');
     setStateName('');
@@ -586,7 +586,7 @@ export const BookingForm: React.FC = () => {
         patientName: name.trim(),
         patientMobile: mobile.trim(),
         patientGender: gender,
-        ...(dob ? { patientDob: dob } : { patientAge: Number(age) }),
+        patientDob: dob,
         patientCity: city.trim(),
         patientState: stateName.trim(),
         patientPincode: pincode.trim(),
@@ -946,14 +946,9 @@ export const BookingForm: React.FC = () => {
 
               <div className="dob-col">
                 <DobField
-                  dob={dob}
-                  age={age}
-                  onChangeDob={(v) => {
+                  value={dob}
+                  onChange={(v) => {
                     setDob(v);
-                    setAgeError(null);
-                  }}
-                  onChangeAge={(v) => {
-                    setAge(v);
                     setAgeError(null);
                   }}
                   required

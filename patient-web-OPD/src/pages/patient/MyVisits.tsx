@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Stethoscope, FileText, Bell, Upload, Pill, Download } from 'lucide-react';
 import { patientApi } from '../../patientApi';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import {
   ApiException,
   type PatientVisit,
@@ -21,15 +22,14 @@ export const MyVisits: React.FC = () => (
 );
 
 const MyVisitsForPatient: React.FC = () => {
+  const { doctor } = useDoctorCtx();
   const { selected } = usePatientAuth();
   const queryClient = useQueryClient();
   const profileId = selected!.id;
 
   const { data: visits, isLoading, error, refetch } = useQuery({
-    // Null, not the doctor whose link they arrived on: this is the
-    // patient's own history, and it is theirs across every clinic.
-    queryKey: ['patient-visits', profileId, null],
-    queryFn: () => patientApi.myVisits(profileId),
+    queryKey: ['patient-visits', profileId, doctor?.id],
+    queryFn: () => patientApi.myVisits(profileId, doctor?.id),
   });
 
   /**

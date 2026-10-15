@@ -694,17 +694,37 @@ img {
     min-height: 40px;
     padding-block: 0;
   }
-  /* The count keeps its natural width — squeezed to an equal share its label
-     wrapped onto two lines and the number fell off the end. The switch beside
-     it takes the rest of the line, which pushes the search, reset and export
-     onto one of their own. */
+  /*
+     Three rows, in the order the doctor uses them: which day, how many, then
+     find one.
+
+       ‹  Today  [ Thu, 15 October ▾ ]  ›
+       Total booked  6                    [↺]
+       [ search, full width            ]
+
+     Each row is claimed with a 100% basis rather than left to wrap where it
+     happens to fit, so the order holds whatever the count reads or how wide
+     the date is. Search keeps its box here instead of collapsing to an icon
+     (`expanded` on the field) — the row is its own, so there is no width to
+     buy back.
+  */
   .dash-controls .kpi-total {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     white-space: nowrap;
   }
-  .dash-controls .kpi-toggle {
-    flex: 1 1 auto;
-    min-width: 150px;
+  .dash-controls .reset-filters-btn {
+    order: 1;
+  }
+  .dash-controls .kpi-total {
+    order: 1;
+  }
+  .dash-controls .dash-search {
+    order: 2;
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+  .dash-controls .dash-search .input {
+    height: 40px;
   }
   /* Export fills what the two icon buttons leave on the last line. */
   .dash-controls .dash-export {
@@ -3965,6 +3985,19 @@ tr.appt-row.upcoming td:first-child {
     padding: 10px 12px;
     gap: 10px;
   }
+  /*
+     The foot carries its own padding for the same reason the row above does:
+     the card itself has none at this width. Written with vertical padding
+     only, its badge sat at x=15 against a card edge of 14 — one pixel inside
+     the border, on top of the status rail `::before` draws there — and Done
+     ended at 360 against an edge of 361. The horizontal values match
+     `.appt-card-main` exactly, so the badge and the avatar above it share a
+     left edge.
+  */
+  .appt-card-foot {
+    padding: 10px 12px 11px;
+    margin-top: 0;
+  }
   .appt-avatar {
     width: 34px;
     height: 34px;
@@ -6778,5 +6811,117 @@ tr.family-head td {
 @media (max-width: 640px) {
   .ivf-inv-row {
     grid-template-columns: minmax(90px, 1.2fr) 1fr 1.3fr;
+  }
+}
+
+/* ── The appointment card's actions (phone layout) ──────────────
+   The overflow menu beside the time, and the status / number / Done line
+   under the patient. Both were table columns the card layout had dropped, so
+   a doctor on a phone could neither mark a visit seen nor cancel one without
+   opening it first — the two things done most between patients. */
+.appt-card-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.appt-card-menu {
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
+  line-height: 1;
+}
+.appt-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: var(--hairline);
+}
+/* The number sits between the badge and the action, and gives up its width
+   first — a long name has already had its say on the line above. */
+.appt-card-foot .appt-phone {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appt-card-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--state-success, var(--teal-dark));
+  cursor: pointer;
+}
+.appt-card-done:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+.appt-card-done:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Off the phone layout ───────────────────────────────────────
+   `.hide-on-phone` sits on the control itself rather than being listed here
+   by class, so a screen that hides something says so where the button is
+   written.
+
+   At the end of the file on purpose: `.btn` and `.kpi-toggle` both set their
+   own `display`, at the same specificity as a single class, so a rule written
+   higher up lost to them on source order and the buttons stayed on screen.
+   Raising the specificity instead would have meant naming every control this
+   could ever apply to. */
+@media (max-width: 767px) {
+  .hide-on-phone {
+    display: none;
+  }
+  /* The top bar already says "Appointments" directly above this one. */
+  .page-head.title-in-topbar h1 {
+    display: none;
+  }
+}
+
+/* ── An icon button in the top bar ──────────────────────────────
+   For the one or two page actions worth reaching from any scroll position on
+   a phone, the bar being sticky. The appointment list puts its booking QR
+   here: with the page title hidden, that button was the only thing left on
+   its row and was spending a band of height on itself. */
+.topbar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.topbar-icon-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+/* The counterpart of `.hide-on-phone`, and at the end for the same reason:
+   `.btn` and friends set their own `display` further up the file. */
+.show-on-phone {
+  display: none;
+}
+@media (max-width: 767px) {
+  .show-on-phone {
+    display: inline-flex;
   }
 }

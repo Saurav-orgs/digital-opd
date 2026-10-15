@@ -13,7 +13,6 @@ import { ForgotPassword } from './pages/patient/ForgotPassword';
 import { MyVisits } from './pages/patient/MyVisits';
 import { Reports } from './pages/patient/Reports';
 import { Patients } from './pages/patient/Patients';
-import { Profile } from './pages/patient/Profile';
 import { Notifications } from './pages/patient/Notifications';
 import { Footer } from './components/Footer';
 import { AccountNav } from './components/AccountNav';
@@ -87,14 +86,6 @@ export default function App() {
                   element={
                     <RequirePatientAuth>
                       <Notifications />
-                    </RequirePatientAuth>
-                  }
-                />
-                <Route
-                  path="/profile"
-                  element={
-                    <RequirePatientAuth>
-                      <Profile />
                     </RequirePatientAuth>
                   }
                 />

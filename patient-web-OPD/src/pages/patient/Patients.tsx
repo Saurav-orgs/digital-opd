@@ -6,7 +6,7 @@ import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { ApiException, type PatientDetailsInput, type PatientProfile } from '../../types';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { DobField } from '../../components/DobField';
-import { validateDobOrAge } from '../../lib/dob';
+import { validateDob } from '../../lib/dob';
 
 /**
  * Everyone registered on this number — add, switch to, or remove.
@@ -186,7 +186,6 @@ const AddPatientForm: React.FC<{
     pincode: '',
   });
   // Held as typed and converted on submit, so the field can be empty.
-  const [age, setAge] = useState('');
   const [dob, setDob] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -197,7 +196,7 @@ const AddPatientForm: React.FC<{
     mutationFn: () =>
       patientApi.addProfile({
         ...form,
-        ...(dob ? { dob } : age.trim() ? { age: Number(age) } : {}),
+        ...(dob ? { dob } : {}),
       }),
     onSuccess: (created) => onAdded(created.id),
     onError: (err) =>
@@ -208,7 +207,7 @@ const AddPatientForm: React.FC<{
     e.preventDefault();
     setError(null);
     if (form.name.trim().length < 2) return setError('Please enter the patient’s name.');
-    const dobError = validateDobOrAge(dob, age, false);
+    const dobError = validateDob(dob, false);
     if (dobError) return setError(dobError);
     if (form.city.trim().length < 2) return setError('Please enter the city.');
     if (form.state.trim().length < 2) return setError('Please enter the state.');
@@ -251,14 +250,9 @@ const AddPatientForm: React.FC<{
         </div>
         <div className="dob-col">
           <DobField
-            dob={dob}
-            age={age}
-            onChangeDob={(v) => {
+            value={dob}
+            onChange={(v) => {
               setDob(v);
-              setError(null);
-            }}
-            onChangeAge={(v) => {
-              setAge(v);
               setError(null);
             }}
           />

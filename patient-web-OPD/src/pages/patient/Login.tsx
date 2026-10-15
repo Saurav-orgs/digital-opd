@@ -9,7 +9,7 @@ import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException } from '../../types';
 import { DobField } from '../../components/DobField';
-import { validateDobOrAge } from '../../lib/dob';
+import { validateDob } from '../../lib/dob';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -31,7 +31,6 @@ export const Login: React.FC = () => {
   // the same set booking and the front desk collect.
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
-  const [age, setAge] = useState('');
   const [dob, setDob] = useState('');
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('');
@@ -88,7 +87,7 @@ export const Login: React.FC = () => {
       if (password !== confirmPassword) return setError('Passwords do not match.');
       if (name.trim().length < 2) return setError('Please enter the patient’s name.');
       if (!gender) return setError('Please select a gender.');
-      const dobError = validateDobOrAge(dob, age, true);
+      const dobError = validateDob(dob, true);
       if (dobError) return setError(dobError);
       if (city.trim().length < 2) return setError('Please enter the city.');
       if (stateName.trim().length < 2) return setError('Please enter the state.');
@@ -107,7 +106,7 @@ export const Login: React.FC = () => {
           {
             name: name.trim(),
             gender,
-            ...(dob ? { dob } : { age: Number(age) }),
+            dob,
             city: city.trim(),
             state: stateName.trim(),
             pincode: pincode.trim(),
@@ -249,14 +248,9 @@ export const Login: React.FC = () => {
                 </div>
                 <div className="dob-col">
                   <DobField
-                    dob={dob}
-                    age={age}
-                    onChangeDob={(v) => {
+                    value={dob}
+                    onChange={(v) => {
                       setDob(v);
-                      setError(null);
-                    }}
-                    onChangeAge={(v) => {
-                      setAge(v);
                       setError(null);
                     }}
                     required

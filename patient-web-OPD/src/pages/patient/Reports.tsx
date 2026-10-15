@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, ExternalLink } from 'lucide-react';
 import { patientApi } from '../../patientApi';
+import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
 import { PatientSwitcher, RequirePatient } from '../../components/PatientSwitcher';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
@@ -13,14 +14,13 @@ export const Reports: React.FC = () => (
 );
 
 const ReportsForPatient: React.FC = () => {
+  const { doctor } = useDoctorCtx();
   const { selected } = usePatientAuth();
   const profileId = selected!.id;
 
   const { data: reports, isLoading, error, refetch } = useQuery({
-    // Null, not the doctor whose link they arrived on: this is the
-    // patient's own history, and it is theirs across every clinic.
-    queryKey: ['patient-reports', profileId, null],
-    queryFn: () => patientApi.myReports(profileId),
+    queryKey: ['patient-reports', profileId, doctor?.id],
+    queryFn: () => patientApi.myReports(profileId, doctor?.id),
   });
 
   return (

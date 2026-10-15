@@ -64,6 +64,44 @@ export function needsReschedule(a: Appointment): boolean {
   return a.on_leave && isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a);
 }
 
+/**
+ * Where a visit belongs in the queue: 0 is the top.
+ *
+ * The day was in time order and nothing else, so a 09:00 the doctor finished
+ * two hours ago sat above the 11:20 patient actually waiting. What a doctor
+ * opens this screen for is "who is next", and that is never someone already
+ * seen — so the unfinished come first and the finished sink, each still in
+ * time order within its own group.
+ *
+ * A no-show rides with the missed rather than the pending: nobody arrived, so
+ * there is nothing left to do about it, which is what the bottom half means.
+ */
+function queueRank(a: Appointment): number {
+  if (isCancelled(a)) return 3;
+  if (a.consultation_status === 'done') return 2;
+  if (isMissed(a) || a.consultation_status === 'no_show') return 1;
+  return 0;
+}
+
+/**
+ * The day as a queue — pending, then missed, then completed, then cancelled,
+ * each by start time.
+ *
+ * Sorted here rather than by the API: the same endpoint feeds the patient's
+ * own screens, where "what happened, in order" is the right answer and this
+ * would be the wrong one.
+ *
+ * Note what this gives the "Next" badge for free. Next is defined as the first
+ * still-pending visit in the list, so once the pending are at the top in time
+ * order, the earliest pending one is both next *and* first on screen — the
+ * badge and the position cannot disagree, because neither is told separately.
+ */
+export function byQueueOrder(a: Appointment, b: Appointment): number {
+  const rank = queueRank(a) - queueRank(b);
+  if (rank !== 0) return rank;
+  return (a.start_time ?? '').localeCompare(b.start_time ?? '');
+}
+
 /** The status value to render for a visit, `missed` standing in for a stale
  *  `pending`. Only a display value — never send it back to the server. */
 export function displayStatus(a: Appointment): string {

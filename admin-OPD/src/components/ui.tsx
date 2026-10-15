@@ -351,11 +351,20 @@ export function SearchField({
   onChange,
   placeholder,
   label = 'Search',
+  expanded,
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder: string;
   label?: string;
+  /**
+   * Skip the phone's collapse-to-an-icon and stay a box.
+   *
+   * Collapsing exists to buy width on a crowded toolbar. A screen that gives
+   * search a line of its own has the width already, and an icon that has to
+   * be pressed before it will take a name is a step for nothing.
+   */
+  expanded?: boolean;
 }) {
   const phone = useMediaQuery(PHONE);
   const [open, setOpen] = useState(false);
@@ -373,7 +382,7 @@ export function SearchField({
     if (!phone) setOpen(false);
   }, [phone]);
 
-  const collapsed = phone && !open;
+  const collapsed = phone && !expanded && !open;
 
   return (
     <div className={`dash-search ${collapsed ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}>
@@ -401,7 +410,7 @@ export function SearchField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
-          {phone && (
+          {phone && !expanded && (
             <button
               type="button"
               className="dash-search-close"
