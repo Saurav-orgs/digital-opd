@@ -49,6 +49,18 @@ export class PatientDetailsDto {
   })
   gender?: string;
 
+  /**
+   * What every registration form now asks for. `age` is still accepted for the
+   * patient who does not know their birth date; the service keeps it as an
+   * estimated `dob` so the record ages on its own either way.
+   */
+  @ApiPropertyOptional({ example: '1992-04-17' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'Please enter a valid date of birth (YYYY-MM-DD).',
+  })
+  dob?: string;
+
   @ApiPropertyOptional({ example: 34 })
   @IsOptional()
   @IsInt({ message: 'Age must be a whole number.' })
@@ -63,11 +75,12 @@ export class PatientDetailsDto {
   })
   relation?: string;
 
-  @ApiProperty({ example: 'H-42, Nehru Nagar' })
+  /** Optional since 14 Oct 2026 — see `CreateAppointmentDto.patient_address`. */
+  @ApiPropertyOptional({ example: 'H-42, Nehru Nagar' })
+  @IsOptional()
   @IsString()
-  @MinLength(3, { message: 'Please enter the address.' })
   @MaxLength(300)
-  address_line: string;
+  address_line?: string;
 
   @ApiProperty({ example: 'Indore' })
   @IsString()

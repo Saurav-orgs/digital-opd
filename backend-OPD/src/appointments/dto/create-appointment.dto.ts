@@ -66,18 +66,41 @@ export class CreateAppointmentDto {
   })
   patient_gender: string;
 
-  @ApiProperty({ example: 34, minimum: 0, maximum: 120 })
+  /**
+   * Date of birth is what the booking form now asks for, so the age on the
+   * record cannot go stale between visits — the same move the front desk made
+   * in `WalkInAppointmentDto`. `patient_age` is still accepted because a
+   * patient who only knows their age says so, and the server keeps that as an
+   * estimated date of birth (`dobFromAge`). The appointment row stores an age
+   * snapshot either way.
+   */
+  @ApiPropertyOptional({ example: '1992-04-17' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'Please enter a valid date of birth (YYYY-MM-DD).',
+  })
+  patient_dob?: string;
+
+  @ApiPropertyOptional({ example: 34, minimum: 0, maximum: 120 })
+  @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'Please enter a valid age.' })
   @Min(0, { message: 'Please enter a valid age.' })
   @Max(120, { message: 'Please enter a valid age.' })
-  patient_age: number;
+  patient_age?: number;
 
-  @ApiProperty({ example: 'H-42, Nehru Nagar' })
+  /**
+   * Optional since 14 Oct 2026: the booking form stopped asking for a house
+   * and street. City, state and PIN are what the clinic actually uses, and a
+   * line the patient had to invent to get past a required field was worth
+   * less than the one it cost them. Walk-ins the desk types still carry one,
+   * and so does every booking made before this.
+   */
+  @ApiPropertyOptional({ example: 'H-42, Nehru Nagar' })
+  @IsOptional()
   @IsString()
-  @MinLength(3, { message: 'Please enter the address.' })
   @MaxLength(300)
-  patient_address: string;
+  patient_address?: string;
 
   @ApiProperty({ example: 'Indore' })
   @IsString()

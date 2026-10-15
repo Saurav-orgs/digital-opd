@@ -413,8 +413,27 @@ img {
 .sidebar .spacer {
   flex: 1;
 }
-.btn-logout .logout-short {
-  display: none;
+/* Sign out is a `.nav-item.is-bottom` wearing a different colour — see the
+   comment on the button. Geometry comes from those two classes so it cannot
+   drift away from Settings again; only the tint is set here. */
+.btn-logout {
+  /* Settings lives inside `.sidebar-items`, which is inset 8px; Sign out is a
+     direct child of the sidebar so that a long menu scrolling cannot carry it
+     off screen. The inset is matched by hand — that gap is most of why the two
+     did not line up. */
+  margin: 4px 8px 0;
+  border: 1px solid rgba(226, 75, 74, 0.25);
+  background: #fdecec;
+  color: var(--state-error);
+  font-family: inherit;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+.btn-logout:hover,
+.btn-logout.is-bottom:hover {
+  background: var(--state-error);
+  border-color: var(--state-error);
+  color: #ffffff;
 }
 
 .main {
@@ -542,23 +561,6 @@ img {
   .sidebar.expanded .nav-label {
     display: inline;
   }
-  /* Collapsed, the button is an icon in the rail's own column, not a bar
-     stretched across it. */
-  .btn-logout {
-    width: 40px;
-    margin: 0 auto;
-    padding: 10px 0;
-  }
-  .sidebar.expanded .btn-logout {
-    width: calc(100% - 16px);
-    padding: 10px 12px;
-  }
-  .btn-logout .logout-short {
-    display: inline;
-  }
-  .sidebar.expanded .btn-logout .logout-short {
-    display: none;
-  }
   /* `.powered-by` is declared further down at equal specificity, so this has
      to out-rank it rather than merely follow it. */
   .sidebar .sidebar-powered-by {
@@ -615,6 +617,22 @@ img {
   gap: 16px;
   grid-template-columns: 1fr; /* mobile: single column by default */
 }
+/*
+  A grid item may not refuse to fit its track.
+
+  `min-width: auto` is the default, and it stops an item shrinking below the
+  widest thing inside it. On the time-slots screen one nowrap summary line
+  ("11:00 AM – 2:00 PM, 5:00 PM – 7:00 PM") held the card at 393px inside a
+  347px column, which widened the document to 407px on a 375px phone — so the
+  browser zoomed the whole page out to make it fit, and the doctor arrived on a
+  screen whose cards were visibly wider than its header.
+
+  The children that need to ellipsise already say `min-width: 0`; this is the
+  grid item above them, which was the one doing the refusing.
+*/
+.grid > * {
+  min-width: 0;
+}
 
 /* Opt-in multi-column groups */
 @media (min-width: 768px) {
@@ -639,6 +657,108 @@ img {
   }
   /* The wordmark is the first thing to give up room on a narrow topbar; the
      mark alone still says whose app this is. */
+
+  /*
+    The appointment toolbar, on a phone.
+
+    Seven controls that wrap onto three lines, each sized by its own content:
+    measured at 375px they came out 22, 30, 32, 34, 36, 39 and 40px tall, with
+    the tops of a single wrapped line 2–3px apart. Nothing was wrong with any
+    one of them; together they read as a pile rather than a toolbar.
+
+    One height for everything on the bar, and the day navigator gets a line of
+    its own with the date filling the space between its arrows — it is the
+    control the doctor uses most and the one that was being squeezed.
+  */
+  /* Both classes, so this outranks the base `.dash-controls` gap declared
+     further down the file — a single-class rule up here loses to it on source
+     order, and the 50% basis below is measured against this value. */
+  .list-panel-head.dash-controls {
+    gap: 8px;
+  }
+  .dash-controls > .day-nav {
+    flex: 1 0 100%;
+    margin-bottom: 0;
+    flex-wrap: nowrap;
+  }
+  .dash-controls .day-pick {
+    flex: 1;
+    justify-content: space-between;
+  }
+  .dash-controls .day-arrow,
+  .dash-controls .day-today,
+  .dash-controls .day-pick,
+  .dash-controls .kpi-total,
+  .dash-controls .kpi-toggle,
+  .dash-controls .dash-search-toggle,
+  .dash-controls .reset-filters-btn,
+  .dash-controls .dash-export {
+    height: 40px;
+    min-height: 40px;
+    padding-block: 0;
+  }
+  /*
+     Three rows, in the order the doctor uses them: which day, how many, then
+     find one.
+
+       ‹  Today  [ Thu, 15 October ▾ ]  ›
+       Total booked  6                    [↺]
+       [ search, full width            ]
+
+     Each row is claimed with a 100% basis rather than left to wrap where it
+     happens to fit, so the order holds whatever the count reads or how wide
+     the date is. Search keeps its box here instead of collapsing to an icon
+     (`expanded` on the field) — the row is its own, so there is no width to
+     buy back.
+  */
+  /* The two figures split their line exactly — 50% less half the gap each —
+     so neither is a chip stretched across the width on its own. */
+  .dash-controls .kpi-total {
+    order: 1;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    white-space: nowrap;
+  }
+  /* Search and refresh share the last line, search taking what is left. */
+  .dash-controls .dash-search {
+    order: 2;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .dash-controls .reset-filters-btn {
+    order: 3;
+    flex: 0 0 40px;
+  }
+  .dash-controls .dash-search .input {
+    height: 40px;
+  }
+  /* Export fills what the two icon buttons leave on the last line. */
+  .dash-controls .dash-export {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /*
+    16px, because iOS Safari zooms the page into any field whose text is
+    smaller and never zooms back out. The time-slots screen is where it was
+    reported — it is nothing but time fields, so the doctor tapped one and the
+    whole screen stayed magnified — but it was every form on a phone.
+
+    The alternative is `maximum-scale=1` on the viewport meta, which also stops
+    the zoom and stops anyone pinch-zooming anything ever again. A larger field
+    on a phone is the better trade; it is easier to read and hit as well.
+
+    The page measured clean at 375px with a day open — nothing overflows — so
+    the field size really was the whole of it.
+  */
+  .input,
+  .select,
+  textarea.input,
+  input[type='time'],
+  input[type='date'],
+  .tg-slotlen select {
+    font-size: 16px;
+  }
 }
 
 /* ── Card ──────────────────────────────────────────────────── */
@@ -702,21 +822,6 @@ img {
   border-color: transparent;
   background: transparent;
 }
-.btn-logout {
-  width: 100%;
-  justify-content: center;
-  background: #fdecec;
-  color: var(--state-error);
-  border: 1px solid rgba(226, 75, 74, 0.25);
-  font-weight: 500;
-  transition: all 0.15s ease;
-}
-.btn-logout:hover {
-  background: var(--state-error);
-  color: #ffffff;
-  border-color: var(--state-error);
-}
-
 /* ── Action Menu Dropdown ─────────────────────────────────── */
 .action-menu-container {
   position: relative;
@@ -1310,6 +1415,21 @@ tr.appt-row.upcoming td:first-child {
   padding: 16px;
   overflow-y: auto;
 }
+/*
+  Every dialog caps its own height and scrolls.
+
+  It used to grow as tall as its content and leave the scrolling to
+  `.modal-backdrop`, which works on a desktop and nowhere else: at phone width
+  the backdrop is deliberately `overflow: hidden` (a scrolling backdrop let the
+  sheet be dragged off the top of the screen), so a form taller than the screen
+  simply had no way to reach its end. The cap is here, on the dialog, so it
+  holds at every width and whether or not the dialog passes a footer.
+
+  `.modal-pinned` below is the richer version — a fixed header, a scrolling
+  body — and the shared `Modal` always uses it. This rule is what covers the
+  dialogs that build their own markup instead: they stay in normal block flow
+  and scroll as one box.
+*/
 .modal {
   background: var(--card);
   border-radius: var(--radius-card);
@@ -1318,6 +1438,9 @@ tr.appt-row.upcoming td:first-child {
   margin: auto;
   padding: 22px;
   box-shadow: 0 12px 32px rgba(22, 56, 50, 0.15);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .modal-lg {
   max-width: 640px;
@@ -1367,11 +1490,15 @@ tr.appt-row.upcoming td:first-child {
   }
 }
 
-/* A modal with pinned controls: the body scrolls, the footer never leaves. */
+/*
+  The shape the shared `Modal` builds: the title and any footer stay put, and
+  only the body between them scrolls. The dialog itself must not scroll as
+  well, or the header scrolls away with the content.
+*/
 .modal-pinned {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 32px);
+  overflow-y: hidden;
 }
 .modal-pinned .modal-body {
   overflow-y: auto;
@@ -1394,6 +1521,46 @@ tr.appt-row.upcoming td:first-child {
   gap: 10px;
   margin-top: 20px;
   flex-wrap: wrap;
+}
+
+/* The bookings standing in the way of a leave day — a list to ring round. */
+.leave-clash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.leave-clash {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--page);
+}
+
+/*
+  A warning the screen leads with, rather than a toast that has gone by the
+  time it matters. Same tints as the "On leave" badge it explains.
+*/
+.page-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.page-notice.is-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.page-notice strong {
+  font-weight: 700;
 }
 
 /* ── Segmented tabs ────────────────────────────────────────
@@ -2373,11 +2540,23 @@ tr.appt-row.upcoming td:first-child {
 
 /* ── Report viewer + clamped summary ────────────────────────
    The file opens over the visit rather than in a browser tab. */
+/*
+  The file fills the body it is given rather than claiming a fixed height.
+
+  It used to be an `<iframe>` at a flat 68vh, which failed twice over. A wheel
+  over an embedded PDF is consumed by the viewer rather than passed to the
+  page, so anything below the frame could not be scrolled to; and on a phone
+  there is usually no viewer to put in the frame at all, so a three-page report
+  showed page one and nothing else. A PDF is drawn page by page now (see
+  `ReportViewerModal`), and this box is simply the space it is drawn into.
+*/
 .report-viewer {
+  display: flex;
+  flex-direction: column;
   min-height: 40vh;
+  height: 100%;
 }
-.report-viewer img,
-.report-viewer iframe {
+.report-viewer img {
   display: block;
   width: 100%;
   max-width: 100%;
@@ -2385,9 +2564,9 @@ tr.appt-row.upcoming td:first-child {
   border-radius: var(--r);
   background: #fff;
 }
-.report-viewer iframe {
-  height: 68vh;
-}
+/* A scan keeps its own size and the body scrolls it. Shrinking a lab report to
+   fit the dialog would make the numbers on it unreadable, which is the one
+   thing the doctor opened it for. */
 .report-viewer img {
   height: auto;
   object-fit: contain;
@@ -3749,12 +3928,14 @@ tr.appt-row.upcoming td:first-child {
 }
 /* Flex + a real gap, so the icon cannot run under the first digits the way
    the emoji it replaced did. */
+/* Read, not tapped: it stopped being a `tel:` link, so it stops wearing the
+   accent that invited the tap. */
 .appt-phone {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--teal-dark);
+  color: var(--text-secondary);
   margin-top: 5px;
   font-weight: 600;
 }
@@ -3809,6 +3990,19 @@ tr.appt-row.upcoming td:first-child {
   .appt-card-main {
     padding: 10px 12px;
     gap: 10px;
+  }
+  /*
+     The foot carries its own padding for the same reason the row above does:
+     the card itself has none at this width. Written with vertical padding
+     only, its badge sat at x=15 against a card edge of 14 — one pixel inside
+     the border, on top of the status rail `::before` draws there — and Done
+     ended at 360 against an edge of 361. The horizontal values match
+     `.appt-card-main` exactly, so the badge and the avatar above it share a
+     left edge.
+  */
+  .appt-card-foot {
+    padding: 10px 12px 11px;
+    margin-top: 0;
   }
   .appt-avatar {
     width: 34px;
@@ -5622,6 +5816,7 @@ tr.appt-row.upcoming td:first-child {
        added. */
     grid-template-areas:
       'back   back'
+      'notice notice'
       'header header'
       'aside  main';
     align-content: start;
@@ -5637,6 +5832,11 @@ tr.appt-row.upcoming td:first-child {
      names, so anything unnamed lands after them. */
   .visit-header {
     grid-area: header;
+  }
+  /* The leave warning, for the same reason: unnamed, it was auto-placed into
+     the left column below the reports and read as a note about them. */
+  .visit-page > .page-notice {
+    grid-area: notice;
   }
   .visit-patient-col .patient-card {
     padding: 20px;
@@ -6618,4 +6818,134 @@ tr.family-head td {
   .ivf-inv-row {
     grid-template-columns: minmax(90px, 1.2fr) 1fr 1.3fr;
   }
+}
+
+/* ── The appointment card's actions (phone layout) ──────────────
+   The overflow menu beside the time, and the status / number / Done line
+   under the patient. Both were table columns the card layout had dropped, so
+   a doctor on a phone could neither mark a visit seen nor cancel one without
+   opening it first — the two things done most between patients. */
+.appt-card-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.appt-card-menu {
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
+  line-height: 1;
+}
+.appt-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: var(--hairline);
+}
+/* The number sits between the badge and the action, and gives up its width
+   first — a long name has already had its say on the line above. */
+.appt-card-foot .appt-phone {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appt-card-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--state-success, var(--teal-dark));
+  cursor: pointer;
+}
+.appt-card-done:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+.appt-card-done:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Off the phone layout ───────────────────────────────────────
+   `.hide-on-phone` sits on the control itself rather than being listed here
+   by class, so a screen that hides something says so where the button is
+   written.
+
+   At the end of the file on purpose: `.btn` and `.kpi-toggle` both set their
+   own `display`, at the same specificity as a single class, so a rule written
+   higher up lost to them on source order and the buttons stayed on screen.
+   Raising the specificity instead would have meant naming every control this
+   could ever apply to. */
+@media (max-width: 767px) {
+  .hide-on-phone {
+    display: none;
+  }
+  /* The top bar already says "Appointments" directly above this one. */
+  .page-head.title-in-topbar h1 {
+    display: none;
+  }
+  /*
+     …and with the title gone, the Clinic QR moved into that bar and the
+     walk-in button floating, the head has nothing left in it. It measured 0px
+     tall and still spent its 18px bottom margin, which is the white band that
+     appeared above the date filter. An empty row keeps no spacing.
+  */
+  .page-head.title-in-topbar {
+    margin-bottom: 0;
+  }
+}
+
+/* ── An icon button in the top bar ──────────────────────────────
+   For the one or two page actions worth reaching from any scroll position on
+   a phone, the bar being sticky. The appointment list puts its booking QR
+   here: with the page title hidden, that button was the only thing left on
+   its row and was spending a band of height on itself. */
+.topbar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.topbar-icon-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+/* The counterpart of `.hide-on-phone`, and at the end for the same reason:
+   `.btn` and friends set their own `display` further up the file. */
+.show-on-phone {
+  display: none;
+}
+@media (max-width: 767px) {
+  .show-on-phone {
+    display: inline-flex;
+  }
+}
+
+/* Refreshing: the arrow turns while the list is being fetched, so a press on
+   an already-current day still visibly does something. */
+.reset-filters-btn.is-busy svg {
+  animation: spin 0.7s linear infinite;
+}
+.reset-filters-btn:disabled {
+  cursor: default;
 }

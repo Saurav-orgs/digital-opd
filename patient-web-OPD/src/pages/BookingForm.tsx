@@ -6,7 +6,6 @@ import {
   Calendar,
   User,
   Phone,
-  MapPin,
   FileText,
   CheckCircle2,
   Upload,
@@ -20,6 +19,9 @@ import { AppConfig } from '../config';
 import { patientApi, patientTokenStore } from '../patientApi';
 import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
+import { DobField } from '../components/DobField';
+import { dobFromAge } from '../lib/dob';
+import { validateDob } from '../lib/dob';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
 import { OtpCodeField } from '../components/OtpCodeField';
@@ -212,8 +214,9 @@ export const BookingForm: React.FC = () => {
   const otp = useWhatsAppOtp(mobile.trim());
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
-  const [age, setAge] = useState('');
-  const [address, setAddress] = useState('');
+  // One value: the date of birth. An age typed into the field is stored as
+  // the date it implies — see `DobField`.
+  const [dob, setDob] = useState('');
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('');
   const [pincode, setPincode] = useState('');
@@ -225,7 +228,6 @@ export const BookingForm: React.FC = () => {
   const [nameError, setNameError] = useState<string | null>(null);
   const [genderError, setGenderError] = useState<string | null>(null);
   const [ageError, setAgeError] = useState<string | null>(null);
-  const [addressError, setAddressError] = useState<string | null>(null);
   const [cityError, setCityError] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [pincodeError, setPincodeError] = useState<string | null>(null);
@@ -324,14 +326,9 @@ export const BookingForm: React.FC = () => {
     check(name.trim().length >= 2, setNameError, 'Please enter the patient’s full name.');
     check(!!gender, setGenderError, 'Please select a gender.');
 
-    const ageNum = Number(age);
-    check(
-      !!age.trim() && Number.isInteger(ageNum) && ageNum >= 0 && ageNum <= 120,
-      setAgeError,
-      'Enter a valid age.',
-    );
+    const dobError = validateDob(dob, true);
+    check(!dobError, setAgeError, dobError ?? '');
 
-    check(address.trim().length >= 3, setAddressError, 'Please enter the address.');
     check(city.trim().length >= 2, setCityError, 'Please enter the city.');
     check(stateName.trim().length >= 2, setStateError, 'Please enter the state.');
     check(
@@ -449,8 +446,9 @@ export const BookingForm: React.FC = () => {
     setProfileId(p.id);
     setName(p.name);
     setGender(p.gender ?? '');
-    setAge(p.last_age != null ? String(p.last_age) : '');
-    setAddress(p.address_line ?? '');
+    // The record's own date, or the date their last known age implies — so a
+    // returning patient is never asked for this twice.
+    setDob(p.dob ?? (p.last_age != null ? (dobFromAge(p.last_age) ?? '') : ''));
     setCity(p.city ?? '');
     setStateName(p.state ?? '');
     setPincode(p.pincode ?? '');
@@ -466,8 +464,7 @@ export const BookingForm: React.FC = () => {
     setProfileId(null);
     setName('');
     setGender('');
-    setAge('');
-    setAddress('');
+    setDob('');
     setCity('');
     setStateName('');
     setPincode('');
@@ -589,8 +586,7 @@ export const BookingForm: React.FC = () => {
         patientName: name.trim(),
         patientMobile: mobile.trim(),
         patientGender: gender,
-        patientAge: Number(age),
-        patientAddress: address.trim(),
+        patientDob: dob,
         patientCity: city.trim(),
         patientState: stateName.trim(),
         patientPincode: pincode.trim(),
@@ -929,7 +925,7 @@ export const BookingForm: React.FC = () => {
               {nameError && <span className="error-text">{nameError}</span>}
             </div>
 
-            <div style={{ display: 'flex', gap: '16px' }}>
+            <div style={{ display: 'flex', gap: '16px' , flexWrap: 'wrap' }}>
               <div className="form-field" style={{ flex: 1 }}>
                 <label className="form-label icon-label">
                   <User size={14} color="var(--text-secondary)" />
@@ -948,40 +944,20 @@ export const BookingForm: React.FC = () => {
                 {genderError && <span className="error-text">{genderError}</span>}
               </div>
 
-              <div className="form-field" style={{ flex: 1 }}>
-                <label className="form-label icon-label">
-                  <User size={14} color="var(--text-secondary)" />
-                  <span>Age *</span>
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={120}
-                  className={'form-input' + (ageError ? ' error' : '')}
-                  placeholder="Age"
-                  value={age}
-                  onChange={(e) => setAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+              <div className="dob-col">
+                <DobField
+                  value={dob}
+                  onChange={(v) => {
+                    setDob(v);
+                    setAgeError(null);
+                  }}
+                  required
+                  error={ageError}
                 />
-                {ageError && <span className="error-text">{ageError}</span>}
               </div>
             </div>
 
-            <div className="form-field">
-              <label className="form-label icon-label">
-                <MapPin size={14} color="var(--text-secondary)" />
-                <span>Address *</span>
-              </label>
-              <textarea
-                className={'form-input' + (addressError ? ' error' : '')}
-                rows={2}
-                placeholder="House / street"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-              />
-              {addressError && <span className="error-text">{addressError}</span>}
-            </div>
-
-            <div style={{ display: 'flex', gap: '16px' }}>
+            <div style={{ display: 'flex', gap: '16px' , flexWrap: 'wrap' }}>
               <div className="form-field" style={{ flex: 1 }}>
                 <label className="form-label">City *</label>
                 <input

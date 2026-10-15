@@ -9,14 +9,20 @@ import { TopbarPortal } from '../components/TopbarPortal';
 import { BookingQrModal } from '../components/BookingQr';
 import { Badge, ConfirmDialog, Empty, FloatingCta, Loading, SearchField } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
-import { displayStatus, isCancelled, isMissed } from '../lib/appointmentStatus';
+import {
+  byQueueOrder,
+  displayStatus,
+  isCancelled,
+  isMissed,
+  isOpen,
+  needsReschedule,
+} from '../lib/appointmentStatus';
 import { avatarTone, initials } from '../lib/avatar';
-import { Download } from 'lucide-react';
+import { AlertTriangle, Download } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useAnchoredMenu } from '../lib/anchoredMenu';
 import {
   CheckCircleIcon,
-  PhoneIcon,
   PlusPersonIcon,
   QrIcon,
   ResetIcon,
@@ -150,13 +156,36 @@ export default function Dashboard() {
     [rows],
   );
 
+  /*
+   * The bookings on a leave day that the doctor still owes a consultation for.
+   *
+   * Each row already carries an "On leave" badge, but a badge is only seen by
+   * someone reading down the list — and the whole point is that the doctor is
+   * not going to be here that day. The count leads the screen instead. Taken
+   * from the rows already loaded, so no extra request and no second definition
+   * of which visits still need moving.
+   */
+  const needReschedule = useMemo(() => rows.filter(needsReschedule), [rows]);
+
+  /*
+   * What the list shows, as a queue rather than a timetable — see
+   * `byQueueOrder`. Sorted here, where Export reads it too, so the file comes
+   * out in the order the desk is looking at.
+   */
   const shown = useMemo(() => {
-    if (status === 'all') return rows;
-    if (status === 'done') return rows.filter((a) => isDone(a.consultation_status));
-    if (status === 'missed') return rows.filter((a) => isMissed(a));
-    return rows.filter(
-      (a) => isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a),
-    );
+    const picked =
+      status === 'all'
+        ? rows
+        : status === 'done'
+          ? rows.filter((a) => isDone(a.consultation_status))
+          : status === 'missed'
+            ? rows.filter((a) => isMissed(a))
+            : rows.filter(
+                (a) => isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a),
+              );
+    // `toSorted`, not `sort`: `rows` is react-query's own array and sorting it
+    // in place would mutate the cache.
+    return picked.toSorted(byQueueOrder);
   }, [rows, status]);
 
   /**
@@ -238,6 +267,23 @@ export default function Dashboard() {
             'Appointments'
           )}
         </span>
+        {/* The booking QR, as an icon in the bar rather than a labelled button
+            on the page. With the page title hidden it was the only thing left
+            on its row, so a whole band of height bought one button the doctor
+            presses when a patient asks how to book. Up here it costs nothing
+            and is reachable from any scroll position, the bar being sticky.
+            Phone only — the wide layout has room for the labelled one. */}
+        {meQ.data?.public_slug && (
+          <button
+            type="button"
+            className="topbar-icon-btn show-on-phone"
+            onClick={() => setQrOpen(true)}
+            aria-label="Clinic booking QR"
+            title="Clinic booking QR"
+          >
+            <QrIcon size={18} />
+          </button>
+        )}
         {meQ.data?.profile_photo_url ? (
           <img className="topbar-avatar" src={meQ.data.profile_photo_url} alt="" />
         ) : (
@@ -252,11 +298,15 @@ export default function Dashboard() {
         the screen they open most, and the design spends that height on rows
         instead; the name is in the sidebar and the top bar already.
       */}
-      <div className="page-head">
+      {/* `title-in-topbar` hides the h1 on a phone, because the bar above
+          already says "Appointments" — the same word twice in 60px of height.
+          Only for the doctor: a staff login's top bar carries their name and
+          the clinic instead, so they would be left with no title at all. */}
+      <div className={`page-head ${isDoctor ? 'title-in-topbar' : ''}`}>
         <h1>Appointments</h1>
         <div className="dash-head-actions">
           {meQ.data?.public_slug && (
-            <button className="btn btn-sm" onClick={() => setQrOpen(true)}>
+            <button className="btn btn-sm hide-on-phone" onClick={() => setQrOpen(true)}>
               <QrIcon size={16} />
               Clinic QR
             </button>
@@ -352,12 +402,26 @@ export default function Dashboard() {
             <span className="kpi-num">{counts.total}</span>
           </button>
 
+          {/* Phone only. The statistics drawer carrying the other three
+              figures is off this layout, so the one a doctor acts on comes out
+              beside the total — which also gives that row two halves instead
+              of one chip stretched across it. It filters like the drawer's own
+              tiles do: press again to go back to the whole day. */}
+          <button
+            type="button"
+            className={`kpi kpi-total show-on-phone ${status === 'pending' ? 'selected' : ''}`}
+            onClick={() => setStatus((v) => (v === 'pending' ? 'all' : 'pending'))}
+          >
+            <span className="kpi-label">Pending</span>
+            <span className="kpi-num">{counts.pending}</span>
+          </button>
+
           {/* A switch: it turns a persistent view on and off, which is not
               what a link means. The label does not change with the state —
               the switch position already says which way it is. */}
           <button
             type="button"
-            className="kpi-toggle"
+            className="kpi-toggle hide-on-phone"
             role="switch"
             aria-checked={statsOpen}
             aria-expanded={statsOpen}
@@ -372,19 +436,37 @@ export default function Dashboard() {
             onChange={setSearchInput}
             placeholder="Search by name or mobile number"
             label="Search appointments"
+            expanded
           />
 
+          {/*
+            A circular arrow means "bring this up to date", and that is what it
+            does. It was wired to clear the filters and disabled whenever there
+            were none to clear — so on the ordinary case, an unfiltered list,
+            pressing it did nothing at all and it read as broken. Refreshing is
+            also the thing actually wanted on this screen: bookings arrive
+            while it is open. Filters, when set, are cleared on the way.
+          */}
           <button
-            className="reset-filters-btn"
-            onClick={resetFilters}
-            disabled={!filtersActive}
-            title="Reset filters"
-            aria-label="Reset filters"
+            className={`reset-filters-btn ${listQ.isFetching ? 'is-busy' : ''}`}
+            onClick={() => {
+              if (filtersActive) resetFilters();
+              void listQ.refetch();
+            }}
+            disabled={listQ.isFetching}
+            title={filtersActive ? 'Clear filters and refresh' : 'Refresh'}
+            aria-label={filtersActive ? 'Clear filters and refresh' : 'Refresh'}
           >
             <ResetIcon size={17} />
           </button>
 
-          <button className="btn btn-sm dash-export" onClick={exportCsv} disabled={!rows.length}>
+          {/* Desk work: a CSV download is not something done between patients,
+              and the row it sat on was the third of three on a phone. */}
+          <button
+            className="btn btn-sm dash-export hide-on-phone"
+            onClick={exportCsv}
+            disabled={!rows.length}
+          >
             <Download size={15} />
             Export
           </button>
@@ -422,6 +504,20 @@ export default function Dashboard() {
               <span className="kpi-label">Missed</span>
               <span className="kpi-num">{counts.missed}</span>
             </button>
+          </div>
+        )}
+
+        {needReschedule.length > 0 && (
+          <div className="page-notice is-warn" role="status">
+            <AlertTriangle size={18} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              You are on leave on <strong>{dayLabel(day)}</strong>.{' '}
+              {needReschedule.length === 1
+                ? '1 booking still needs'
+                : `${needReschedule.length} bookings still need`}{' '}
+              rescheduling — {needReschedule.length === 1 ? 'the patient has' : 'those patients have'}{' '}
+              been told their appointment has to move.
+            </span>
           </div>
         )}
 
@@ -486,10 +582,6 @@ function isDone(status: ConsultationStatus) {
  * put them in the Pending filter and, worse, mark one of them as the patient
  * the doctor is about to see.
  */
-function isOpen(status: ConsultationStatus) {
-  return status === 'pending' || status === 'on_hold';
-}
-
 /**
  * The design's left accent bar: where this visit sits in the day.
  *
@@ -669,6 +761,102 @@ function DayTable({
   }
 
   /*
+   * The menus and confirmations, shared by both layouts.
+   *
+   * They used to be written inside the table's JSX, below the early return
+   * that the card layout takes — so on a phone the overflow menu opened
+   * nothing and "mark as completed" had nowhere to ask. Declared once here
+   * and rendered by whichever layout is on screen.
+   */
+  const overlays = (
+    <>
+        {menuFor && (
+          <div ref={menuRef} className="action-menu-dropdown" style={{ ...style, zIndex: 70 }}>
+            {/*
+              The undo the toast offered, after the toast has gone. A visit
+              marked done at 11:00 and noticed at 15:00 needs somewhere to be
+              put back, and the tick itself is greyed out by then.
+            */}
+            {menuRow && isDone(menuRow.consultation_status) && (
+              <button
+                className="action-menu-item"
+                disabled={undoDone.isPending}
+                onClick={() => {
+                  const id = menuFor;
+                  setMenuFor(null);
+                  undoDone.mutate([id]);
+                }}
+              >
+                Move back to pending
+              </button>
+            )}
+            <button
+              className="action-menu-item danger"
+              onClick={() => {
+                setMenuFor(null);
+                setCancelling(menuRow);
+              }}
+            >
+              Cancel appointment
+            </button>
+          </div>
+        )}
+
+        {confirmDone && (
+          <ConfirmDialog
+            title={
+              confirmDone === 'bulk'
+                ? `Mark ${selected.size} appointment${selected.size === 1 ? '' : 's'} as completed?`
+                : 'Mark this visit as completed?'
+            }
+            message={
+              confirmDone === 'bulk' ? (
+                <>
+                  Every selected visit is recorded as seen. The patients see it on
+                  their own visit list. You can move any of them back from the row
+                  menu.
+                </>
+              ) : (
+                <>
+                  {confirmDone.patient_name}'s {confirmDone.start_time?.slice(0, 5)} visit
+                  is recorded as seen, and the patient sees it on their visit list.
+                  You can move it back from the row menu.
+                </>
+              )
+            }
+            confirmLabel="Mark as completed"
+            cancelLabel="Not yet"
+            busy={markDone.isPending || bulkBusy}
+            onConfirm={() => {
+              if (confirmDone === 'bulk') void bulkDone();
+              else markDone.mutate(confirmDone.id);
+            }}
+            onCancel={() => setConfirmDone(null)}
+          />
+        )}
+
+        {cancelling && (
+          <ConfirmDialog
+            title="Cancel this appointment?"
+            message={
+              <>
+                {cancelling.patient_name}'s {cancelling.start_time?.slice(0, 5)} slot is
+                freed and can be booked again. The row stays on the day, marked
+                cancelled.
+              </>
+            }
+            confirmLabel="Cancel it"
+            cancelLabel="Keep it"
+            destructive
+            busy={cancel.isPending}
+            onConfirm={() => cancel.mutate(cancelling.id)}
+            onCancel={() => setCancelling(null)}
+          />
+        )}
+    </>
+  );
+
+  /*
    * Below the desktop breakpoint the table did not fit, so it scrolled
    * sideways — which hides the status column exactly when the doctor is
    * scanning for what still needs doing, and makes tapping a row a two-handed
@@ -688,9 +876,16 @@ function DayTable({
             a={a}
             bucket={bucketOf(a, isToday, a.id === nextId)}
             isNext={a.id === nextId}
+            canAct={canAct}
+            onMarkDone={() => setConfirmDone(a)}
+            markingDone={markDone.isPending}
+            menuOpen={menuFor === a.id}
+            onMenu={() => setMenuFor((v) => (v === a.id ? null : a.id))}
+            menuRef={menuFor === a.id ? menuBtn : nullRef}
             onClick={() => onSelect(a.id)}
           />
         ))}
+        {overlays}
       </div>
     );
   }
@@ -767,89 +962,7 @@ function DayTable({
         </tbody>
       </table>
 
-      {menuFor && (
-        <div ref={menuRef} className="action-menu-dropdown" style={{ ...style, zIndex: 70 }}>
-          {/*
-            The undo the toast offered, after the toast has gone. A visit
-            marked done at 11:00 and noticed at 15:00 needs somewhere to be
-            put back, and the tick itself is greyed out by then.
-          */}
-          {menuRow && isDone(menuRow.consultation_status) && (
-            <button
-              className="action-menu-item"
-              disabled={undoDone.isPending}
-              onClick={() => {
-                const id = menuFor;
-                setMenuFor(null);
-                undoDone.mutate([id]);
-              }}
-            >
-              Move back to pending
-            </button>
-          )}
-          <button
-            className="action-menu-item danger"
-            onClick={() => {
-              setMenuFor(null);
-              setCancelling(menuRow);
-            }}
-          >
-            Cancel appointment
-          </button>
-        </div>
-      )}
-
-      {confirmDone && (
-        <ConfirmDialog
-          title={
-            confirmDone === 'bulk'
-              ? `Mark ${selected.size} appointment${selected.size === 1 ? '' : 's'} as completed?`
-              : 'Mark this visit as completed?'
-          }
-          message={
-            confirmDone === 'bulk' ? (
-              <>
-                Every selected visit is recorded as seen. The patients see it on
-                their own visit list. You can move any of them back from the row
-                menu.
-              </>
-            ) : (
-              <>
-                {confirmDone.patient_name}'s {confirmDone.start_time?.slice(0, 5)} visit
-                is recorded as seen, and the patient sees it on their visit list.
-                You can move it back from the row menu.
-              </>
-            )
-          }
-          confirmLabel="Mark as completed"
-          cancelLabel="Not yet"
-          busy={markDone.isPending || bulkBusy}
-          onConfirm={() => {
-            if (confirmDone === 'bulk') void bulkDone();
-            else markDone.mutate(confirmDone.id);
-          }}
-          onCancel={() => setConfirmDone(null)}
-        />
-      )}
-
-      {cancelling && (
-        <ConfirmDialog
-          title="Cancel this appointment?"
-          message={
-            <>
-              {cancelling.patient_name}'s {cancelling.start_time?.slice(0, 5)} slot is
-              freed and can be booked again. The row stays on the day, marked
-              cancelled.
-            </>
-          }
-          confirmLabel="Cancel it"
-          cancelLabel="Keep it"
-          destructive
-          busy={cancel.isPending}
-          onConfirm={() => cancel.mutate(cancelling.id)}
-          onCancel={() => setCancelling(null)}
-        />
-      )}
+      {overlays}
     </div>
   );
 }
@@ -872,11 +985,24 @@ function AppointmentCard({
   a,
   bucket,
   isNext,
+  canAct,
+  onMarkDone,
+  markingDone,
+  menuOpen,
+  onMenu,
+  menuRef,
   onClick,
 }: {
   a: Appointment;
   bucket: string;
   isNext: boolean;
+  /** Whether this account may work the queue, not just read it. */
+  canAct: boolean;
+  onMarkDone: () => void;
+  markingDone: boolean;
+  menuOpen: boolean;
+  onMenu: () => void;
+  menuRef: React.RefObject<HTMLButtonElement | null>;
   onClick: () => void;
 }) {
   const done = isDone(a.consultation_status);
@@ -909,14 +1035,11 @@ function AppointmentCard({
         <div className="appt-body">
           <div className="appt-card-top">
             <span className="appt-card-name">{a.patient_name}</span>
+            {/* Only "Next" rides the name. The visit's state is the badge on
+                the foot below, beside the number — carrying it in both places
+                said the same word twice on a card three lines tall. */}
             {isNext && <span className="appt-badge next">Next</span>}
-            {done && <span className="appt-badge done">Completed</span>}
-            {cancelled && <span className="appt-badge cancelled">Cancelled</span>}
-            {!cancelled && a.consultation_status === 'no_show' && (
-              <span className="appt-badge no-show">No-show</span>
-            )}
-            {missed && <span className="appt-badge missed">Missed</span>}
-            {a.on_leave && (
+            {needsReschedule(a) && (
               <span
                 className="appt-badge leave"
                 title="Doctor is on leave this day — reschedule this booking."
@@ -926,18 +1049,53 @@ function AppointmentCard({
             )}
           </div>
           {who && <div className="appt-meta">{who}</div>}
-          <a
-            className="appt-phone"
-            href={`tel:${a.patient_mobile}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <PhoneIcon />
-            {a.patient_mobile}
-          </a>
         </div>
-        <span className={`appt-time-badge ${over ? 'is-done' : ''}`}>
-          {fmtTime(a.start_time)}
+        <span className="appt-card-right">
+          <span className={`appt-time-badge ${over ? 'is-done' : ''}`}>
+            {fmtTime(a.start_time)}
+          </span>
+          {canAct && (
+            <button
+              ref={menuRef as React.RefObject<HTMLButtonElement>}
+              type="button"
+              className="row-act appt-card-menu"
+              aria-label="More actions"
+              aria-expanded={menuOpen}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMenu();
+              }}
+            >
+              ⋮
+            </button>
+          )}
         </span>
+      </div>
+
+      {/*
+        The foot: what state the visit is in, the number, and the one action
+        the desk takes without opening it.
+
+        A phone had neither the overflow menu nor "Done" — both lived in a
+        table column that the card layout dropped — so marking a patient seen
+        meant opening the visit and coming back. They are the two things done
+        most between patients, which is exactly when a doctor is holding a
+        phone rather than sitting at the desk.
+      */}
+      <div className="appt-card-foot" onClick={(e) => e.stopPropagation()}>
+        <Badge value={displayStatus(a)} />
+        <span className="appt-phone">{a.patient_mobile}</span>
+        {canAct && !over && (
+          <button
+            type="button"
+            className="appt-card-done"
+            disabled={markingDone}
+            onClick={onMarkDone}
+          >
+            <CheckCircleIcon size={16} />
+            Done
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1001,7 +1159,7 @@ function AppointmentRow({
             <span className="row-name">
               {a.patient_name}
               {isNext && <span className="appt-badge next">Next</span>}
-              {a.on_leave && (
+              {needsReschedule(a) && (
                 <span
                   title="Doctor is on leave this day — reschedule this booking."
                   style={{ marginLeft: 6, color: 'var(--state-on-hold)' }}

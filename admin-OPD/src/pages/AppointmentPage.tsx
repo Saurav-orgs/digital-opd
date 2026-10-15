@@ -23,7 +23,7 @@ import { InlineSlotPicker } from '../components/InlineSlotPicker';
 import { PrescriptionTabs } from '../components/PrescriptionTabs';
 import { ISSUE_MODE_LABEL } from '../lib/issueMode';
 import { isIvfDoctor } from '../lib/ivfCaseSheet';
-import { isCancelled } from '../lib/appointmentStatus';
+import { isCancelled, needsReschedule } from '../lib/appointmentStatus';
 import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
 import { flushDraft } from '../lib/draftFlush';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
@@ -36,7 +36,7 @@ import { useCollapsible } from '../lib/collapsePreference';
 import { appointmentRefetchInterval, hasTrajectory } from '../lib/summaryPolling';
 import { avatarTone, initials } from '../lib/avatar';
 import { ReportViewerModal, SummaryModal } from '../components/ReportViewer';
-import { Eye, History } from 'lucide-react';
+import { AlertTriangle, Eye, History } from 'lucide-react';
 import { formatDuration } from '../lib/duration';
 import {
   CheckCircleIcon,
@@ -795,6 +795,20 @@ export default function AppointmentPage() {
         the prescription are the same task, and paging between them meant the
         doctor could not see the report they were prescribing against.
       */}
+      {/* The day was marked as leave after this was booked. Said here as well
+          as on the list, because this is the screen the doctor opens when they
+          work through the bookings that have to move. */}
+      {a && needsReschedule(a) && (
+        <div className="page-notice is-warn" role="status">
+          <AlertTriangle size={18} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            You are on leave on <strong>{prettyDate(a.appointment_date)}</strong>. This
+            appointment still needs rescheduling — the patient has been told it has to
+            move.
+          </span>
+        </div>
+      )}
+
       {a && (
         <VisitHeaderCard
           appointment={a}
@@ -1262,6 +1276,7 @@ function ReportCard({
 
       {viewing && (
         <ReportViewerModal
+          id={report.id}
           title={report.title}
           url={report.url}
           onClose={() => setViewing(false)}

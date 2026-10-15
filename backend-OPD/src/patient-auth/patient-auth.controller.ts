@@ -7,6 +7,11 @@ import { PatientRegisterDto } from './dto/patient-register.dto';
 import { PatientCheckDto } from './dto/patient-check.dto';
 import { PatientSignupDto } from './dto/patient-signup.dto';
 import { ConfirmMobileCodeDto, SendMobileCodeDto } from './dto/mobile-verification.dto';
+import {
+  PatientForgotPasswordDto,
+  PatientResetPasswordDto,
+  PatientVerifyResetCodeDto,
+} from './dto/password-reset.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { PatientAuthGuard } from './patient-auth.guard';
 import { CurrentPatient, AuthPatient } from './current-patient.decorator';
@@ -75,6 +80,34 @@ export class PatientAuthController {
   @ApiOperation({ summary: 'Sign in with mobile number and password' })
   login(@Body() dto: PatientLoginDto) {
     return this.service.login(dto);
+  }
+
+  @Post('forgot-password')
+  // Each call costs a WhatsApp message, like send-otp. The service adds the
+  // same per-number resend cooldown on top.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Forgot password, step 1 — send a reset code over WhatsApp. Answers the same for an unknown number.',
+  })
+  forgotPassword(@Body() dto: PatientForgotPasswordDto) {
+    return this.service.forgotPassword(dto);
+  }
+
+  @Post('verify-reset-code')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Forgot password, step 2 — check the code and get a token for the new password',
+  })
+  verifyResetCode(@Body() dto: PatientVerifyResetCodeDto) {
+    return this.service.verifyResetCode(dto);
+  }
+
+  @Post('reset-password')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Forgot password, step 3 — set the new password with the token' })
+  resetPassword(@Body() dto: PatientResetPasswordDto) {
+    return this.service.resetPassword(dto);
   }
 
   @Get('me')

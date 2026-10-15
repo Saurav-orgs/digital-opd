@@ -5,6 +5,8 @@ import { patientApi } from '../../patientApi';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { ApiException, type PatientDetailsInput, type PatientProfile } from '../../types';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { DobField } from '../../components/DobField';
+import { validateDob } from '../../lib/dob';
 
 /**
  * Everyone registered on this number — add, switch to, or remove.
@@ -179,13 +181,12 @@ const AddPatientForm: React.FC<{
   const [form, setForm] = useState<PatientDetailsInput>({
     name: '',
     gender: '',
-    address_line: '',
     city: '',
     state: '',
     pincode: '',
   });
   // Held as typed and converted on submit, so the field can be empty.
-  const [age, setAge] = useState('');
+  const [dob, setDob] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const set = (k: keyof PatientDetailsInput, v: string) =>
@@ -193,7 +194,10 @@ const AddPatientForm: React.FC<{
 
   const add = useMutation({
     mutationFn: () =>
-      patientApi.addProfile({ ...form, age: age.trim() ? Number(age) : undefined }),
+      patientApi.addProfile({
+        ...form,
+        ...(dob ? { dob } : {}),
+      }),
     onSuccess: (created) => onAdded(created.id),
     onError: (err) =>
       setError(err instanceof ApiException ? err.message : 'Could not add this patient.'),
@@ -203,10 +207,8 @@ const AddPatientForm: React.FC<{
     e.preventDefault();
     setError(null);
     if (form.name.trim().length < 2) return setError('Please enter the patient’s name.');
-    if (age.trim() && !(Number(age) >= 0 && Number(age) <= 120)) {
-      return setError('Enter a valid age.');
-    }
-    if (form.address_line.trim().length < 3) return setError('Please enter the address.');
+    const dobError = validateDob(dob, false);
+    if (dobError) return setError(dobError);
     if (form.city.trim().length < 2) return setError('Please enter the city.');
     if (form.state.trim().length < 2) return setError('Please enter the state.');
     if (!/^[1-9]\d{5}$/.test(form.pincode.trim())) {
@@ -232,7 +234,7 @@ const AddPatientForm: React.FC<{
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
         <div className="form-field" style={{ flex: 1 }}>
           <label className="form-label">Gender</label>
           <select
@@ -246,14 +248,13 @@ const AddPatientForm: React.FC<{
             <option value="other">Other</option>
           </select>
         </div>
-        <div className="form-field" style={{ flex: 1 }}>
-          <label className="form-label">Age</label>
-          <input
-            className="form-input"
-            inputMode="numeric"
-            maxLength={3}
-            value={age}
-            onChange={(e) => setAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+        <div className="dob-col">
+          <DobField
+            value={dob}
+            onChange={(v) => {
+              setDob(v);
+              setError(null);
+            }}
           />
         </div>
         <div className="form-field" style={{ flex: 1 }}>
@@ -273,18 +274,7 @@ const AddPatientForm: React.FC<{
         </div>
       </div>
 
-      <div className="form-field">
-        <label className="form-label">Address *</label>
-        <textarea
-          className="form-input"
-          rows={2}
-          value={form.address_line}
-          onChange={(e) => set('address_line', e.target.value)}
-          placeholder="House / street"
-        />
-      </div>
-
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
         <div className="form-field" style={{ flex: 1 }}>
           <label className="form-label">City *</label>
           <input

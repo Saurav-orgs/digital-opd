@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   blockedNumbersApi,
   patientProfilesApi,
-  type StaffPatientInput,
+  type StaffPatientUpdate,
 } from '../api/endpoints';
 import type { ClinicPatient } from '../api/types';
 import { ApiError } from '../api/client';
@@ -119,8 +119,7 @@ export function PatientFormModal({
 
   const save = useMutation({
     mutationFn: () => {
-      const body: StaffPatientInput = {
-        mobile: mobile.trim(),
+      const details: StaffPatientUpdate = {
         name: name.trim(),
         gender,
         dob: dob || undefined,
@@ -128,9 +127,13 @@ export function PatientFormModal({
         conditions: splitList(conditions),
         long_term_medicines: splitList(longMeds),
       };
+      // The number is the account, not a field of the patient — editing it
+      // here would be moving the record to someone else's family — so the
+      // edit DTO has no `mobile` and the server refuses a body carrying one.
+      // Sending it anyway is what produced "property mobile should not exist".
       return isEdit
-        ? patientProfilesApi.update(editing!.id, body)
-        : patientProfilesApi.create(body);
+        ? patientProfilesApi.update(editing!.id, details)
+        : patientProfilesApi.create({ ...details, mobile: mobile.trim() });
     },
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['patients'] });

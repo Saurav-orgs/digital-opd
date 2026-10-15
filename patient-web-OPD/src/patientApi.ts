@@ -125,6 +125,26 @@ export const patientApi = {
     })),
   me: () => unwrap<PatientMe>(client.get('/patient/auth/me')),
 
+  /**
+   * Forgot the password. Three steps over WhatsApp, because the number is the
+   * account — there is no email to send a link to.
+   *
+   * `forgotPassword` answers the same way for a number with no account, so
+   * this screen cannot be used to find out who has one. `verifyResetCode`
+   * checks the code on its own and hands back a short-lived token, so a
+   * mistyped code never costs the patient the password they just typed twice.
+   */
+  forgotPassword: (mobile: string) =>
+    unwrap<{ ok: true; resendAfter: number }>(
+      client.post('/patient/auth/forgot-password', { mobile }),
+    ),
+  verifyResetCode: (mobile: string, code: string) =>
+    unwrap<{ token: string }>(
+      client.post('/patient/auth/verify-reset-code', { mobile, code }),
+    ),
+  resetPassword: (token: string, password: string) =>
+    unwrap<{ ok: true }>(client.post('/patient/auth/reset-password', { token, password })),
+
   // ── The patients on this account ──
   profiles: () => unwrap<PatientProfile[]>(client.get('/patient/profiles')),
   addProfile: (patient: PatientDetailsInput) =>

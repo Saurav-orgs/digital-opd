@@ -2511,3 +2511,66 @@ h4 {
     padding: 10px 14px;
   }
 }
+
+/* The age a chosen birth date works out to — the check that the year was not
+   mis-tapped. */
+.dob-note {
+  display: block;
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* Date of birth or age, as two labelled choices. A link reading "I only know
+   the age" asked the patient to understand the problem before they could find
+   the way out of it; this says what is on offer. */
+.dob-switch {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #f4f6f7);
+}
+.dob-switch button {
+  flex: 1;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.dob-switch button.is-on {
+  background: var(--card, #fff);
+  color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 16px on a phone, for the same reason the doctor app does it: iOS Safari
+   zooms the page into any field whose text is smaller and never zooms back
+   out. The date-of-birth picker makes this one the patient has to tap. */
+@media (max-width: 767px) {
+  .form-input {
+    font-size: 16px;
+  }
+}
+
+/* The date-or-age field needs more room than a third of a row: its two
+   choices sit side by side and were wrapping inside a column shared with
+   Gender and Relation. It takes the whole line on a phone and behaves as an
+   ordinary column above that. */
+.dob-col {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  .dob-col {
+    flex: 1 1 100%;
+  }
+}
+

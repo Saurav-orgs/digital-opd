@@ -106,8 +106,9 @@ export const api = {
     patientName: string;
     patientMobile: string;
     patientGender: string;
-    patientAge: number;
-    patientAddress: string;
+    /** One of the two: the record keeps a date, an age is stored as an estimate. */
+    patientDob?: string;
+    patientAge?: number;
     patientCity: string;
     patientState: string;
     patientPincode: string;
@@ -123,13 +124,13 @@ export const api = {
         patient_name: params.patientName,
         patient_mobile: params.patientMobile,
         patient_gender: params.patientGender,
-        patient_age: params.patientAge,
+        ...(params.patientDob ? { patient_dob: params.patientDob } : {}),
+        ...(params.patientAge != null ? { patient_age: params.patientAge } : {}),
         // Present = "this existing patient"; absent = "a new patient", even if
         // the name matches one already on the number.
         ...(params.patientProfileId
           ? { patient_profile_id: params.patientProfileId }
           : {}),
-        patient_address: params.patientAddress.trim(),
         patient_city: params.patientCity.trim(),
         patient_state: params.patientState.trim(),
         patient_pincode: params.patientPincode.trim(),

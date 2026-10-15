@@ -53,12 +53,31 @@ export enum PaymentEventSource {
 }
 
 /** Kinds of in-app patient notification. */
+/**
+ * What a WhatsApp code in `mobile_verifications` was sent for. Both flows use
+ * the same table and the same 6-digit code; the purpose is what stops one
+ * flow's code being spent in the other.
+ */
+export enum MobileVerificationPurpose {
+  /** Proving a number nobody has an account on yet. */
+  SIGNUP = 'signup',
+  /** Proving a number whose account exists, to choose a new password. */
+  PASSWORD_RESET = 'password_reset',
+}
+
 export enum NotificationType {
   REPORT_AVAILABLE = 'report_available',
   APPOINTMENT_REMINDER = 'appointment_reminder',
   PRESCRIPTION_READY = 'prescription_ready',
   APPOINTMENT_CANCELLED = 'appointment_cancelled',
   APPOINTMENT_RESCHEDULED = 'appointment_rescheduled',
+  /**
+   * The doctor marked the day as leave over a booking that was already made.
+   * Distinct from `APPOINTMENT_RESCHEDULED`, which carries a new time: here
+   * there is no new time yet, and the clinic is about to call. The column is
+   * a plain string, so this needs no migration.
+   */
+  DOCTOR_ON_LEAVE = 'doctor_on_leave',
 }
 
 /**

@@ -103,12 +103,24 @@ function blankDay(): DayAvailability {
 export function DayAvailabilityEditor({
   timings,
   onChange,
-  onNotify,
+  onPersist,
+  saving,
 }: {
   timings: DayTimings;
   onChange: (next: DayTimings) => void;
-  /** Confirms a save or a bulk apply — a toast at the call site. */
-  onNotify?: (message: string) => void;
+  /**
+   * Write the week to the server, and say what happened.
+   *
+   * Every action that finishes a thought — saving a day, copying it across,
+   * clearing it — goes through here. It used to be `onChange` plus a separate
+   * "Save schedule" button at the top of the page, which meant "Save Mon" set a
+   * flag, said "Mon timings saved", and sent nothing: a doctor who edited
+   * Monday and navigated away lost it. The component still owns no mutation —
+   * the page supplies this — it just no longer pretends a local flag is a save.
+   */
+  onPersist: (next: DayTimings, message: string) => void;
+  /** True while a write is in flight, so the day's buttons cannot be double-fired. */
+  saving?: boolean;
 }) {
   // One day open at a time, so the list stays scannable.
   const [openDay, setOpenDay] = useState<number | null>(null);
@@ -148,10 +160,9 @@ export function DayAvailabilityEditor({
       setErrors((p) => ({ ...p, [day]: err }));
       return;
     }
-    patch(day, { ...e, saved: true });
     setErrors((p) => ({ ...p, [day]: '' }));
     setOpenDay(null);
-    onNotify?.(`${DAY_LABEL[day]} timings saved`);
+    onPersist({ ...timings, [day]: { ...e, saved: true } }, `${DAY_LABEL[day]} saved`);
   };
 
   const applyToAll = (day: number) => {
@@ -166,17 +177,16 @@ export function DayAvailabilityEditor({
       // Copied, never shared: editing Tuesday later must not rewrite Monday.
       next[d] = { saved: true, slots: e.slots.map((s) => ({ ...s })) };
     }
-    onChange(next);
+    setErrors((p) => ({ ...p, [day]: '' }));
     setOpenDay(null);
-    onNotify?.(`${DAY_LABEL[day]}'s timings applied to every day`);
+    onPersist(next, `${DAY_LABEL[day]}'s timings applied to every day and saved`);
   };
 
   const clearDay = (day: number) => {
     const next = { ...timings };
     delete next[day];
-    onChange(next);
     setOpenDay(null);
-    onNotify?.(`${DAY_LABEL[day]} set as a day off`);
+    onPersist(next, `${DAY_LABEL[day]} is now a day off`);
   };
 
   return (
@@ -262,11 +272,17 @@ export function DayAvailabilityEditor({
                   <button
                     type="button"
                     className="btn btn-sm btn-primary"
+                    disabled={saving}
                     onClick={() => saveDay(day)}
                   >
-                    Save {DAY_LABEL[day]}
+                    {saving ? 'Saving…' : `Save ${DAY_LABEL[day]}`}
                   </button>
-                  <button type="button" className="btn btn-sm" onClick={() => applyToAll(day)}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={saving}
+                    onClick={() => applyToAll(day)}
+                  >
                     <Copy size={14} aria-hidden /> Apply to all days
                   </button>
                   <button type="button" className="btn btn-sm" onClick={() => addSlot(day)}>
@@ -274,7 +290,12 @@ export function DayAvailabilityEditor({
                   </button>
                   <span className="tg-acts-gap" />
                   {isSet && (
-                    <button type="button" className="dr-clear" onClick={() => clearDay(day)}>
+                    <button
+                      type="button"
+                      className="dr-clear"
+                      disabled={saving}
+                      onClick={() => clearDay(day)}
+                    >
                       Clear {DAY_LABEL[day]}
                     </button>
                   )}

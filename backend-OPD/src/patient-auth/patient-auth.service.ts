@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/sequelize';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { Op } from 'sequelize';
 import { Patient } from '../database/models/patient.model';
 import { MobileVerification } from '../database/models/mobile-verification.model';
@@ -13,9 +13,18 @@ import { PatientLoginDto } from './dto/patient-login.dto';
 import { PatientRegisterDto } from './dto/patient-register.dto';
 import { PatientCheckDto } from './dto/patient-check.dto';
 import { PatientSignupDto } from './dto/patient-signup.dto';
+import {
+  PatientForgotPasswordDto,
+  PatientResetPasswordDto,
+  PatientVerifyResetCodeDto,
+} from './dto/password-reset.dto';
 import { AuthPatient } from './current-patient.decorator';
 import { ActivityLogService } from '../activity/activity-log.service';
-import { ActivityAction, ActivityActor } from '../common/enums';
+import {
+  ActivityAction,
+  ActivityActor,
+  MobileVerificationPurpose,
+} from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
@@ -68,7 +77,7 @@ export class PatientAuthService {
     }
 
     const recent = await this.verificationModel.findOne({
-      where: { mobile, consumed_at: null },
+      where: { mobile, purpose: MobileVerificationPurpose.SIGNUP, consumed_at: null },
       order: [['created_at', 'DESC']],
     });
     if (recent) {
@@ -82,9 +91,12 @@ export class PatientAuthService {
 
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     // A new code retires the old one: only the latest row is ever checked.
-    await this.verificationModel.destroy({ where: { mobile, consumed_at: null } });
+    await this.verificationModel.destroy({
+      where: { mobile, purpose: MobileVerificationPurpose.SIGNUP, consumed_at: null },
+    });
     const row = await this.verificationModel.create({
       mobile,
+      purpose: MobileVerificationPurpose.SIGNUP,
       code_hash: sha256(`${mobile}:${code}`),
       attempts: 0,
       expires_at: new Date(Date.now() + CODE_MINUTES * 60_000),
@@ -101,7 +113,7 @@ export class PatientAuthService {
   async confirmMobileCode(dto: ConfirmMobileCodeDto): Promise<{ verified: true }> {
     const mobile = dto.mobile;
     const row = await this.verificationModel.findOne({
-      where: { mobile, consumed_at: null },
+      where: { mobile, purpose: MobileVerificationPurpose.SIGNUP, consumed_at: null },
       order: [['created_at', 'DESC']],
     });
     if (!row || row.expires_at.getTime() < Date.now()) {
@@ -138,6 +150,7 @@ export class PatientAuthService {
     const row = await this.verificationModel.findOne({
       where: {
         mobile,
+        purpose: MobileVerificationPurpose.SIGNUP,
         consumed_at: null,
         verified_at: { [Op.ne]: null },
         expires_at: { [Op.gt]: new Date() },
@@ -290,6 +303,153 @@ export class PatientAuthService {
       ...session,
       patients: await this.profiles.listForAccount(account.id),
     };
+  }
+
+  // ── Forgot / reset password ────────────────────────────────
+
+  /**
+   * Send a reset code to a number that already has an account.
+   *
+   * Answers the same way whether or not the number has one, and only actually
+   * sends when it does. `check` does tell a caller whether a number is
+   * registered — the sign-in screen cannot ask for "your password" or "choose
+   * a password" without knowing — but that is one deliberate route with its
+   * own rate limit, and this is not a second one. A number with no password
+   * (a walk-in the front desk opened) has nothing to reset: it claims its
+   * account through sign-up, which is the flow that is allowed to set a first
+   * password.
+   */
+  async forgotPassword(
+    dto: PatientForgotPasswordDto,
+  ): Promise<{ ok: true; resendAfter: number }> {
+    const mobile = dto.mobile;
+    const account = await this.profiles.findAccount(mobile);
+    if (!account?.password_hash) return { ok: true, resendAfter: RESEND_AFTER_SECONDS };
+
+    const recent = await this.verificationModel.findOne({
+      where: {
+        mobile,
+        purpose: MobileVerificationPurpose.PASSWORD_RESET,
+        consumed_at: null,
+      },
+      order: [['created_at', 'DESC']],
+    });
+    if (recent) {
+      const age = (Date.now() - new Date(recent.get('createdAt') as Date).getTime()) / 1000;
+      if (age < RESEND_AFTER_SECONDS) {
+        throw new AppException(ErrorCode.RATE_LIMITED, {
+          message: `A code was just sent. Please wait ${Math.ceil(RESEND_AFTER_SECONDS - age)} seconds before asking for another.`,
+        });
+      }
+    }
+
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    // One live reset at a time: asking for a new code retires the old one, so
+    // a code read off an old message cannot be used later.
+    await this.verificationModel.destroy({
+      where: {
+        mobile,
+        purpose: MobileVerificationPurpose.PASSWORD_RESET,
+        consumed_at: null,
+      },
+    });
+    const row = await this.verificationModel.create({
+      mobile,
+      purpose: MobileVerificationPurpose.PASSWORD_RESET,
+      code_hash: sha256(`${mobile}:${code}`),
+      attempts: 0,
+      expires_at: new Date(Date.now() + CODE_MINUTES * 60_000),
+    } as any);
+
+    await this.whatsapp.sendOtp(mobile, code, `password_reset:${row.id}`);
+    if (!this.isProduction && !this.whatsapp.enabled) {
+      this.logger.log(`Password reset code for ${mobile}: ${code}`);
+    }
+    return { ok: true, resendAfter: RESEND_AFTER_SECONDS };
+  }
+
+  /**
+   * Check the reset code; hand back a short-lived token for the new-password
+   * call. Two steps rather than "code + new password" in one, so a wrong code
+   * never costs the patient the password they just typed twice.
+   */
+  async verifyResetCode(dto: PatientVerifyResetCodeDto): Promise<{ token: string }> {
+    const row = await this.verificationModel.findOne({
+      where: {
+        mobile: dto.mobile,
+        purpose: MobileVerificationPurpose.PASSWORD_RESET,
+        consumed_at: null,
+        verified_at: null,
+      },
+      order: [['created_at', 'DESC']],
+    });
+    // "No code was asked for" and "it expired" get the same words — neither is
+    // worth telling a stranger apart.
+    if (!row || row.expires_at.getTime() < Date.now()) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'That code has expired. Please ask for a new one.',
+      });
+    }
+    if (row.attempts >= MAX_CODE_ATTEMPTS) {
+      throw new AppException(ErrorCode.RATE_LIMITED, {
+        message: 'Too many wrong attempts. Please ask for a new code.',
+      });
+    }
+    if (row.code_hash !== sha256(`${dto.mobile}:${dto.code}`)) {
+      const attempts = row.attempts + 1;
+      await row.update({ attempts } as any);
+      const left = MAX_CODE_ATTEMPTS - attempts;
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message:
+          left > 0
+            ? `That code is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.`
+            : 'That code is not right. Please ask for a new one.',
+      });
+    }
+
+    const token = randomBytes(32).toString('base64url');
+    await row.update({
+      verified_at: new Date(),
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + VERIFIED_FOR_MINUTES * 60_000),
+    } as any);
+    return { token };
+  }
+
+  /** Set the new password. The token is what proves the code was checked. */
+  async resetPassword(dto: PatientResetPasswordDto): Promise<{ ok: true }> {
+    const row = await this.verificationModel.findOne({
+      where: {
+        token_hash: sha256(dto.token),
+        purpose: MobileVerificationPurpose.PASSWORD_RESET,
+        consumed_at: null,
+        verified_at: { [Op.ne]: null },
+        expires_at: { [Op.gt]: new Date() },
+      },
+    });
+    const account = row ? await this.profiles.findAccount(row.mobile) : null;
+    if (!row || !account?.password_hash) {
+      throw new AppException(ErrorCode.BAD_REQUEST, {
+        message: 'This reset has expired. Please start again from Forgot password.',
+      });
+    }
+
+    await account.update({
+      password_hash: await bcrypt.hash(dto.password, 10),
+    } as any);
+    // Spent: one code, one password change.
+    await row.update({ consumed_at: new Date() } as any);
+
+    this.activity.record({
+      action: ActivityAction.PASSWORD_CHANGED,
+      actor_type: ActivityActor.PATIENT,
+      actor_id: account.id,
+      actor_label: account.mobile,
+      entity_type: 'patient_account',
+      entity_id: account.id,
+      summary: `Patient ${account.mobile} reset their password with a WhatsApp code.`,
+    });
+    return { ok: true };
   }
 
   /** The account plus its patients — the portal's "who am I viewing?" data. */

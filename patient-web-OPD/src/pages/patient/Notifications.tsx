@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, FileCheck, CalendarClock, Pill, Download } from 'lucide-react';
+import { Bell, FileCheck, CalendarClock, Pill, Download, AlertTriangle } from 'lucide-react';
 import { patientApi } from '../../patientApi';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { StateView } from '../../components/StateView';
@@ -70,9 +70,13 @@ export const Notifications: React.FC = () => {
                 ? FileCheck
                 : n.type === 'prescription_ready'
                   ? Pill
-                  : n.type === 'appointment_reminder' || n.type === 'appointment_rescheduled'
-                    ? CalendarClock
-                    : Bell;
+                  // The doctor is away and this visit has to move — a warning,
+                  // not a calendar change, because there is no new time yet.
+                  : n.type === 'doctor_on_leave'
+                    ? AlertTriangle
+                    : n.type === 'appointment_reminder' || n.type === 'appointment_rescheduled'
+                      ? CalendarClock
+                      : Bell;
             return (
               <div
                 key={n.id}

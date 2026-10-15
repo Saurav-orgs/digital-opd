@@ -12,7 +12,8 @@ import { LogoFull, LogoMark, PoweredByIttitude } from './Brand';
 import { useCollapsible } from '../lib/collapsePreference';
 import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
 import { TOPBAR_SLOT_ID } from './TopbarPortal';
-import { Clock3, Settings, Zap } from 'lucide-react';
+import { ConfirmDialog } from './ui';
+import { Clock3, LogOut, Settings, Zap } from 'lucide-react';
 import {
   BlockIcon,
   CalendarIcon,
@@ -67,6 +68,16 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /*
+   * Sign out is asked about first.
+   *
+   * It sits at the foot of a rail the doctor is otherwise tapping all day to
+   * get between screens, and at 72px wide it is an unlabelled ⏻ one slot
+   * below Settings. Pressing it mid-consultation drops the prescription being
+   * written and costs a re-login at the desk — and nothing on the way out
+   * said so.
+   */
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [collapsed, toggleCollapsed] = useCollapsible('sidebar', true);
   const railMode = useMediaQuery(RAIL);
 
@@ -161,18 +172,24 @@ export default function Layout() {
         {/* Only when nothing was pinned to the foot — otherwise the group
             above brought its own. */}
         {!grouped.some((g) => g.section === 'bottom') && <div className="spacer" />}
+        {/*
+          Shaped as a nav row, not as a button.
+
+          Sign out sits directly under Settings and the two read as a pair, but
+          they were built as different things — Settings a `.nav-item.is-bottom`
+          with a 19px glyph and its label beside it, Sign out a `.btn` with a
+          text ⏻ and a centred label. Collapsed, their icons landed on
+          different centres; expanded, one was left-aligned and the other was
+          not. Same markup and same geometry now; only the colour differs,
+          which is the one thing that should.
+        */}
         <button
-          className="btn btn-logout"
+          className="nav-item is-bottom btn-logout"
           title={expanded ? undefined : 'Sign out'}
-          onClick={() => {
-            logout();
-            navigate('/login');
-          }}
+          onClick={() => setConfirmingLogout(true)}
         >
+          <LogOut size={19} strokeWidth={1.9} />
           <span className="nav-label">Sign out</span>
-          <span className="logout-short" aria-hidden>
-            ⏻
-          </span>
         </button>
         <PoweredByIttitude className="sidebar-powered-by" />
       </aside>
@@ -200,6 +217,26 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {confirmingLogout && (
+        <ConfirmDialog
+          title="Sign out?"
+          message={
+            <>
+              Anything you have not saved on this screen is lost, and you will
+              need your password to get back in.
+            </>
+          }
+          confirmLabel="Sign out"
+          cancelLabel="Stay signed in"
+          onConfirm={() => {
+            setConfirmingLogout(false);
+            logout();
+            navigate('/login');
+          }}
+          onCancel={() => setConfirmingLogout(false)}
+        />
+      )}
     </div>
   );
 }

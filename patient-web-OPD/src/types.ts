@@ -78,10 +78,13 @@ export interface PatientProfile {
   name: string;
   relation: string | null;
   gender: string | null;
+  /** YYYY-MM-DD. What the record actually keeps; the age is derived from it. */
+  dob: string | null;
   address_line: string | null;
   city: string | null;
   state: string | null;
   pincode: string | null;
+  /** Derived from `dob` today, so it is never the age they were last visit. */
   last_age: number | null;
   last_visit_date: string | null;
   visit_count: number;
@@ -101,9 +104,16 @@ export interface AccountCheck {
 export interface PatientDetailsInput {
   name: string;
   gender?: string;
+  /** One of the two — an age is stored as an estimated date of birth. */
+  dob?: string;
   age?: number;
   relation?: string;
-  address_line: string;
+  /**
+   * Optional since 14 Oct 2026: no patient-side form asks for a house and
+   * street any more — city, state and PIN are what the clinic uses. Records
+   * that already carry one still show it, and the desk can still type one.
+   */
+  address_line?: string;
   city: string;
   state: string;
   pincode: string;
@@ -174,7 +184,9 @@ export interface PatientNotification {
     | 'appointment_reminder'
     | 'prescription_ready'
     | 'appointment_cancelled'
-    | 'appointment_rescheduled';
+    | 'appointment_rescheduled'
+    /** The doctor marked the day as leave; the clinic will call with a new time. */
+    | 'doctor_on_leave';
   title: string;
   body: string | null;
   data: Record<string, unknown> | null;

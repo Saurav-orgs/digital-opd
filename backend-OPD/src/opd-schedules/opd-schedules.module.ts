@@ -7,6 +7,7 @@ import { ScheduleException } from '../database/models/schedule-exception.model';
 import { Appointment } from '../database/models/appointment.model';
 import { Doctor } from '../database/models/doctor.model';
 import { SlotsModule } from '../slots/slots.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,9 @@ import { SlotsModule } from '../slots/slots.module';
       Doctor,
     ]),
     SlotsModule,
+    // Marking leave over a booking tells the patient; WhatsAppService is
+    // global, so only this one needs importing.
+    NotificationsModule,
   ],
   controllers: [OpdSchedulesController],
   providers: [OpdSchedulesService],
