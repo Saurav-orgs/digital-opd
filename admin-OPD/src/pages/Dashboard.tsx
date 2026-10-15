@@ -9,9 +9,15 @@ import { TopbarPortal } from '../components/TopbarPortal';
 import { BookingQrModal } from '../components/BookingQr';
 import { Badge, ConfirmDialog, Empty, FloatingCta, Loading, SearchField } from '../components/ui';
 import { NARROW, useMediaQuery } from '../lib/useMediaQuery';
-import { displayStatus, isCancelled, isMissed } from '../lib/appointmentStatus';
+import {
+  displayStatus,
+  isCancelled,
+  isMissed,
+  isOpen,
+  needsReschedule,
+} from '../lib/appointmentStatus';
 import { avatarTone, initials } from '../lib/avatar';
-import { Download } from 'lucide-react';
+import { AlertTriangle, Download } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useAnchoredMenu } from '../lib/anchoredMenu';
 import {
@@ -149,6 +155,17 @@ export default function Dashboard() {
     }),
     [rows],
   );
+
+  /*
+   * The bookings on a leave day that the doctor still owes a consultation for.
+   *
+   * Each row already carries an "On leave" badge, but a badge is only seen by
+   * someone reading down the list — and the whole point is that the doctor is
+   * not going to be here that day. The count leads the screen instead. Taken
+   * from the rows already loaded, so no extra request and no second definition
+   * of which visits still need moving.
+   */
+  const needReschedule = useMemo(() => rows.filter(needsReschedule), [rows]);
 
   const shown = useMemo(() => {
     if (status === 'all') return rows;
@@ -425,6 +442,20 @@ export default function Dashboard() {
           </div>
         )}
 
+        {needReschedule.length > 0 && (
+          <div className="page-notice is-warn" role="status">
+            <AlertTriangle size={18} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              You are on leave on <strong>{dayLabel(day)}</strong>.{' '}
+              {needReschedule.length === 1
+                ? '1 booking still needs'
+                : `${needReschedule.length} bookings still need`}{' '}
+              rescheduling — {needReschedule.length === 1 ? 'the patient has' : 'those patients have'}{' '}
+              been told their appointment has to move.
+            </span>
+          </div>
+        )}
+
         <DayTable
           rows={shown}
           canAct={canCreate}
@@ -486,10 +517,6 @@ function isDone(status: ConsultationStatus) {
  * put them in the Pending filter and, worse, mark one of them as the patient
  * the doctor is about to see.
  */
-function isOpen(status: ConsultationStatus) {
-  return status === 'pending' || status === 'on_hold';
-}
-
 /**
  * The design's left accent bar: where this visit sits in the day.
  *
@@ -916,7 +943,7 @@ function AppointmentCard({
               <span className="appt-badge no-show">No-show</span>
             )}
             {missed && <span className="appt-badge missed">Missed</span>}
-            {a.on_leave && (
+            {needsReschedule(a) && (
               <span
                 className="appt-badge leave"
                 title="Doctor is on leave this day — reschedule this booking."
@@ -926,14 +953,15 @@ function AppointmentCard({
             )}
           </div>
           {who && <div className="appt-meta">{who}</div>}
-          <a
-            className="appt-phone"
-            href={`tel:${a.patient_mobile}`}
-            onClick={(e) => e.stopPropagation()}
-          >
+          {/* Not a `tel:` link. The whole card opens the visit, and a number
+              sitting inside it meant a thumb that drifted a few pixels started
+              a phone call instead — on the screen the doctor taps all day. The
+              number is here to be read; ringing a patient is done from their
+              profile, deliberately. */}
+          <span className="appt-phone">
             <PhoneIcon />
             {a.patient_mobile}
-          </a>
+          </span>
         </div>
         <span className={`appt-time-badge ${over ? 'is-done' : ''}`}>
           {fmtTime(a.start_time)}
@@ -1001,7 +1029,7 @@ function AppointmentRow({
             <span className="row-name">
               {a.patient_name}
               {isNext && <span className="appt-badge next">Next</span>}
-              {a.on_leave && (
+              {needsReschedule(a) && (
                 <span
                   title="Doctor is on leave this day — reschedule this booking."
                   style={{ marginLeft: 6, color: 'var(--state-on-hold)' }}

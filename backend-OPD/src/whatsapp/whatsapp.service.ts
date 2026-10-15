@@ -16,6 +16,18 @@ interface WhatsAppConfig {
   countryCode: string;
   otpTemplate: string;
   otpTemplateLang: string;
+  leaveTemplate: string;
+  leaveTemplateLang: string;
+}
+
+/** What `deliver` needs to say about a send it does not otherwise know about. */
+interface DeliveryLog {
+  /** Written instead of sending, when there are no credentials. */
+  offline: string;
+  /** Written after Meta accepts it. */
+  sent: string;
+  /** Named in the "template is missing" error, outside production. */
+  templateHint: string;
 }
 
 /** One `statuses[]` item from Meta's messages webhook. */
@@ -118,8 +130,93 @@ export class WhatsAppService {
       reference: reference ?? null,
     } as any);
 
+    await this.deliver(row, body, {
+      offline: `[whatsapp → ${to}] verification code ${code}`,
+      sent: `Sent verification code to ${to} over WhatsApp`,
+      templateHint: 'WA_OTP_TEMPLATE_NAME / LANG',
+    });
+  }
+
+  /**
+   * Whether a given notice can go out at all.
+   *
+   * Meta only accepts a pre-approved template outside the 24-hour window a
+   * patient's own reply opens, and a patient who booked last week is well
+   * outside it. So a notice needs its own template name configured on top of
+   * the credentials — until one is approved and set, callers fall back to the
+   * in-app notification alone rather than half-sending.
+   */
+  canSendNotice(template: string): boolean {
+    return this.enabled && !!template;
+  }
+
+  /**
+   * Send one approved UTILITY template with positional body parameters.
+   *
+   * The counterpart of `sendOtp` for everything that is not a code: no Copy
+   * Code button, nothing to mask, and the whole request is kept in the row
+   * because none of it is a secret. Throws like `sendOtp` does — a caller
+   * that must not fail because of a message (the leave is already saved by
+   * the time this runs) catches it and carries on.
+   */
+  async sendTemplate(
+    mobile: string,
+    template: string,
+    language: string,
+    params: string[],
+    opts: { kind: string; reference?: string },
+  ): Promise<void> {
+    const to = `${this.cfg.countryCode}${mobile}`;
+    const body = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'template',
+      template: {
+        name: template,
+        language: { code: language },
+        components: [
+          {
+            type: 'body',
+            parameters: params.map((text) => ({ type: 'text', text })),
+          },
+        ],
+      },
+    };
+
+    const row = await this.messages.create({
+      kind: opts.kind,
+      to,
+      template,
+      language,
+      status: 'queued',
+      request: body,
+      reference: opts.reference ?? null,
+    } as any);
+
+    await this.deliver(row, body, {
+      offline: `[whatsapp → ${to}] ${template}(${params.join(' · ')})`,
+      sent: `Sent ${template} to ${to} over WhatsApp`,
+      templateHint: `the ${template} template`,
+    });
+  }
+
+  /**
+   * Post one already-recorded message to Meta and keep its row current.
+   *
+   * Shared by every sender: the bookkeeping either side of the request — the
+   * offline fallback, the network failure, Meta's error body, the accepted id
+   * — is identical whatever the template was, and the OTP path is the one
+   * that was debugged into this shape.
+   */
+  private async deliver(
+    row: WhatsAppMessage,
+    body: Record<string, unknown>,
+    log: DeliveryLog,
+  ): Promise<void> {
+    const to = row.to;
     if (!this.enabled) {
-      this.logger.log(`[whatsapp → ${to}] verification code ${code}`);
+      this.logger.log(log.offline);
       await row.update({
         status: 'accepted',
         status_at: new Date(),
@@ -150,7 +247,7 @@ export class WhatsAppService {
         error_message: message,
         response: { network_error: message },
       } as any);
-      throw this.sendFailed();
+      throw this.sendFailed(undefined, log.templateHint);
     }
 
     const text = await res.text().catch(() => '');
@@ -168,7 +265,7 @@ export class WhatsAppService {
         error_message: error.message ?? `HTTP ${res.status}`,
         response: json ?? { http_status: res.status, body: text },
       } as any);
-      throw this.sendFailed(error.code);
+      throw this.sendFailed(error.code, log.templateHint);
     }
 
     const waId = (json?.messages as Array<{ id?: string }> | undefined)?.[0]?.id ?? null;
@@ -178,7 +275,7 @@ export class WhatsAppService {
       wa_message_id: waId,
       response: json ?? { body: text },
     } as any);
-    this.logger.log(`Sent verification code to ${to} over WhatsApp (${waId ?? 'no id'}).`);
+    this.logger.log(`${log.sent} (${waId ?? 'no id'}).`);
   }
 
   /**
@@ -233,7 +330,7 @@ export class WhatsAppService {
    * sandbox one is spelled out because it is the first wall every deployment
    * hits — the test sender only reaches numbers on its allowed list.
    */
-  private sendFailed(code?: number): AppException {
+  private sendFailed(code?: number, templateHint = 'WA_OTP_TEMPLATE_NAME / LANG'): AppException {
     let message =
       'We could not send the WhatsApp message right now. Please try again in a moment.';
     if (code === 131026) {
@@ -245,7 +342,7 @@ export class WhatsAppService {
     } else if (code === 132001 || code === 132000 || code === 132012) {
       message = this.isProduction
         ? 'WhatsApp is not fully set up for this clinic yet. Please try again later.'
-        : 'The WhatsApp OTP template is missing or does not match — check WA_OTP_TEMPLATE_NAME / LANG.';
+        : `The WhatsApp template is missing or does not match — check ${templateHint}.`;
     }
     return new AppException(ErrorCode.WHATSAPP_SEND_FAILED, { message });
   }

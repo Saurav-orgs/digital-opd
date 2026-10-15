@@ -48,6 +48,16 @@ export interface AppConfig {
     /** Name and language of the approved AUTHENTICATION template. */
     otpTemplate: string;
     otpTemplateLang: string;
+    /**
+     * Name and language of the approved UTILITY template for "your doctor is
+     * on leave". Empty until one exists — see the value for why there is no
+     * fallback name.
+     */
+    leaveTemplate: string;
+    leaveTemplateLang: string;
+    /** Name and language of the approved UTILITY template for a moved visit. */
+    rescheduleTemplate: string;
+    rescheduleTemplateLang: string;
   };
   /**
    * Cashfree Payment Gateway, which takes the subscription payment at sign-up.
@@ -170,6 +180,19 @@ export default (): AppConfig => ({
     countryCode: process.env.WA_COUNTRY_CODE || '91',
     otpTemplate: process.env.WA_OTP_TEMPLATE_NAME || 'otp_verification',
     otpTemplateLang: process.env.WA_OTP_TEMPLATE_LANG || 'en_US',
+    /*
+     * The "your doctor is on leave" notice. Empty on purpose and with no
+     * fallback name: unlike the OTP, this template does not exist yet — Meta
+     * has to approve a UTILITY template before anything can be sent with it,
+     * and naming one that was never approved would turn every send into a
+     * 132001. While it is empty the leave flow writes the in-app notification
+     * and skips WhatsApp (`canSendNotice`).
+     */
+    leaveTemplate: process.env.WA_LEAVE_TEMPLATE_NAME || '',
+    leaveTemplateLang: process.env.WA_LEAVE_TEMPLATE_LANG || 'en_US',
+    /** The "your appointment has moved to…" notice. Empty for the same reason. */
+    rescheduleTemplate: process.env.WA_RESCHEDULE_TEMPLATE_NAME || '',
+    rescheduleTemplateLang: process.env.WA_RESCHEDULE_TEMPLATE_LANG || 'en_US',
   },
   cashfree: {
     appId: cashfreeCredential('APP_ID'),

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Phone, User, MapPin, LogIn, UserPlus, Lock, MessageCircle, ShieldCheck } from 'lucide-react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { Phone, User, LogIn, UserPlus, Lock, MessageCircle, ShieldCheck } from 'lucide-react';
 import { PasswordField } from '../../components/PasswordField';
 import { OtpCodeField } from '../../components/OtpCodeField';
 import { useWhatsAppOtp } from '../../auth/useWhatsAppOtp';
@@ -8,6 +8,8 @@ import { patientApi } from '../../patientApi';
 import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { useDoctorCtx } from '../../context/DoctorContext';
 import { ApiException } from '../../types';
+import { DobField } from '../../components/DobField';
+import { validateDobOrAge } from '../../lib/dob';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -30,7 +32,7 @@ export const Login: React.FC = () => {
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
   const [age, setAge] = useState('');
-  const [address, setAddress] = useState('');
+  const [dob, setDob] = useState('');
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('');
   const [pincode, setPincode] = useState('');
@@ -86,11 +88,8 @@ export const Login: React.FC = () => {
       if (password !== confirmPassword) return setError('Passwords do not match.');
       if (name.trim().length < 2) return setError('Please enter the patient’s name.');
       if (!gender) return setError('Please select a gender.');
-      const ageNum = Number(age);
-      if (!age.trim() || !Number.isInteger(ageNum) || ageNum < 0 || ageNum > 120) {
-        return setError('Enter a valid age.');
-      }
-      if (address.trim().length < 3) return setError('Please enter the address.');
+      const dobError = validateDobOrAge(dob, age, true);
+      if (dobError) return setError(dobError);
       if (city.trim().length < 2) return setError('Please enter the city.');
       if (stateName.trim().length < 2) return setError('Please enter the state.');
       if (!/^[1-9]\d{5}$/.test(pincode.trim())) {
@@ -108,8 +107,7 @@ export const Login: React.FC = () => {
           {
             name: name.trim(),
             gender,
-            age: Number(age),
-            address_line: address.trim(),
+            ...(dob ? { dob } : { age: Number(age) }),
             city: city.trim(),
             state: stateName.trim(),
             pincode: pincode.trim(),
@@ -192,6 +190,15 @@ export const Login: React.FC = () => {
                 setError(null);
               }}
             />
+            {/* Only on the sign-in side: there is nothing to recover while
+                the password is being chosen. */}
+            {mode === 'login' && (
+              <div style={{ textAlign: 'right', marginTop: 6 }}>
+                <Link to="/forgot-password" style={{ fontSize: 12.5 }}>
+                  Forgot password?
+                </Link>
+              </div>
+            )}
           </div>
           )}
 
@@ -226,7 +233,7 @@ export const Login: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
                 <div className="form-field" style={{ flex: 1 }}>
                   <label className="form-label">Gender</label>
                   <select
@@ -240,35 +247,24 @@ export const Login: React.FC = () => {
                     <option value="other">Other</option>
                   </select>
                 </div>
-                <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label">Age</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={120}
-                    className="form-input"
-                    placeholder="Age"
-                    value={age}
-                    onChange={(e) => setAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                <div className="dob-col">
+                  <DobField
+                    dob={dob}
+                    age={age}
+                    onChangeDob={(v) => {
+                      setDob(v);
+                      setError(null);
+                    }}
+                    onChangeAge={(v) => {
+                      setAge(v);
+                      setError(null);
+                    }}
+                    required
                   />
                 </div>
               </div>
 
-              <div className="form-field">
-                <label className="form-label icon-label">
-                  <MapPin size={14} color="var(--text-secondary)" />
-                  <span>Address</span>
-                </label>
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  placeholder="House / street"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
                 <div className="form-field" style={{ flex: 1 }}>
                   <label className="form-label">City</label>
                   <input

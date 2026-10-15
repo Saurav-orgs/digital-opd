@@ -571,10 +571,18 @@ export default function DoctorRegisterPage({
                 than one slot. Days you leave unset are treated as days off.
               </div>
 
+              {/* No account exists yet, so there is nothing to write to: here
+                  "saved" honestly means "recorded in this form", and the whole
+                  week is submitted with the rest of the registration. The
+                  editor asks the caller to persist; this is what that means at
+                  sign-up. */}
               <DayAvailabilityEditor
                 timings={timings}
                 onChange={setTimings}
-                onNotify={setNotice}
+                onPersist={(next, message) => {
+                  setTimings(next);
+                  setNotice(message);
+                }}
               />
 
               <label className="form-label" style={{ marginTop: 14 }}>

@@ -35,9 +35,13 @@ export interface PatientProfileSummary {
   /** YYYY-MM-DD when known; age is derived from it rather than stored. */
   dob: string | null;
   /**
-   * Age as of their most recent visit — the fallback when there is no `dob`.
-   * A patient who has not visited yet gets their age today from `dob`, so a
-   * fresh registration still prefills its first booking.
+   * The patient's age today, from `dob`.
+   *
+   * The visit snapshot is only the fallback, for a record old enough to predate
+   * the `dob` column. It used to be the other way round, which meant a patient
+   * who last came two years ago was shown — and had prefilled into their next
+   * booking — the age they were then. A birth date on file is never stale; an
+   * age recorded at a visit is stale the following year.
    */
   last_age: number | null;
   last_visit_date: string | null;
@@ -541,7 +545,7 @@ export class PatientProfilesService {
         blood_group: profile.blood_group ?? null,
         conditions: profile.conditions ?? [],
         long_term_medicines: profile.long_term_medicines ?? [],
-        last_age: stat?.latest.patient_age ?? ageFromDob(profile.dob, this.today()),
+        last_age: ageFromDob(profile.dob, this.today()) ?? stat?.latest.patient_age ?? null,
         last_visit_date: stat?.latest.appointment_date ?? null,
         visit_count: stat?.count ?? 0,
         can_delete: !stat?.consulted,
@@ -593,7 +597,7 @@ export class PatientProfilesService {
       city: profile.city,
       state: profile.state,
       pincode: profile.pincode,
-      last_age: latest?.patient_age ?? ageFromDob(profile.dob, this.today()),
+      last_age: ageFromDob(profile.dob, this.today()) ?? latest?.patient_age ?? null,
       last_visit_date: latest?.appointment_date ?? null,
       visit_count: visits.length,
       can_delete: !consulted,

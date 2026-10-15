@@ -234,6 +234,20 @@ export const settingsApi = {
 };
 
 // ── Schedules & leave ────────────────────────────────────────
+/**
+ * One booking standing in the way of a leave day, as the server lists them in
+ * the `LEAVE_HAS_BOOKINGS` details. snake_case because it is the appointment
+ * row's own shape, which the rest of the API still speaks.
+ */
+export interface LeaveClash {
+  id: string;
+  appointment_date: string;
+  start_time: string;
+  end_time: string;
+  patient_name: string;
+  patient_mobile: string;
+}
+
 export const schedulesApi = {
   list: (doctorId: string) =>
     api.get<ScheduleEntry[]>(`/doctors/${doctorId}/schedules`).then((r) => r.data),
@@ -249,12 +263,24 @@ export const schedulesApi = {
       .then((r) => r.data),
   // A span is one call: `end_date` marks every day from `date` to it, and
   // `to` on the delete clears the same span. Omit both for a single day.
-  markLeave: (doctorId: string, date: string, reason?: string, endDate?: string) =>
+  //
+  // Without `force` the server refuses a day that still has bookings the
+  // doctor owes a consultation for, and hands back the list of them as
+  // `LEAVE_HAS_BOOKINGS` details — see `LeaveClashes`. Sending it again with
+  // `force` marks the leave and tells each of those patients.
+  markLeave: (
+    doctorId: string,
+    date: string,
+    reason?: string,
+    endDate?: string,
+    force?: boolean,
+  ) =>
     api
       .post(`/doctors/${doctorId}/leave`, {
         date,
         reason,
         ...(endDate && endDate !== date ? { end_date: endDate } : {}),
+        ...(force ? { force: true } : {}),
       })
       .then((r) => r.data),
   removeLeave: (doctorId: string, date: string, to?: string) =>
@@ -697,11 +723,11 @@ export const patientProfilesApi = {
   create: (body: StaffPatientInput) =>
     api.post<ClinicPatient>('/patient-profiles', body).then((r) => r.data),
   /** Edit one of this clinic's patients, including the clinical summary. */
-  update: (id: string, body: Partial<StaffPatientInput>) =>
+  update: (id: string, body: Partial<StaffPatientUpdate>) =>
     api.patch<ClinicPatient>(`/patient-profiles/${id}`, body).then((r) => r.data),
 };
 
-/** What the desk's new-patient / edit form sends. Mobile is omitted on edit. */
+/** What the desk's new-patient form sends. */
 export interface StaffPatientInput {
   mobile: string;
   name: string;
@@ -716,6 +742,18 @@ export interface StaffPatientInput {
   conditions?: string[];
   long_term_medicines?: string[];
 }
+
+/**
+ * What an edit sends — the same fields without the number.
+ *
+ * The number is the account a patient hangs off, not a property of the
+ * patient: changing it would move the record into someone else's family. So
+ * `StaffUpdatePatientDto` has no `mobile`, the server runs
+ * `forbidNonWhitelisted`, and an edit that carried one came back 422. This
+ * type is why that cannot be written again — it used to be
+ * `Partial<StaffPatientInput>`, which allowed exactly the body that failed.
+ */
+export type StaffPatientUpdate = Omit<StaffPatientInput, 'mobile'>;
 
 // ── Blocked numbers ──────────────────────────────────────────
 // A clinic's own defence against nuisance bookings. Scoped per doctor: the

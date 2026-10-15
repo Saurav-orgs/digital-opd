@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { CalendarClock, ChevronDown, Timer, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { schedulesApi } from '../api/endpoints';
+import { schedulesApi, type LeaveClash } from '../api/endpoints';
 import type { ScheduleEntry, Slot } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/Toast';
-import { Empty, Field, Loading } from '../components/ui';
+import { Empty, Field, Loading, Modal } from '../components/ui';
 import { WalkInModal } from '../components/WalkInModal';
 import {
   DayAvailabilityEditor,
@@ -27,6 +27,13 @@ const hhmm = (t: string) => t.slice(0, 5);
  * server arrives saved — nothing is "unset" here that the clinic is already
  * open for.
  */
+/** One write of the whole week: what to store, how long a slot is, what to say. */
+interface SaveArgs {
+  week: DayTimings;
+  mins: number;
+  message: string;
+}
+
 export default function DoctorSchedule() {
   const { can, user, isDoctor } = useAuth();
   /*
@@ -40,6 +47,7 @@ export default function DoctorSchedule() {
     !!(location.state as { fresh?: boolean } | null)?.fresh,
   );
   const toast = useToast();
+  const qc = useQueryClient();
   const canEdit = can('opd_schedules', 'update');
   // Booking a slot off the grid is a booking, not a schedule edit — a role
   // that may set hours but not take appointments gets the read-only grid.
@@ -73,24 +81,63 @@ export default function DoctorSchedule() {
     if (schedQ.data[0]) setSlotMins(schedQ.data[0].slot_duration_min);
   }, [schedQ.data]);
 
+  /*
+   * One write per action, from the day the doctor is actually editing.
+   *
+   * There used to be a "Save schedule" button at the top of the page and the
+   * day's own "Save Mon" only set a local flag — so the day said it was saved
+   * and nothing had left the browser. The endpoint replaces the whole week in
+   * one call, so sending the week on every day-level action costs no more than
+   * the old button did and means the word "save" is finally true.
+   *
+   * `week` and `mins` are passed in rather than read from state: the caller
+   * hands over the values it has just produced, and waiting for a re-render
+   * before saving would send the previous ones.
+   */
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: ({ week, mins }: SaveArgs) => {
       const entries: ScheduleEntry[] = [];
-      for (const day of workingDays(timings)) {
-        for (const slot of timings[day].slots) {
+      for (const day of workingDays(week)) {
+        for (const slot of week[day].slots) {
           entries.push({
             day_of_week: day,
             start_time: slot.start_time,
             end_time: slot.end_time,
-            slot_duration_min: slotMins,
+            slot_duration_min: mins,
           });
         }
       }
       return schedulesApi.replace(id, entries);
     },
-    onSuccess: () => toast.success('Schedule saved'),
-    onError: (e) => toast.error(e),
+    onMutate: ({ week, mins }) => {
+      // Shown immediately; `onError` puts the old week back.
+      const previous = { timings, slotMins };
+      setTimings(week);
+      setSlotMins(mins);
+      return { previous };
+    },
+    onSuccess: (_data, { message }) => {
+      toast.success(message);
+      // The preview beside this reads the same hours.
+      qc.invalidateQueries({ queryKey: ['slots', id] });
+    },
+    onError: (e, _vars, context) => {
+      // Never leave a day reading "saved" over hours the server refused.
+      if (context?.previous) {
+        setTimings(context.previous.timings);
+        setSlotMins(context.previous.slotMins);
+      }
+      toast.error(e);
+    },
   });
+
+  /** A day-level action: the week the editor just built, at the current length. */
+  const persist = (week: DayTimings, message: string) =>
+    save.mutate({ week, mins: slotMins, message });
+
+  /** The slot-length pill: the week as it stands, at the new length. */
+  const persistSlotLength = (mins: number) =>
+    save.mutate({ week: timings, mins, message: `Slots are now ${mins} minutes` });
 
   if (!isDoctor || !id) return <Empty>This page is for the doctor’s account.</Empty>;
   if (schedQ.isLoading) return <Loading />;
@@ -105,15 +152,6 @@ export default function DoctorSchedule() {
             Add multiple sessions to one day for split OPD (e.g. morning &amp; evening).
           </span>
         </div>
-        <div className="row">
-          {/* No Back: this is a menu item in its own right now, not a screen
-              reached from the profile form. */}
-          {canEdit && (
-            <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save schedule'}
-            </button>
-          )}
-        </div>
       </div>
 
       {showWelcome && (
@@ -124,9 +162,9 @@ export default function DoctorSchedule() {
           <div>
             <b>Your clinic is open Monday to Saturday, 10:00 AM – 2:00 PM.</b>
             <span>
-              That is our starting point, not your decision — change any day
-              below and press Save schedule. Leave it as it is and patients can
-              book these hours straight away.
+              That is our starting point, not your decision — open any day
+              below and change it. Leave it as it is and patients can book
+              these hours straight away.
             </span>
           </div>
           <button
@@ -152,17 +190,22 @@ export default function DoctorSchedule() {
             <div className="tg-card-head-text">
               <div className="card-title">Weekly hours</div>
               <div className="tg-sub">
-                Open a day to add its time slots, then save it. A day can have
-                more than one slot. Days left unset are days off.
+                Open a day to set its hours and save it — each day is saved on
+                its own. A day can have more than one slot, and days left unset
+                are days off.
               </div>
             </div>
             <label className="tg-slotlen" title="How long one appointment is">
               <Timer size={15} aria-hidden />
               <span className="sr-only">Length of one appointment slot</span>
+              {/* Saved on change for the same reason the days are: this used
+                  to reach the server only via "Save schedule", so without it a
+                  change here would be silently dropped. It applies to the whole
+                  week, so the week is what gets written. */}
               <select
                 value={slotMins}
-                disabled={!canEdit}
-                onChange={(e) => setSlotMins(Number(e.target.value))}
+                disabled={!canEdit || save.isPending}
+                onChange={(e) => persistSlotLength(Number(e.target.value))}
               >
                 {[5, 10, 15, 20, 30, 45, 60].map((m) => (
                   <option key={m} value={m}>{m} min slots</option>
@@ -175,13 +218,10 @@ export default function DoctorSchedule() {
           <DayAvailabilityEditor
             timings={timings}
             onChange={setTimings}
-            onNotify={(m) => toast.success(m)}
+            onPersist={persist}
+            saving={save.isPending}
           />
 
-          <span className="hint">
-            Saving a day here records it; the schedule reaches the server when
-            you press Save schedule.
-          </span>
         </div>
 
         <div className="stack">
@@ -267,25 +307,43 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
     qc.invalidateQueries({ queryKey: ['slots', doctorId] });
   };
 
+  /*
+   * The bookings the server refused over, held while the doctor decides.
+   *
+   * The refusal used to end at a red toast reading "… (3 bookings)": no way to
+   * see which three, and no way to go on. A doctor does not stop being away
+   * because the day is booked — the booking is what has to move — so the
+   * answer is to show them and ask, then send the same call back with `force`.
+   */
+  const [clashes, setClashes] = useState<LeaveClash[] | null>(null);
+
   const mark = useMutation({
-    mutationFn: () =>
-      schedulesApi.markLeave(doctorId, date, reason || undefined, endDate || undefined),
-    onSuccess: () => {
+    mutationFn: (force?: boolean) =>
+      schedulesApi.markLeave(doctorId, date, reason || undefined, endDate || undefined, force),
+    onSuccess: (_data, force) => {
       refresh();
+      // The visits on those days now carry an "On leave" warning, and the list
+      // counts them — so the appointments the doctor must ring round about do
+      // not depend on remembering this moment.
+      qc.invalidateQueries({ queryKey: ['appointments'] });
       const span = formatSpan({ from: date, to: endDate || date, reason: null });
+      const moved = force ? clashes?.length ?? 0 : 0;
       toast.success(
         'Leave marked',
-        `${span} ${endDate && endDate !== date ? 'are' : 'is'} now blocked for booking.`,
+        moved > 0
+          ? `${span} ${endDate && endDate !== date ? 'are' : 'is'} now blocked. ` +
+              `${moved} booking${moved === 1 ? '' : 's'} still need${moved === 1 ? 's' : ''} ` +
+              `rescheduling — ${moved === 1 ? 'that patient has' : 'those patients have'} been notified.`
+          : `${span} ${endDate && endDate !== date ? 'are' : 'is'} now blocked for booking.`,
       );
+      setClashes(null);
       setDate('');
       setEndDate('');
       setReason('');
     },
     onError: (e) => {
-      // Surface the blocking bookings clearly (LEAVE_HAS_BOOKINGS).
       if (e instanceof ApiError && e.code === 'LEAVE_HAS_BOOKINGS') {
-        const n = Array.isArray(e.details) ? e.details.length : 0;
-        toast.error(e, `${e.message} (${n} booking${n === 1 ? '' : 's'})`);
+        setClashes(Array.isArray(e.details) ? (e.details as LeaveClash[]) : []);
       } else {
         toast.error(e);
       }
@@ -346,7 +404,7 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
         className="btn btn-primary btn-sm"
         style={{ width: '100%', justifyContent: 'center' }}
         disabled={!canEdit || !date || rangeInvalid || mark.isPending}
-        onClick={() => mark.mutate()}
+        onClick={() => mark.mutate(undefined)}
       >
         {mark.isPending
           ? 'Marking…'
@@ -355,7 +413,8 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
             : 'Mark this date as leave'}
       </button>
       <p className="muted" style={{ fontSize: 12, margin: '10px 0' }}>
-        Blocked if any of the days already has confirmed bookings.
+        If any of the days is already booked, you will be shown the bookings
+        before the leave is marked.
       </p>
 
       <div style={{ borderTop: 'var(--hairline)', paddingTop: 12 }}>
@@ -390,7 +449,74 @@ function LeavePanel({ doctorId, canEdit }: { doctorId: string; canEdit: boolean 
           ))
         )}
       </div>
+
+      {clashes && (
+        <LeaveClashDialog
+          clashes={clashes}
+          busy={mark.isPending}
+          onCancel={() => setClashes(null)}
+          onConfirm={() => mark.mutate(true)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * "These bookings clash — go ahead anyway?"
+ *
+ * Shown instead of refusing. The doctor is going to be away whatever this
+ * screen says; what they need is the list to ring round, which is why each row
+ * carries the patient's number as a `tel:` link rather than just a name.
+ */
+function LeaveClashDialog({
+  clashes,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  clashes: LeaveClash[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      title={`${clashes.length} booking${clashes.length === 1 ? '' : 's'} on these days`}
+      onClose={onCancel}
+      persistent
+      footer={
+        <div className="modal-actions">
+          <button className="btn" onClick={onCancel} disabled={busy}>
+            Go back
+          </button>
+          <button className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+            {busy ? 'Marking…' : 'Mark leave anyway'}
+          </button>
+        </div>
+      }
+    >
+      <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.55, marginTop: 0 }}>
+        The leave will be marked and no new bookings can be made, but these
+        visits stay where they are until you move them. Each patient is told
+        their appointment has to change.
+      </p>
+      <div className="leave-clash-list">
+        {clashes.map((c) => (
+          <div key={c.id} className="leave-clash">
+            <div>
+              <div style={{ fontWeight: 600 }}>{c.patient_name}</div>
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                {formatDate(c.appointment_date)} · {hhmm(c.start_time)}
+              </div>
+            </div>
+            <a className="btn btn-sm" href={`tel:${c.patient_mobile}`}>
+              {c.patient_mobile}
+            </a>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }
 

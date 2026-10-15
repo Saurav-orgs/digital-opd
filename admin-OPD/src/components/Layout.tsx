@@ -13,7 +13,7 @@ import { useCollapsible } from '../lib/collapsePreference';
 import { RAIL, useMediaQuery } from '../lib/useMediaQuery';
 import { TOPBAR_SLOT_ID } from './TopbarPortal';
 import { ConfirmDialog } from './ui';
-import { Clock3, Settings, Zap } from 'lucide-react';
+import { Clock3, LogOut, Settings, Zap } from 'lucide-react';
 import {
   BlockIcon,
   CalendarIcon,
@@ -172,15 +172,24 @@ export default function Layout() {
         {/* Only when nothing was pinned to the foot — otherwise the group
             above brought its own. */}
         {!grouped.some((g) => g.section === 'bottom') && <div className="spacer" />}
+        {/*
+          Shaped as a nav row, not as a button.
+
+          Sign out sits directly under Settings and the two read as a pair, but
+          they were built as different things — Settings a `.nav-item.is-bottom`
+          with a 19px glyph and its label beside it, Sign out a `.btn` with a
+          text ⏻ and a centred label. Collapsed, their icons landed on
+          different centres; expanded, one was left-aligned and the other was
+          not. Same markup and same geometry now; only the colour differs,
+          which is the one thing that should.
+        */}
         <button
-          className="btn btn-logout"
+          className="nav-item is-bottom btn-logout"
           title={expanded ? undefined : 'Sign out'}
           onClick={() => setConfirmingLogout(true)}
         >
+          <LogOut size={19} strokeWidth={1.9} />
           <span className="nav-label">Sign out</span>
-          <span className="logout-short" aria-hidden>
-            ⏻
-          </span>
         </button>
         <PoweredByIttitude className="sidebar-powered-by" />
       </aside>

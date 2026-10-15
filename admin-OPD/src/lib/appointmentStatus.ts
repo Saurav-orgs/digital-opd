@@ -1,4 +1,16 @@
-import type { Appointment } from '../api/types';
+import type { Appointment, ConsultationStatus } from '../api/types';
+
+/**
+ * Is this visit still waiting on the doctor?
+ *
+ * The question behind "pending" on the list, behind which rows a leave day
+ * still owes a consultation for, and behind which visit is next. It lived in
+ * `Dashboard.tsx` until the leave warning needed the same answer on the visit
+ * screen; two copies of a rule about status columns is how they drift.
+ */
+export function isOpen(status: ConsultationStatus): boolean {
+  return status === 'pending' || status === 'on_hold';
+}
 
 /** Today as "YYYY-MM-DD" in the browser's own timezone, the way the server
  *  dates appointments. */
@@ -38,6 +50,18 @@ export function isMissed(a: Appointment): boolean {
   if (isCancelled(a)) return false;
   if (a.consultation_status !== 'pending' && a.consultation_status !== 'on_hold') return false;
   return a.appointment_date < todayIso();
+}
+
+/**
+ * Does this visit have to be moved because the doctor is away that day?
+ *
+ * `on_leave` alone is not the question — it only says the day was marked as
+ * leave, which is just as true of the visit that was cancelled last week and
+ * of the one the doctor already saw. Warning about those sends the clinic
+ * ringing patients who need no call.
+ */
+export function needsReschedule(a: Appointment): boolean {
+  return a.on_leave && isOpen(a.consultation_status) && !isCancelled(a) && !isMissed(a);
 }
 
 /** The status value to render for a visit, `missed` standing in for a stale

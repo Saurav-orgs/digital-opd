@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bell, User, LogIn, FileText, CalendarClock, LogOut, Plus, Menu, X } from 'lucide-react';
+import { Bell, User, LogIn, FileText, CalendarClock, LogOut, Plus, Menu, X, UserCircle } from 'lucide-react';
 import { usePatientAuth } from '../auth/PatientAuthContext';
 import { patientApi } from '../patientApi';
 import { useDoctorCtx } from '../context/DoctorContext';
@@ -74,14 +74,22 @@ export const AccountNav: React.FC = () => {
           <FileText size={14} />
           <span>Reports</span>
         </Link>
+        {/* The account's own page: who is on this number, and everything they
+            have across every doctor. It had no way in at all before. */}
+        <Link to="/profile" className="web-contact-pill web-nav-pill" style={{ textDecoration: 'none' }} title="My profile">
+          <UserCircle size={14} />
+          <span>Profile</span>
+        </Link>
       </div>
 
       {bell}
 
-      <button onClick={logout} className="account-signout" title={`Sign out (${patient.mobile})`}>
+      {/* Was a bare sign-out: an unlabelled person icon that logged you out on
+          one tap. It opens the account now, and signing out is a named item in
+          the menu where it cannot be hit by accident. */}
+      <Link to="/profile" className="account-signout" title={`My profile (${patient.mobile})`}>
         <User size={18} />
-        <LogOut size={14} />
-      </button>
+      </Link>
 
       <button
         className="nav-hamburger"
@@ -109,6 +117,10 @@ export const AccountNav: React.FC = () => {
             <Link to="/reports" className="nav-menu-item" role="menuitem">
               <FileText size={16} />
               <span>My reports</span>
+            </Link>
+            <Link to="/profile" className="nav-menu-item" role="menuitem">
+              <UserCircle size={16} />
+              <span>My profile</span>
             </Link>
             <div className="nav-menu-sep" />
             <div className="nav-menu-mobile">{patient.mobile}</div>

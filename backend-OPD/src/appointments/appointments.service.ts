@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { literal, Op, UniqueConstraintError } from 'sequelize';
 import { ConfigService } from '@nestjs/config';
@@ -8,6 +8,7 @@ import { PatientReport } from '../database/models/patient-report.model';
 import { Doctor } from '../database/models/doctor.model';
 import { PatientProfile } from '../database/models/patient-profile.model';
 import { SlotsService } from '../slots/slots.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { StorageService } from '../uploads/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
@@ -39,6 +40,8 @@ import { nowInClinic, readableDate, to12Hour } from '../common/utils/clinic-time
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     @InjectModel(Appointment) private readonly appointmentModel: typeof Appointment,
     @InjectModel(AppointmentPrescription)
@@ -56,6 +59,9 @@ export class AppointmentsService {
     private readonly blocked: BlockedNumbersService,
     private readonly config: ConfigService,
     private readonly activity: ActivityLogService,
+    // A moved visit is messaged as well as bell-notified; WhatsAppService is
+    // global, so this needs no module import.
+    private readonly whatsapp: WhatsAppService,
   ) {}
 
   /**
@@ -98,8 +104,11 @@ export class AppointmentsService {
         patient_name: dto.patient_name,
         patient_mobile: dto.patient_mobile,
         patient_gender: dto.patient_gender,
-        patient_age: dto.patient_age,
-        patient_address: dto.patient_address,
+        // Derived from the birth date when the form gave one — the same line
+        // the walk-in path uses, so both doors record the age the same way.
+        patient_age:
+          ageFromDob(dto.patient_dob, dto.appointment_date) ?? dto.patient_age ?? null,
+        patient_address: dto.patient_address ?? null,
         patient_city: dto.patient_city,
         patient_state: dto.patient_state,
         patient_pincode: dto.patient_pincode,
@@ -307,6 +316,8 @@ export class AppointmentsService {
     patient_name: string;
     patient_gender?: string;
     patient_dob?: string;
+    /** Only when the patient did not know their birth date; kept as an estimate. */
+    patient_age?: number;
     // Optional: a walk-in can be booked before the desk has the address.
     patient_address?: string;
     patient_city?: string;
@@ -337,6 +348,7 @@ export class AppointmentsService {
       name: dto.patient_name,
       gender: dto.patient_gender,
       dob: dto.patient_dob,
+      age: dto.patient_age,
       address_line: dto.patient_address,
       city: dto.patient_city,
       state: dto.patient_state,
@@ -551,8 +563,16 @@ export class AppointmentsService {
     this.assertOwnership(appointment, user);
     const prescriptions = await this.presignPrescriptions(appointment);
     const reports = await this.reportsForAppointment(id);
+    // The same flag the list carries, so the visit screen can say this day is
+    // on leave rather than the doctor having to notice it back on the list.
+    const leaveKeys = await this.slots.leaveDayKeys([
+      { doctorId: appointment.doctor_id, date: appointment.appointment_date },
+    ]);
     return {
       ...appointment.toJSON(),
+      on_leave: leaveKeys.has(
+        `${appointment.doctor_id}|${appointment.appointment_date}`,
+      ),
       prescriptions,
       reports,
       // Combined AI summary across all of this visit's reports (fields already
@@ -651,6 +671,7 @@ export class AppointmentsService {
         appointment.doctor_id,
         appointment.patient_profile_id,
       );
+      await this.sendRescheduleNotice(appointment, dto.appointment_date, dto.start_time);
     }
 
     this.activity.recordForUser(user, {
@@ -665,6 +686,55 @@ export class AppointmentsService {
     });
 
     return this.withDoctor(id);
+  }
+
+  /**
+   * Tell the patient on WhatsApp that their visit has moved.
+   *
+   * The in-app notification above is the one that always goes out; this
+   * reaches the patient who is not in the app, which for a time change is most
+   * of them. It needs a Meta-approved UTILITY template — outside the 24-hour
+   * window a patient's own reply opens, nothing else may be sent — so until
+   * `WA_RESCHEDULE_TEMPLATE_NAME` names one this is skipped rather than failed.
+   *
+   * Never throws. The appointment has already moved by the time this runs, and
+   * failing the request over an undelivered message would tell the clinic the
+   * reschedule did not save when it did.
+   */
+  private async sendRescheduleNotice(
+    appointment: Appointment,
+    date: string,
+    startTime: string,
+  ): Promise<void> {
+    const template = this.config.get<string>('whatsapp.rescheduleTemplate') ?? '';
+    if (!this.whatsapp.canSendNotice(template)) return;
+    const language =
+      this.config.get<string>('whatsapp.rescheduleTemplateLang') ?? 'en_US';
+
+    const doctor = await this.doctorModel.findByPk(appointment.doctor_id, {
+      attributes: ['id', 'name'],
+    });
+    try {
+      await this.whatsapp.sendTemplate(
+        appointment.patient_mobile,
+        template,
+        language,
+        [
+          appointment.patient_name,
+          // No "Dr" prefix — the stored name carries its own title.
+          doctor?.name ?? 'your doctor',
+          readableDate(date),
+          to12Hour(startTime),
+        ],
+        { kind: 'reschedule_notice', reference: `appointment:${appointment.id}` },
+      );
+    } catch (err) {
+      // Already recorded in `whatsapp_messages` with Meta's own reason; this
+      // line is so the reschedule's own log tells the same story.
+      this.logger.warn(
+        `Reschedule notice for ${appointment.patient_name} was not sent on WhatsApp: ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Doctor uploads one or more prescription images against a visit. */

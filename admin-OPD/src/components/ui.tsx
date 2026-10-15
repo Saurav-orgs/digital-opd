@@ -35,11 +35,12 @@ export function Modal({
   /**
    * Controls pinned to the bottom of the dialog, always on screen.
    *
-   * Without this a modal grows as tall as its content and the page scrolls
-   * behind it, so anything at the end — the action the dialog exists for —
-   * is only found by scrolling past everything else. Passing a footer caps
-   * the height and scrolls the body instead. Modals that pass nothing are
-   * untouched.
+   * Optional, and no longer what decides whether the dialog scrolls — every
+   * modal caps its height and scrolls its body now, footer or not. It used to
+   * be the switch for that, which meant the dialogs that passed nothing grew
+   * past the bottom of the screen and relied on the backdrop scrolling
+   * instead; at phone width the backdrop deliberately does not scroll, so on
+   * a short screen the end of a long form simply could not be reached.
    */
   footer?: ReactNode;
   /**
@@ -52,7 +53,7 @@ export function Modal({
   return (
     <div className="modal-backdrop" onClick={persistent ? undefined : onClose}>
       <div
-        className={`modal ${large ? 'modal-lg' : ''} ${footer ? 'modal-pinned' : ''}`}
+        className={`modal modal-pinned ${large ? 'modal-lg' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/*
@@ -67,14 +68,8 @@ export function Modal({
             ×
           </button>
         </div>
-        {footer ? (
-          <>
-            <div className="modal-body">{children}</div>
-            <div className="modal-foot">{footer}</div>
-          </>
-        ) : (
-          children
-        )}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
       </div>
     </div>
   );

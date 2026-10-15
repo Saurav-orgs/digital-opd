@@ -9,9 +9,11 @@ import { BookingForm } from './pages/BookingForm';
 import { Confirmation } from './pages/Confirmation';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { Login } from './pages/patient/Login';
+import { ForgotPassword } from './pages/patient/ForgotPassword';
 import { MyVisits } from './pages/patient/MyVisits';
 import { Reports } from './pages/patient/Reports';
 import { Patients } from './pages/patient/Patients';
+import { Profile } from './pages/patient/Profile';
 import { Notifications } from './pages/patient/Notifications';
 import { Footer } from './components/Footer';
 import { AccountNav } from './components/AccountNav';
@@ -63,6 +65,7 @@ export default function App() {
                 <Route path="/privacy" element={<PrivacyPolicy />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route
                   path="/visits"
                   element={
@@ -84,6 +87,14 @@ export default function App() {
                   element={
                     <RequirePatientAuth>
                       <Notifications />
+                    </RequirePatientAuth>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <RequirePatientAuth>
+                      <Profile />
                     </RequirePatientAuth>
                   }
                 />
