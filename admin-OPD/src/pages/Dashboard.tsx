@@ -402,6 +402,20 @@ export default function Dashboard() {
             <span className="kpi-num">{counts.total}</span>
           </button>
 
+          {/* Phone only. The statistics drawer carrying the other three
+              figures is off this layout, so the one a doctor acts on comes out
+              beside the total — which also gives that row two halves instead
+              of one chip stretched across it. It filters like the drawer's own
+              tiles do: press again to go back to the whole day. */}
+          <button
+            type="button"
+            className={`kpi kpi-total show-on-phone ${status === 'pending' ? 'selected' : ''}`}
+            onClick={() => setStatus((v) => (v === 'pending' ? 'all' : 'pending'))}
+          >
+            <span className="kpi-label">Pending</span>
+            <span className="kpi-num">{counts.pending}</span>
+          </button>
+
           {/* A switch: it turns a persistent view on and off, which is not
               what a link means. The label does not change with the state —
               the switch position already says which way it is. */}
@@ -425,12 +439,23 @@ export default function Dashboard() {
             expanded
           />
 
+          {/*
+            A circular arrow means "bring this up to date", and that is what it
+            does. It was wired to clear the filters and disabled whenever there
+            were none to clear — so on the ordinary case, an unfiltered list,
+            pressing it did nothing at all and it read as broken. Refreshing is
+            also the thing actually wanted on this screen: bookings arrive
+            while it is open. Filters, when set, are cleared on the way.
+          */}
           <button
-            className="reset-filters-btn"
-            onClick={resetFilters}
-            disabled={!filtersActive}
-            title="Reset filters"
-            aria-label="Reset filters"
+            className={`reset-filters-btn ${listQ.isFetching ? 'is-busy' : ''}`}
+            onClick={() => {
+              if (filtersActive) resetFilters();
+              void listQ.refetch();
+            }}
+            disabled={listQ.isFetching}
+            title={filtersActive ? 'Clear filters and refresh' : 'Refresh'}
+            aria-label={filtersActive ? 'Clear filters and refresh' : 'Refresh'}
           >
             <ResetIcon size={17} />
           </button>

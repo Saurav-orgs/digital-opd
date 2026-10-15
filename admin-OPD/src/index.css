@@ -670,7 +670,10 @@ img {
     its own with the date filling the space between its arrows — it is the
     control the doctor uses most and the one that was being squeezed.
   */
-  .dash-controls {
+  /* Both classes, so this outranks the base `.dash-controls` gap declared
+     further down the file — a single-class rule up here loses to it on source
+     order, and the 50% basis below is measured against this value. */
+  .list-panel-head.dash-controls {
     gap: 8px;
   }
   .dash-controls > .day-nav {
@@ -708,20 +711,23 @@ img {
      (`expanded` on the field) — the row is its own, so there is no width to
      buy back.
   */
+  /* The two figures split their line exactly — 50% less half the gap each —
+     so neither is a chip stretched across the width on its own. */
   .dash-controls .kpi-total {
-    flex: 1 1 auto;
+    order: 1;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
     white-space: nowrap;
   }
-  .dash-controls .reset-filters-btn {
-    order: 1;
-  }
-  .dash-controls .kpi-total {
-    order: 1;
-  }
+  /* Search and refresh share the last line, search taking what is left. */
   .dash-controls .dash-search {
     order: 2;
-    flex: 1 0 100%;
+    flex: 1 1 auto;
     min-width: 0;
+  }
+  .dash-controls .reset-filters-btn {
+    order: 3;
+    flex: 0 0 40px;
   }
   .dash-controls .dash-search .input {
     height: 40px;
@@ -6933,4 +6939,13 @@ tr.family-head td {
   .show-on-phone {
     display: inline-flex;
   }
+}
+
+/* Refreshing: the arrow turns while the list is being fetched, so a press on
+   an already-current day still visibly does something. */
+.reset-filters-btn.is-busy svg {
+  animation: spin 0.7s linear infinite;
+}
+.reset-filters-btn:disabled {
+  cursor: default;
 }
