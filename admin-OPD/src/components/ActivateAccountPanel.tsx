@@ -84,9 +84,17 @@ export function ActivateAccountPanel({
                   {p.name}
                   {p.isRecommended && <span className="renew-plan-tag">Popular</span>}
                 </span>
-                <span className="renew-plan-price">{inr(p.price.total)}</span>
+                {/* The per-month rate leads, as it does on the pricing site:
+                    a year shown only as its one big total reads as dear, when
+                    it is the cheapest way to buy the same month. The full
+                    amount charged stays on the line below, and on the Pay
+                    button, so nothing about the price is hidden. */}
+                <span className="renew-plan-price">
+                  {inr(p.monthly)}
+                  <span className="renew-plan-per">/mo + GST</span>
+                </span>
                 <span className="renew-plan-sub">
-                  {p.months} month{p.months === 1 ? '' : 's'} · incl. {inr(p.price.gst)} GST
+                  {p.months} month{p.months === 1 ? '' : 's'} · {inr(p.price.total)} incl. GST
                 </span>
               </button>
             ))}

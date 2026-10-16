@@ -530,11 +530,39 @@ export class AppointmentsService {
     // count only — presigning a URL per report here would mean an S3 signing
     // call per row, and the list never renders the files themselves.
     const reportCounts = await this.reportCountsFor(rows.map((r) => r.id));
-    return rows.map((r) => ({
+    const result = rows.map((r) => ({
       ...r.toJSON(),
       on_leave: leaveKeys.has(`${r.doctor_id}|${r.appointment_date}`),
       reports_count: reportCounts.get(r.id) ?? 0,
     }));
+    await this.fillMissingAges(result);
+    return result;
+  }
+
+  /**
+   * Fill a null `patient_age` from the patient's profile.
+   *
+   * A visit's age is a snapshot taken when it was booked, and a follow-up (or
+   * any booking made against an existing patient without re-entering their
+   * details) leaves it null — so the list showed a name and reason with no age
+   * beside them. The profile still holds the birth date; this reads the age it
+   * implies on the visit's own date, so a row reads the same whether the age
+   * was captured at booking or is being filled in now. Years only, to match the
+   * snapshot it stands in for.
+   */
+  private async fillMissingAges(rows: Record<string, any>[]): Promise<void> {
+    const need = rows.filter(
+      (r) => r.patient_age == null && r.patient_profile_id,
+    );
+    if (!need.length) return;
+    const dobById = await this.profiles.dobByIds(
+      need.map((r) => r.patient_profile_id as string),
+    );
+    for (const r of need) {
+      const dob = dobById.get(r.patient_profile_id);
+      if (!dob) continue;
+      r.patient_age = ageFromDob(dob, r.appointment_date);
+    }
   }
 
   /** report count per appointment id, in one grouped query. */
@@ -568,7 +596,7 @@ export class AppointmentsService {
     const leaveKeys = await this.slots.leaveDayKeys([
       { doctorId: appointment.doctor_id, date: appointment.appointment_date },
     ]);
-    return {
+    const result = {
       ...appointment.toJSON(),
       on_leave: leaveKeys.has(
         `${appointment.doctor_id}|${appointment.appointment_date}`,
@@ -580,6 +608,8 @@ export class AppointmentsService {
       // _count).
       e_prescription: await this.issuedRx(id),
     };
+    await this.fillMissingAges([result]);
+    return result;
   }
 
   /**

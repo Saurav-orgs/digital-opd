@@ -6,7 +6,7 @@ import { usePatientAuth } from '../../auth/PatientAuthContext';
 import { ApiException, type PatientDetailsInput, type PatientProfile } from '../../types';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { DobField } from '../../components/DobField';
-import { validateDob } from '../../lib/dob';
+import { formatAge, validateDob } from '../../lib/dob';
 
 /**
  * Everyone registered on this number — add, switch to, or remove.
@@ -82,7 +82,7 @@ export const Patients: React.FC = () => {
                   )}
                 </div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 3 }}>
-                  {[p.last_age != null ? `${p.last_age} yrs` : null, p.gender, p.patient_code]
+                  {[formatAge(p.dob) ?? (p.last_age != null ? `${p.last_age} yrs` : null), p.gender, p.patient_code]
                     .filter(Boolean)
                     .join(' · ')}
                 </div>

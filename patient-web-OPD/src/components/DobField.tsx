@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Cake } from 'lucide-react';
-import { ageFromDob, dobFromAge, todayIso } from '../lib/dob';
+import { ageFromDob, dobFromAge, formatAgeLong, todayIso } from '../lib/dob';
 
 /**
  * A patient's age, asked for either way round.
@@ -98,7 +98,7 @@ export function DobField({
       {/* In date mode, the age it works out to is the check that the year was
           not mis-tapped — invisible otherwise until it reaches a prescription. */}
       {mode === 'dob' && age != null && (
-        <span className="dob-note">{age} years old</span>
+        <span className="dob-note">{formatAgeLong(value)} old</span>
       )}
       {error && <span className="error-text">{error}</span>}
     </div>

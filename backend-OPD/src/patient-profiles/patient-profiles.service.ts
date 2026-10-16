@@ -168,6 +168,27 @@ export class PatientProfilesService {
     return this.patientModel.findOne({ where: { mobile } });
   }
 
+  /**
+   * The birth date for a set of profiles, keyed by id.
+   *
+   * Lets a caller fill an age the record knows but an individual row does not —
+   * a follow-up booked without re-entering the patient leaves the appointment's
+   * own `patient_age` null, yet the profile still carries the date of birth.
+   * The caller works the age out on each row's own date, so this returns the
+   * raw birth date rather than an age computed here against one date.
+   */
+  async dobByIds(ids: string[]): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length) return out;
+    const rows = await this.profileModel.findAll({
+      where: { id: { [Op.in]: unique } },
+      attributes: ['id', 'dob'],
+    });
+    for (const p of rows) out.set(p.id, p.dob);
+    return out;
+  }
+
   async findOrCreateAccount(mobile: string): Promise<Patient> {
     const existing = await this.patientModel.findOne({ where: { mobile } });
     if (existing) return existing;

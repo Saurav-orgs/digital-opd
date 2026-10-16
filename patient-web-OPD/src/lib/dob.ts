@@ -64,3 +64,66 @@ export function validateDob(dob: string, required: boolean): string | null {
   if (!dob) return required ? 'Please enter a date of birth, or the age.' : null;
   return ageFromDob(dob) == null ? 'Please enter a valid date of birth.' : null;
 }
+
+
+/**
+ * Years and months between a birth date and a reference date (today by
+ * default), or null for an unusable date. Months matter for the young: a
+ * six-month-old and a two-year-old are both "0 yrs" to {@link ageFromDob}.
+ */
+export function ageYm(
+  dob: string,
+  asOf?: string,
+): { years: number; months: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
+  const [by, bm, bd] = dob.split('-').map(Number);
+  let ry: number;
+  let rm: number;
+  let rd: number;
+  if (asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    [ry, rm, rd] = asOf.split('-').map(Number);
+  } else {
+    const now = new Date();
+    ry = now.getFullYear();
+    rm = now.getMonth() + 1;
+    rd = now.getDate();
+  }
+  let years = ry - by;
+  let months = rm - bm;
+  if (rd < bd) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  return years < 0 || years > 120 ? null : { years, months };
+}
+
+/**
+ * A compact age for a list: "6 mo", "2 yr 3 mo", "25 yrs". Months are shown
+ * only under five years — the age where they carry clinical weight; past that
+ * they are noise beside the year.
+ */
+export function formatAge(dob: string | null, asOf?: string): string | null {
+  if (!dob) return null;
+  const ym = ageYm(dob, asOf);
+  if (!ym) return null;
+  const { years, months } = ym;
+  if (years < 1) return `${months} mo`;
+  if (months > 0) return `${years} yr${years === 1 ? '' : 's'} ${months} mo`;
+  return `${years} yr${years === 1 ? '' : 's'}`;
+}
+
+/**
+ * The spelled-out age the booking form shows under the picker: "6 months",
+ * "2 years and 3 months", "25 years". Same under-five rule for the months.
+ */
+export function formatAgeLong(dob: string, asOf?: string): string | null {
+  const ym = ageYm(dob, asOf);
+  if (!ym) return null;
+  const { years, months } = ym;
+  const yStr = `${years} year${years === 1 ? '' : 's'}`;
+  const mStr = `${months} month${months === 1 ? '' : 's'}`;
+  if (years < 1) return mStr;
+  if (months > 0) return `${yStr} ${mStr}`;
+  return yStr;
+}
