@@ -12,16 +12,23 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
  * the moment someone types, which is exactly when they need to know what the
  * box was for.
  */
-export function Field({ label, hint, error, id, ...props }: FieldProps) {
+export function Field({ label, hint, error, id, required, ...props }: FieldProps) {
   const auto = useId();
   const fieldId = id ?? auto;
   const hintId = `${fieldId}-hint`;
   return (
     <div className="field">
-      <label htmlFor={fieldId}>{label}</label>
+      <label htmlFor={fieldId}>
+        {label}
+        {required && <span className="req" aria-hidden="true">*</span>}
+      </label>
       <input
         id={fieldId}
         className={`input ${error ? 'is-error' : ''}`}
+        // aria-required, not the native attribute: the form validates itself
+        // and shows its own inline errors, which the browser bubble would
+        // jump in front of.
+        aria-required={required || undefined}
         aria-invalid={error ? true : undefined}
         aria-describedby={hint || error ? hintId : undefined}
         {...props}
@@ -36,19 +43,23 @@ export function Field({ label, hint, error, id, ...props }: FieldProps) {
 }
 
 /** Same, with a show/hide toggle — typing a password blind is how they get mistyped. */
-export function PasswordField({ label, hint, error, id, ...props }: FieldProps) {
+export function PasswordField({ label, hint, error, id, required, ...props }: FieldProps) {
   const auto = useId();
   const fieldId = id ?? auto;
   const hintId = `${fieldId}-hint`;
   const [shown, setShown] = useState(false);
   return (
     <div className="field">
-      <label htmlFor={fieldId}>{label}</label>
+      <label htmlFor={fieldId}>
+        {label}
+        {required && <span className="req" aria-hidden="true">*</span>}
+      </label>
       <div className="field-with-btn">
         <input
           id={fieldId}
           type={shown ? 'text' : 'password'}
           className={`input ${error ? 'is-error' : ''}`}
+          aria-required={required || undefined}
           aria-invalid={error ? true : undefined}
           aria-describedby={hint || error ? hintId : undefined}
           {...props}

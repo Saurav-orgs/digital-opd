@@ -24,6 +24,25 @@ export function bookingUrlOf(doctor: Doctor): string {
 export function BookingQrModal({ doctor, onClose }: { doctor: Doctor; onClose: () => void }) {
   const toast = useToast();
   const url = bookingUrlOf(doctor);
+  const [downloading, setDownloading] = useState(false);
+
+  // The bytes come from the API, not from `qr_code_url`: that S3 link is
+  // cross-origin, so the `download` attribute on an <a> is ignored and the
+  // image merely opened in a new tab — the bug this replaces. `myQrFile`
+  // reads the same QR through the API, where it is CORS-readable and saves.
+  const downloadQr = async () => {
+    setDownloading(true);
+    try {
+      const { blob, filename } = await doctorsApi.myQrFile();
+      downloadFile(new File([blob], filename, { type: blob.type || 'image/png' }));
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not download the QR code.',
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <Modal title="Booking link & QR" onClose={onClose}>
@@ -49,9 +68,9 @@ export function BookingQrModal({ doctor, onClose }: { doctor: Doctor; onClose: (
           Copy link
         </button>
         {doctor.qr_code_url && (
-          <a className="btn btn-sm" href={doctor.qr_code_url} target="_blank" rel="noreferrer" download="doctor-booking-qr.png">
-            ⬇ Download QR
-          </a>
+          <button className="btn btn-sm" onClick={downloadQr} disabled={downloading}>
+            {downloading ? 'Preparing…' : '⬇ Download QR'}
+          </button>
         )}
         {doctor.qr_code_url && <ShareQrButton doctorName={doctor.name} bookingUrl={url} />}
       </div>

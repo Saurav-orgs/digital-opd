@@ -237,6 +237,7 @@ export default function Signup() {
                 <Field label="Email" value={form.email} disabled readOnly />
                 <PasswordField
                   label="Password"
+                  required
                   autoComplete="current-password"
                   error={
                     submitted && !form.password ? 'Enter the password for this account.' : null
@@ -246,6 +247,7 @@ export default function Signup() {
                 />
                 <Field
                   label="Mobile number"
+                  required
                   inputMode="numeric"
                   autoComplete="tel"
                   maxLength={10}
@@ -299,6 +301,7 @@ export default function Signup() {
               >
                 <Field
                   label="Email"
+                  required
                   type="email"
                   autoComplete="email"
                   placeholder="you@clinic.com"
@@ -309,6 +312,7 @@ export default function Signup() {
                 />
                 <Field
                   label="Mobile number"
+                  required
                   inputMode="numeric"
                   autoComplete="tel"
                   maxLength={10}
@@ -323,6 +327,7 @@ export default function Signup() {
                 />
                 <PasswordField
                   label="Password"
+                  required
                   autoComplete="new-password"
                   hint="At least 8 characters."
                   error={errorFor('password')}
@@ -332,6 +337,7 @@ export default function Signup() {
                 />
                 <PasswordField
                   label="Confirm password"
+                  required
                   autoComplete="new-password"
                   // Typed and different is wrong straight away; waiting for a
                   // blur to say so just means typing the rest of it twice.
@@ -374,6 +380,7 @@ export default function Signup() {
               >
                 <Field
                   label="Verification code"
+                  required
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   maxLength={6}

@@ -193,7 +193,7 @@ function RoleModal({ role, onClose }: { role: Role | null; onClose: () => void }
   return (
     <Modal title={role ? 'Edit role' : 'Add role'} onClose={onClose} large>
       <div className="grid cols-2">
-        <Field label="Name">
+        <Field label="Name" required>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Description">

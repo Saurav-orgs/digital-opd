@@ -652,11 +652,36 @@ svg {
   font-size: 1rem;
   box-shadow: var(--shadow-sm);
 }
-/* Safari paints its own clear button inside a type=search; the field already
-   has one affordance and does not need two. */
+/* Safari paints its own clear button inside a type=search. Hidden in favour of
+   `.finder-clear`, which is the same affordance at a size a thumb can hit and
+   in both browsers rather than one. */
 .finder-input::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;
+}
+/* The room for the clear button is held whether or not it is there: a field
+   that re-wraps its placeholder the moment a letter is typed reads as a jump. */
+.finder-field .finder-input {
+  padding-right: 48px;
+}
+.finder-clear {
+  position: absolute;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.finder-clear:hover {
+  background: var(--sage-tint);
+  color: var(--text);
 }
 /* Over the content below rather than pushing it down — a list that reflows
    the page as it loads moves the row out from under the cursor. */
@@ -1264,6 +1289,12 @@ svg {
 .field label {
   font-size: 0.9rem;
   font-weight: 600;
+}
+/* The required asterisk on a field label. Same red and spacing as the doctor
+   app's own `.req`, since a patient who signs up here meets that app next. */
+.field label .req {
+  color: var(--danger);
+  margin-left: 2px;
 }
 .input {
   width: 100%;

@@ -146,10 +146,10 @@ function PathlabModal({ lab, onClose }: { lab: User | null; onClose: () => void 
 
   return (
     <Modal title={lab ? 'Edit pathlab' : 'Add pathlab'} onClose={onClose}>
-      <Field label="Lab name">
+      <Field label="Lab name" required>
         <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
-      <Field label="Email">
+      <Field label="Email" required>
         <input
           className="input"
           type="email"
@@ -158,6 +158,7 @@ function PathlabModal({ lab, onClose }: { lab: User | null; onClose: () => void 
         />
       </Field>
       <Field
+        required={!lab}
         label={lab ? 'New password (leave blank to keep)' : 'Password'}
         error={!lab && form.password && form.password.length < 8 ? 'Password must be at least 8 characters.' : undefined}
       >

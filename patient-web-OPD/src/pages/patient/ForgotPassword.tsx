@@ -139,7 +139,7 @@ export function ForgotPassword() {
             <div className="form-field">
               <label className="form-label icon-label">
                 <Phone size={14} color="var(--text-secondary)" />
-                <span>Mobile Number</span>
+                <span>Mobile Number *</span>
               </label>
               <input
                 type="tel"
@@ -185,7 +185,7 @@ export function ForgotPassword() {
                   </span>
                 </p>
                 <div className="form-field">
-                  <label className="form-label">Verification code</label>
+                  <label className="form-label">Verification code *</label>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -229,7 +229,7 @@ export function ForgotPassword() {
                 <div className="form-field">
                   <label className="form-label icon-label">
                     <Lock size={14} color="var(--text-secondary)" />
-                    <span>New password</span>
+                    <span>New password *</span>
                   </label>
                   <PasswordField
                     placeholder="At least 8 characters"
@@ -247,7 +247,7 @@ export function ForgotPassword() {
                 <div className="form-field">
                   <label className="form-label icon-label">
                     <Lock size={14} color="var(--text-secondary)" />
-                    <span>Confirm new password</span>
+                    <span>Confirm new password *</span>
                   </label>
                   <PasswordField
                     placeholder="Re-enter your password"

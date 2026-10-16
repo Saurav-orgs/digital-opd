@@ -37,10 +37,23 @@ export function HistoryVisit({ visit: h }: { visit: Appointment }) {
         <div style={{ fontSize: 13, marginTop: 6, whiteSpace: 'pre-wrap' }}>{h.doctor_notes}</div>
       )}
 
-      {h.prescriptions.length > 0 && (
+      {(h.e_prescription?.pdf_url || h.prescriptions.length > 0) && (
         <>
           <div className="history-sub-label">Prescriptions</div>
-          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            {/* The issued document itself — a typed or dictated prescription
+                leaves no image to thumbnail, so without this the common case
+                had no way to open it from the history at all. */}
+            {h.e_prescription?.pdf_url && (
+              <a
+                className="btn btn-sm"
+                href={h.e_prescription.pdf_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View prescription
+              </a>
+            )}
             {h.prescriptions.map((p) => (
               <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
                 <img

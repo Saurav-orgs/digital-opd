@@ -285,10 +285,10 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
 
   return (
     <Modal title={user ? 'Edit team member' : 'Add team member'} onClose={onClose} large persistent>
-      <Field label="Name">
+      <Field label="Name" required>
         <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
-      <Field label="Email">
+      <Field label="Email" required>
         <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         {!user && (
           <span className="hint">
@@ -322,7 +322,7 @@ function UserModal({ user, onClose }: { user: User | null; onClose: () => void }
           <span className="hint">Must be at least 8 characters.</span>
         </Field>
       )}
-      <label className="form-label">What they can do</label>
+      <label className="form-label">What they can do <span className="req" aria-hidden="true">*</span></label>
       <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
         Screens they can <strong>read</strong> appear in their menu. Untick what
         this person should not touch.

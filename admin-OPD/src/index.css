@@ -2169,8 +2169,10 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text-secondary);
 }
 
-/* The required asterisk on a field label. */
-.field label .req {
+/* The required asterisk on a field label — on a `Field`'s own label and on a
+   standalone `.form-label` (the permission matrix's heading uses one). */
+.field label .req,
+.form-label .req {
   color: var(--danger);
   margin-left: 2px;
 }
@@ -3294,11 +3296,33 @@ tr.appt-row.upcoming td:first-child {
   flex: 0 0 auto;
   min-width: 0;
 }
-/* The native search clear would sit under our own close button. */
-.dash-search.is-open .input {
+/* Same button, same place, whichever of the two is rendered — `SearchField`
+   never shows both. */
+.dash-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dash-search-clear:hover {
+  color: var(--text);
+}
+/* The native search clear would sit under our own button. */
+.dash-search.is-open .input,
+.dash-search.has-clear .input {
   padding-right: 38px;
 }
-.dash-search.is-open .input::-webkit-search-cancel-button {
+.dash-search .input::-webkit-search-cancel-button {
   display: none;
 }
 
@@ -4191,6 +4215,107 @@ tr.appt-row.upcoming td:first-child {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: inset 0 0 0 3px #fff;
+}
+
+/* ── Date of birth as three wheels ───────────────────────────
+   A native date box asks the desk to page a calendar back 30 years for a
+   typical patient and 80 for an elderly one. Three snapping columns are one
+   flick each. `--dob-row` is the row height and the whole geometry: the column
+   is five rows tall and padded by two, so row N sits in the middle band at a
+   scroll offset of exactly N rows — `DobWheel.tsx` reads positions back that
+   way, so the two numbers cannot drift apart. */
+.dob-wheel {
+  --dob-row: 34px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  overflow: hidden;
+}
+.dob-wheel-heads {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--surface-2);
+}
+.dob-wheel-heads span {
+  padding: 5px 0;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.dob-wheel-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+}
+/* The band marks the value, so it sits under the rows and never takes a
+   pointer event — a click has to reach the row it is drawn over. */
+.dob-wheel-band {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: calc(var(--dob-row) * 2);
+  height: var(--dob-row);
+  border-radius: var(--radius-control);
+  background: var(--sage-tint);
+  pointer-events: none;
+}
+.dob-wheel.is-unset .dob-wheel-band {
+  background: var(--surface-3);
+}
+.dob-wheel-col {
+  position: relative;
+  height: calc(var(--dob-row) * 5);
+  padding: calc(var(--dob-row) * 2) 0;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  /* A flick that runs off the end of a wheel must not go on to scroll the
+     dialog behind it — on a phone that moved the form out from under the
+     thumb mid-answer. */
+  overscroll-behavior: contain;
+  /* Fades the ends so the column reads as a wheel rather than a cut-off list,
+     and so the rows above and below the band are visibly not the answer. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 28%,
+    #000 72%,
+    transparent
+  );
+  mask-image: linear-gradient(to bottom, transparent, #000 28%, #000 72%, transparent);
+  scrollbar-width: none;
+}
+.dob-wheel-col::-webkit-scrollbar {
+  display: none;
+}
+.dob-wheel-col:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dob-wheel-col + .dob-wheel-col {
+  border-left: 1px solid var(--border-2);
+}
+.dob-wheel-opt {
+  height: var(--dob-row);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  scroll-snap-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.dob-wheel-opt.is-on {
+  font-weight: 700;
+  color: var(--teal-dark);
+}
+.dob-wheel.is-unset .dob-wheel-opt.is-on {
+  color: var(--text-secondary);
 }
 
 /* Gender as three buttons rather than a select: three options, and the answer
@@ -5146,6 +5271,24 @@ tr.appt-row.upcoming td:first-child {
   justify-content: center;
   gap: 7px;
   margin-top: 4px;
+}
+/* "View prescription" under a past visit — a quiet text link, not a second
+   button competing with the row it hangs off. Indented to the row's own text,
+   and sized to sit under the medicines without crowding the next visit. */
+.vh-rx {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 3px 0 2px;
+  padding: 2px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.vh-rx:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
 }
 .vh-dx {
   font-size: 12.5px;

@@ -383,9 +383,21 @@ export function SearchField({
   }, [phone]);
 
   const collapsed = phone && !expanded && !open;
+  /*
+   * The close button below already empties the box on its way out, so a field
+   * that has one does not get a second cross beside it. Everywhere else — the
+   * whole desktop, and every screen that keeps its box open — clearing used to
+   * mean select-all then delete, with the list behind it re-filtering on each
+   * keystroke of the backspace.
+   */
+  const clearable = value !== '' && !(phone && !expanded);
 
   return (
-    <div className={`dash-search ${collapsed ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}>
+    <div
+      className={`dash-search ${collapsed ? 'is-collapsed' : ''} ${open ? 'is-open' : ''} ${
+        clearable ? 'has-clear' : ''
+      }`}
+    >
       {collapsed ? (
         <button
           type="button"
@@ -410,6 +422,21 @@ export function SearchField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
+          {clearable && (
+            <button
+              type="button"
+              className="dash-search-clear"
+              // Focus stays in the box: clearing is the start of the next
+              // search, not the end of this one.
+              onClick={() => {
+                onChange('');
+                inputRef.current?.focus();
+              }}
+              aria-label="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
           {phone && !expanded && (
             <button
               type="button"
