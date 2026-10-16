@@ -149,7 +149,7 @@ export const Login: React.FC = () => {
           <div className="form-field">
             <label className="form-label icon-label">
               <Phone size={14} color="var(--text-secondary)" />
-              <span>Mobile Number</span>
+              <span>Mobile Number *</span>
             </label>
             <input
               type="tel"
@@ -178,7 +178,7 @@ export const Login: React.FC = () => {
           <div className="form-field">
             <label className="form-label icon-label">
               <Lock size={14} color="var(--text-secondary)" />
-              <span>{mode === 'login' ? 'Password' : 'Create a password'}</span>
+              <span>{mode === 'login' ? 'Password *' : 'Create a password *'}</span>
             </label>
             <PasswordField
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -206,7 +206,7 @@ export const Login: React.FC = () => {
               <div className="form-field">
                 <label className="form-label icon-label">
                   <Lock size={14} color="var(--text-secondary)" />
-                  <span>Confirm password</span>
+                  <span>Confirm password *</span>
                 </label>
                 <PasswordField
                   placeholder="Re-enter your password"
@@ -221,7 +221,7 @@ export const Login: React.FC = () => {
               <div className="form-field">
                 <label className="form-label icon-label">
                   <User size={14} color="var(--text-secondary)" />
-                  <span>Patient’s Full Name</span>
+                  <span>Patient’s Full Name *</span>
                 </label>
                 <input
                   type="text"
@@ -234,7 +234,7 @@ export const Login: React.FC = () => {
 
               <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
                 <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label">Gender</label>
+                  <label className="form-label">Gender *</label>
                   <select
                     className="form-input"
                     value={gender}
@@ -260,7 +260,7 @@ export const Login: React.FC = () => {
 
               <div style={{ display: 'flex', gap: 12 , flexWrap: 'wrap' }}>
                 <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label">City</label>
+                  <label className="form-label">City *</label>
                   <input
                     type="text"
                     className="form-input"
@@ -270,7 +270,7 @@ export const Login: React.FC = () => {
                   />
                 </div>
                 <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label">State</label>
+                  <label className="form-label">State *</label>
                   <input
                     type="text"
                     className="form-input"
@@ -280,7 +280,7 @@ export const Login: React.FC = () => {
                   />
                 </div>
                 <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label">PIN Code</label>
+                  <label className="form-label">PIN Code *</label>
                   <input
                     type="text"
                     inputMode="numeric"

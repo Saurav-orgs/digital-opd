@@ -65,7 +65,7 @@ export default function ChangePassword() {
             password. Choose your own to continue.
           </p>
 
-          <Field label="Temporary password">
+          <Field label="Temporary password" required>
             <PasswordInput
               autoComplete="current-password"
               placeholder="The one from your email"
@@ -74,7 +74,7 @@ export default function ChangePassword() {
             />
           </Field>
 
-          <Field label="New password">
+          <Field label="New password" required>
             <PasswordInput
               placeholder="At least 8 characters"
               value={next}
@@ -82,7 +82,7 @@ export default function ChangePassword() {
             />
           </Field>
 
-          <Field label="Confirm new password">
+          <Field label="Confirm new password" required>
             <PasswordInput
               placeholder="Type it again"
               value={confirm}

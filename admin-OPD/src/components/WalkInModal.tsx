@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi, patientProfilesApi } from '../api/endpoints';
 import type { PatientProfile } from '../api/types';
 import { useToast } from './Toast';
+import { DobWheel } from './DobWheel';
 import { Field, Modal } from './ui';
 import { initials } from '../lib/avatar';
 import { prettyDate } from '../lib/patientFormat';
@@ -335,18 +336,10 @@ export function WalkInModal({
           </Field>
 
           {/* Date of birth, not age: an age typed at the desk is wrong within a
-              year, and this record outlives the visit. */}
+              year, and this record outlives the visit. Asked on wheels rather
+              than a native date box — see DobWheel for why. */}
           <Field label="Date of birth *">
-            <input
-              className="input"
-              type="date"
-              max={new Date().toISOString().slice(0, 10)}
-              value={dob}
-              onChange={(e) => setDob(e.target.value)}
-            />
-            {dob && ageFromDob(dob) && (
-              <span className="hint">{ageFromDob(dob)} years old</span>
-            )}
+            <DobWheel value={dob} onChange={setDob} />
           </Field>
 
           <Field label="Reason for visit">

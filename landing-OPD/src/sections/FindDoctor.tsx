@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Search, Stethoscope } from 'lucide-react';
+import { ArrowRight, Search, Stethoscope, X } from 'lucide-react';
 import { doctorsApi, type PublicDoctor } from '../api';
 
 /** Long enough that a name is not searched letter by letter, short enough to feel live. */
@@ -47,6 +47,7 @@ export function FindDoctor() {
   /** Which row the keyboard is on; -1 is "none, the input has it". */
   const [active, setActive] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const term = query.trim();
   const ready = term.length >= MIN_CHARS;
@@ -158,6 +159,7 @@ export function FindDoctor() {
             <div className="finder-field">
               <Search size={18} className="finder-icon" aria-hidden />
               <input
+                ref={inputRef}
                 className="input finder-input"
                 type="search"
                 value={query}
@@ -176,6 +178,25 @@ export function FindDoctor() {
                 onFocus={() => setOpen(true)}
                 onKeyDown={onKeyDown}
               />
+              {/* Starting a second search meant selecting the first one and
+                  typing over it, or holding backspace through a clinic name.
+                  Focus goes back to the box, because clearing is the start of
+                  the next search and not the end of this one. */}
+              {query !== '' && (
+                <button
+                  type="button"
+                  className="finder-clear"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setQuery('');
+                    setActive(-1);
+                    setOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <X size={18} aria-hidden />
+                </button>
+              )}
             </div>
 
             {showDropdown && (

@@ -37,7 +37,9 @@ export function FAQ() {
         </div>
         <div className="faq-list reveal">
           {FAQS.map((f) => (
-            <details key={f.q} className="faq">
+            // `name` makes the group an exclusive accordion natively: opening
+            // one closes whichever was open, with no state to keep in sync.
+            <details key={f.q} name="faq" className="faq">
               <summary>
                 <span>{f.q}</span>
                 <ChevronDown size={20} aria-hidden="true" />

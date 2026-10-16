@@ -128,7 +128,7 @@ export default function Profile({ embedded = false }: { embedded?: boolean } = {
       <div className="grid cols-2-1">
         <div className="card">
           <div className="grid cols-2">
-            <Field label="Name">
+            <Field label="Name" required>
               <input className="input" disabled={!canEdit} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <Field label="Specialization">
@@ -299,14 +299,14 @@ function ChangePasswordCard() {
   return (
     <div className="card">
       <div className="card-title">Change password</div>
-      <Field label="Current password">
+      <Field label="Current password" required>
         <PasswordInput
           value={current}
           onChange={(e) => setCurrent(e.target.value)}
           autoComplete="current-password"
         />
       </Field>
-      <Field label="New password">
+      <Field label="New password" required>
         <PasswordInput
           placeholder="min 8 characters"
           value={next}
@@ -318,7 +318,7 @@ function ChangePasswordCard() {
           Password must be at least 8 characters.
         </p>
       )}
-      <Field label="Confirm new password">
+      <Field label="Confirm new password" required>
         <PasswordInput
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

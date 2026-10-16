@@ -36,7 +36,7 @@ import { useCollapsible } from '../lib/collapsePreference';
 import { appointmentRefetchInterval, hasTrajectory } from '../lib/summaryPolling';
 import { avatarTone, initials } from '../lib/avatar';
 import { ReportViewerModal, SummaryModal } from '../components/ReportViewer';
-import { AlertTriangle, Eye, History } from 'lucide-react';
+import { AlertTriangle, Eye, FileText, History } from 'lucide-react';
 import { formatDuration } from '../lib/duration';
 import {
   CheckCircleIcon,
@@ -262,6 +262,10 @@ function PreviousVisits({ appointment }: { appointment: Appointment }) {
       <ul className="vh-list">
         {visits.map((v) => {
           const rx = v.e_prescription;
+          // The issued document first; a photographed pad is the prescription
+          // too when that is how the visit was written. A draft has no
+          // `pdf_url`, so nothing to open — and the button stays off.
+          const rxUrl = rx?.pdf_url ?? v.prescriptions?.[0]?.url ?? null;
           return (
             <li key={v.id}>
               <button
@@ -300,6 +304,24 @@ function PreviousVisits({ appointment }: { appointment: Appointment }) {
                   </span>
                 ) : null}
               </button>
+              {/* Straight to the previous visit's prescription — the question
+                  the doctor opened the card to answer, without first loading
+                  the whole visit. Opens in a new tab so this consultation,
+                  and anything half-typed in it, stays put. */}
+              {rxUrl && (
+                <a
+                  className="vh-rx"
+                  href={rxUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  // The row above navigates on click; keep this link's own
+                  // click from also bubbling into that.
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <FileText size={13} aria-hidden="true" />
+                  View prescription
+                </a>
+              )}
             </li>
           );
         })}

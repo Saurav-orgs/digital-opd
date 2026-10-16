@@ -97,7 +97,7 @@ export default function ForgotPassword() {
               Enter the email you sign in with and we will send you a code to
               choose a new password.
             </p>
-            <Field label="Email">
+            <Field label="Email" required>
               <input
                 className="input"
                 type="email"
@@ -121,7 +121,7 @@ export default function ForgotPassword() {
               If <strong>{email.trim()}</strong> has an account, a 6-digit code is
               on its way. It expires in 10 minutes.
             </p>
-            <Field label="Code">
+            <Field label="Code" required>
               <input
                 className="input verify-code"
                 inputMode="numeric"
@@ -172,7 +172,7 @@ export default function ForgotPassword() {
             <p className="muted" style={{ marginTop: 18, marginBottom: 24 }}>
               Code accepted. Choose a new password for <strong>{email.trim()}</strong>.
             </p>
-            <Field label="New password" error={tooShort ? 'Password must be at least 8 characters.' : undefined}>
+            <Field label="New password" required error={tooShort ? 'Password must be at least 8 characters.' : undefined}>
               <PasswordInput
                 placeholder="At least 8 characters"
                 value={password}
@@ -181,7 +181,7 @@ export default function ForgotPassword() {
                 autoFocus
               />
             </Field>
-            <Field label="Confirm new password" error={mismatch ? 'Passwords do not match.' : undefined}>
+            <Field label="Confirm new password" required error={mismatch ? 'Passwords do not match.' : undefined}>
               <PasswordInput
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}

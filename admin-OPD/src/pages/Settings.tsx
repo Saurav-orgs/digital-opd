@@ -132,7 +132,7 @@ export default function SettingsPage() {
           reachable from a patient's phone, not just from this machine.
         </p>
 
-        <Field label="Base URL">
+        <Field label="Base URL" required>
           <input
             className="input"
             placeholder="https://booking.myclinic.com"

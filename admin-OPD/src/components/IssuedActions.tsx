@@ -5,7 +5,7 @@ import { useToast } from './Toast';
 import { ConfirmDialog } from './ui';
 import { PrintPrescriptionButton, WhatsAppPrescriptionButton } from './PrescriptionPreview';
 import { ApiError } from '../api/client';
-import { shareFile } from '../lib/shareFile';
+import { downloadFile, shareFile } from '../lib/shareFile';
 
 /**
  * Sends the issued prescription out through the platform's share sheet as the
@@ -48,6 +48,40 @@ function SharePrescriptionButton({ appointmentId }: { appointmentId: string }) {
   return (
     <button className="btn btn-sm btn-primary" onClick={onShare} disabled={busy}>
       {busy ? 'Preparing…' : '↗ Share'}
+    </button>
+  );
+}
+
+/**
+ * Saves the issued PDF to disk.
+ *
+ * The bytes come from the API, not from the presigned S3 `pdf_url` next to it:
+ * a cross-origin link honours neither the `download` attribute nor a scripted
+ * save, so that link could only ever *open* the PDF in a new tab — which is the
+ * bug this replaces. Fetched through the API, the same document is CORS-readable
+ * and goes straight to the downloads folder.
+ */
+function DownloadPdfButton({ appointmentId }: { appointmentId: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const onDownload = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await consultationApi.prescriptionPdf(appointmentId);
+      downloadFile(new File([blob], filename, { type: 'application/pdf' }));
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not download the prescription.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button className="btn btn-sm" onClick={onDownload} disabled={busy}>
+      {busy ? 'Preparing…' : 'Download PDF'}
     </button>
   );
 }
@@ -110,11 +144,7 @@ export function IssuedActions({
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="badge badge-available">Issued</span>
         <div className="row" style={{ gap: 8 }}>
-          {pdfUrl && (
-            <a className="btn btn-sm" href={pdfUrl} target="_blank" rel="noreferrer">
-              Download PDF
-            </a>
-          )}
+          {pdfUrl && <DownloadPdfButton appointmentId={appointmentId} />}
           <PrintPrescriptionButton appointmentId={appointmentId} />
           <SharePrescriptionButton appointmentId={appointmentId} />
           <WhatsAppPrescriptionButton appointmentId={appointmentId} />

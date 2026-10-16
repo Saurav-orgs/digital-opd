@@ -145,7 +145,7 @@ export default function Login() {
             </p>
             {orderNote}
             <form onSubmit={onSubmit}>
-              <Field label="Email">
+              <Field label="Email" required>
                 <input
                   className="input"
                   type="email"
@@ -155,7 +155,7 @@ export default function Login() {
                   required
                 />
               </Field>
-              <Field label="Password">
+              <Field label="Password" required>
                 <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
