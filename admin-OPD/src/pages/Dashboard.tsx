@@ -1011,13 +1011,22 @@ function AppointmentCard({
   const over = done || cancelled || missed || a.consultation_status === 'no_show';
   // "M · 29 yrs · 2 reports", so the line has room for the number beside it
   // and the card stays two rows tall whatever the name and number are.
-  const who = [
+  // Age and gender lead and are always shown; the reason for visit follows and
+  // is clipped with an ellipsis, so a long one ("Follow-up for …") cannot push
+  // the age off the card or wrap it onto a third line.
+  const whoBase = [
     shortGender(a.patient_gender),
     a.patient_age && `${a.patient_age} yrs`,
     reportsLabel(a.reports_count),
   ]
     .filter(Boolean)
     .join(' · ');
+  const reasonFull = a.description?.trim() || '';
+  // The phone card cuts the reason at 12 characters (spaces counted) and adds
+  // an ellipsis — the strict limit the desk asked for, rather than the pixel
+  // clip the table row uses. The full text stays in the title tooltip.
+  const reason =
+    reasonFull.length > 12 ? `${reasonFull.slice(0, 12).trimEnd()}…` : reasonFull;
 
   return (
     <div className={`appt-card ${bucket}`} onClick={onClick} role="button" tabIndex={0}
@@ -1048,7 +1057,17 @@ function AppointmentCard({
               </span>
             )}
           </div>
-          {who && <div className="appt-meta">{who}</div>}
+          {(whoBase || reasonFull) && (
+            <div className="appt-meta">
+              {whoBase}
+              {whoBase && reasonFull ? ' · ' : ''}
+              {reasonFull && (
+                <span className="appt-reason" title={reasonFull}>
+                  {reason}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <span className="appt-card-right">
           <span className={`appt-time-badge ${over ? 'is-done' : ''}`}>
@@ -1127,14 +1146,16 @@ function AppointmentRow({
   onClick: () => void;
 }) {
   // The report count has a column of its own now, so it comes off this line.
-  const who = [
+  // Gender and age lead and are always shown; the reason follows, clipped with
+  // an ellipsis so a long one does not shove the age out or wrap the row.
+  const whoBase = [
     // Capitalised, as the design has it — the column stores "female".
     a.patient_gender && a.patient_gender[0].toUpperCase() + a.patient_gender.slice(1),
     a.patient_age && `${a.patient_age} yrs`,
-    a.description?.trim() || null,
   ]
     .filter(Boolean)
     .join(' · ');
+  const reason = a.description?.trim() || '';
 
   const over =
     isDone(a.consultation_status) || isCancelled(a) || isMissed(a);
@@ -1171,7 +1192,17 @@ function AppointmentRow({
             {/* Age, gender and the report count fold under the name rather
                 than taking columns of their own, which is what the design's
                 table does. */}
-            {who && <span className="row-sub">{who}</span>}
+            {(whoBase || reason) && (
+              <span className="row-sub">
+                {whoBase}
+                {whoBase && reason ? ' · ' : ''}
+                {reason && (
+                  <span className="appt-reason" title={reason}>
+                    {reason}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
         </span>
       </td>

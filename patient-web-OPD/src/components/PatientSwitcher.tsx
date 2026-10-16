@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatAge } from '../lib/dob';
 import { Link } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { usePatientAuth } from '../auth/PatientAuthContext';
@@ -98,7 +99,7 @@ export const RequirePatient: React.FC<{ children: React.ReactNode }> = ({
                 <div style={{ fontWeight: 600 }}>{p.name}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                   {[
-                    p.last_age != null ? `${p.last_age} yrs` : null,
+                    formatAge(p.dob) ?? (p.last_age != null ? `${p.last_age} yrs` : null),
                     p.gender,
                     p.patient_code,
                   ]

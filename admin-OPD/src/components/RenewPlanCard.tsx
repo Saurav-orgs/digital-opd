@@ -88,9 +88,14 @@ export function RenewPlanCard() {
               {p.name}
               {p.isRecommended && <span className="renew-plan-tag">Popular</span>}
             </span>
-            <span className="renew-plan-price">{inr(p.price.total)}</span>
+            {/* Per-month leads here too — see ActivateAccountPanel, which
+                shows the same plans on the sign-in screen. */}
+            <span className="renew-plan-price">
+              {inr(p.monthly)}
+              <span className="renew-plan-per">/mo + GST</span>
+            </span>
             <span className="renew-plan-sub">
-              {p.months} month{p.months === 1 ? '' : 's'} · incl. {inr(p.price.gst)} GST
+              {p.months} month{p.months === 1 ? '' : 's'} · {inr(p.price.total)} incl. GST
             </span>
           </button>
         ))}

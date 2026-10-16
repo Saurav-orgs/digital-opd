@@ -1,20 +1,52 @@
 import type { ClinicPatient } from '../api/types';
 
-/** Age in whole years, preferring the birth date over the last recorded age. */
-export function ageOf(p: ClinicPatient): string {
-  if (p.dob) {
-    const born = new Date(`${p.dob}T00:00:00`);
-    if (!Number.isNaN(born.getTime())) {
-      const now = new Date();
-      let age = now.getFullYear() - born.getFullYear();
-      const monthDelta = now.getMonth() - born.getMonth();
-      if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < born.getDate())) {
-        age--;
-      }
-      if (age >= 0 && age <= 120) return `${age} yrs`;
-    }
+/**
+ * Years and months between a birth date and a reference date (today by
+ * default), or null for an unusable one. Kept so a young patient's months
+ * survive: a six-month-old and a two-year-old are both "0 yrs" otherwise.
+ */
+export function ageYm(
+  dob: string,
+  asOf?: string,
+): { years: number; months: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
+  const [by, bm, bd] = dob.split('-').map(Number);
+  let ry: number;
+  let rm: number;
+  let rd: number;
+  if (asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    [ry, rm, rd] = asOf.split('-').map(Number);
+  } else {
+    const now = new Date();
+    ry = now.getFullYear();
+    rm = now.getMonth() + 1;
+    rd = now.getDate();
   }
-  return p.last_age != null ? `${p.last_age} yrs` : '—';
+  let years = ry - by;
+  let months = rm - bm;
+  if (rd < bd) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  return years < 0 || years > 120 ? null : { years, months };
+}
+
+/**
+ * A compact age in whole years — "25 yrs". The doctor side shows years only;
+ * the months the birth date also implies are left to the patient-facing
+ * booking form, which asks for them one patient at a time.
+ */
+export function formatAge(dob: string | null | undefined, asOf?: string): string | null {
+  if (!dob) return null;
+  const ym = ageYm(dob, asOf);
+  if (!ym) return null;
+  return `${ym.years} yrs`;
+}
+
+/** Age for the patient list, preferring the birth date over the last age. */
+export function ageOf(p: ClinicPatient): string {
+  return formatAge(p.dob) ?? (p.last_age != null ? `${p.last_age} yrs` : '—');
 }
 
 /** "Female" → "F", "Male" → "M"; anything else as written. */

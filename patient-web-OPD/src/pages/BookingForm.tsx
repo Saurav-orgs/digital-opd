@@ -20,7 +20,7 @@ import { patientApi, patientTokenStore } from '../patientApi';
 import type { Doctor, PatientProfile, Slot } from '../types';
 import { ApiException } from '../types';
 import { DobField } from '../components/DobField';
-import { dobFromAge } from '../lib/dob';
+import { dobFromAge, formatAge } from '../lib/dob';
 import { validateDob } from '../lib/dob';
 import { NetworkAvatar } from '../components/NetworkAvatar';
 import { usePatientAuth } from '../auth/PatientAuthContext';
@@ -841,7 +841,7 @@ export const BookingForm: React.FC = () => {
                       <div style={{ fontWeight: 600 }}>{p.name}</div>
                       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                         {[
-                          p.last_age != null ? `${p.last_age} yrs` : null,
+                          formatAge(p.dob) ?? (p.last_age != null ? `${p.last_age} yrs` : null),
                           p.gender,
                           p.patient_code,
                         ]

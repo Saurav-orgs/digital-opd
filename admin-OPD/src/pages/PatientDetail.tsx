@@ -11,7 +11,7 @@ import {
   Pencil,
   Plus,
 } from 'lucide-react';
-import { prettyDate, prettyGender } from '../lib/patientFormat';
+import { formatAge, prettyDate, prettyGender } from '../lib/patientFormat';
 import {
   appointmentsApi,
   blockedNumbersApi,
@@ -133,7 +133,10 @@ export default function PatientDetailPage() {
   }
 
   const p = o.profile;
-  const genderAge = [prettyGender(p.gender), p.age != null ? `${p.age} yrs` : null]
+  const genderAge = [
+    prettyGender(p.gender),
+    formatAge(p.dob) ?? (p.age != null ? `${p.age} yrs` : null),
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -337,7 +340,7 @@ export default function PatientDetailPage() {
                     <div>
                       <div className="family-name">{f.name}</div>
                       <div className="muted">
-                        {[prettyGender(f.gender), f.dob ? `${ageFrom(f.dob)} yrs` : null]
+                        {[prettyGender(f.gender), formatAge(f.dob)]
                           .filter(Boolean)
                           .join(' · ')}
                       </div>
@@ -545,13 +548,3 @@ function computeUpcoming(visits: Appointment[]): Appointment[] {
     );
 }
 
-/** Age in whole years from YYYY-MM-DD, for the family rows. */
-function ageFrom(dob: string): number | string {
-  const born = new Date(`${dob}T00:00:00`);
-  if (Number.isNaN(born.getTime())) return '';
-  const now = new Date();
-  let age = now.getFullYear() - born.getFullYear();
-  const md = now.getMonth() - born.getMonth();
-  if (md < 0 || (md === 0 && now.getDate() < born.getDate())) age--;
-  return age;
-}

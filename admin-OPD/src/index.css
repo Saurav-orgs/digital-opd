@@ -3950,6 +3950,22 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text-secondary);
   margin-top: 2px;
 }
+/* The reason for visit on a list line: clipped to one line so a long one
+   ("Follow-up for persistent cough and …") cannot push the age off the row or
+   wrap it. The full text stays in the title tooltip. */
+.appt-reason {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+/* The phone card is narrower than a table cell, so the reason gets less room
+   before it clips. */
+.appt-meta .appt-reason {
+  max-width: 180px;
+}
 /* Flex + a real gap, so the icon cannot run under the first digits the way
    the emoji it replaced did. */
 /* Read, not tapped: it stopped being a `tel:` link, so it stops wearing the
@@ -6340,9 +6356,25 @@ tr.row-warn td {
   color: var(--marigold-dark);
 }
 .renew-plan-price {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
   font-family: var(--font-heading);
   font-size: 18px;
   color: var(--text);
+}
+/* Stacked (the sign-in activation card) right-aligns the price in its own
+   column, so the "/mo" line hangs under the number rather than beside it. */
+.renew-plans.is-stacked .renew-plan-price {
+  align-items: flex-end;
+}
+/* "/mo + GST" — the unit the headline number is in. Small and in the body
+   font so it reads as a label, not a second price. */
+.renew-plan-per {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 .renew-plan-sub {
   font-size: 12px;
@@ -6556,6 +6588,22 @@ tr.family-head td {
 .appt-card-actions .btn {
   flex: 1 1 0;
   justify-content: center;
+}
+
+/* On a phone the base `.appt-card` gives up its own padding and hands it to
+   `.appt-card-main` (the phone block far above). But the static patient card's
+   more specific `.appt-card.is-static .appt-card-main { padding: 0 }` won that
+   trade, so its content and action buttons sat flush against the border and
+   the status rail. This restores the same inset the dashboard card's row has —
+   placed after the is-static rules so, at equal specificity, it wins. */
+@media (max-width: 767px) {
+  .appt-card.is-static .appt-card-main {
+    padding: 10px 12px;
+  }
+  .appt-card.is-static .appt-card-actions {
+    padding: 10px 12px 11px;
+    margin-top: 0;
+  }
 }
 
 /* ── Duplicate warning in the new-patient form ─────────────── */
