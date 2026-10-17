@@ -39,6 +39,18 @@ export class Patient extends Model<Patient> {
   @Column({ type: DataType.STRING, allowNull: true })
   password_hash: string | null;
 
+  /**
+   * When the one-time WhatsApp welcome went out — set the first time this
+   * number registers or books on the patient side, and never again.
+   *
+   * It is the account, not the door, that is welcomed once: a walk-in account
+   * the desk opened carries a null here until the patient themselves first
+   * registers or books, so the greeting reaches them on that first patient-side
+   * action rather than being spent silently at the desk.
+   */
+  @Column({ type: DataType.DATE, allowNull: true })
+  welcome_sent_at: Date | null;
+
   @HasMany(() => PatientProfile)
   profiles: PatientProfile[];
 }

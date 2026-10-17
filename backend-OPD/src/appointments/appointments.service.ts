@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrescriptionsService } from '../prescriptions/prescriptions.service';
 import { IvfCaseSheetsService } from '../ivf-case-sheets/ivf-case-sheets.service';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
+import { PatientWelcomeService } from '../patient-welcome/patient-welcome.service';
 import { BlockedNumbersService } from '../blocked-numbers/blocked-numbers.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { WalkInAppointmentDto } from './dto/walkin-appointment.dto';
@@ -62,6 +63,9 @@ export class AppointmentsService {
     // A moved visit is messaged as well as bell-notified; WhatsAppService is
     // global, so this needs no module import.
     private readonly whatsapp: WhatsAppService,
+    // A number's first patient-side action — and a guest booking is one — gets
+    // the one-time WhatsApp welcome.
+    private readonly welcome: PatientWelcomeService,
   ) {}
 
   /**
@@ -133,6 +137,11 @@ export class AppointmentsService {
           `at ${appointment.start_time}.`,
         metadata: { source, start_time: appointment.start_time },
       });
+
+      // The booking is saved; the welcome is a courtesy off the critical path,
+      // and only the first booking for this number actually sends one. The
+      // booked doctor is the clinic the patient came through.
+      void this.welcome.sendIfFirst(appointment.patient_mobile, appointment.doctor_id);
 
       return this.withDoctor(appointment.id);
     } catch (err) {

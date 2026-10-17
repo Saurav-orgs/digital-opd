@@ -14,6 +14,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
 import { IvfCaseSheetsModule } from '../ivf-case-sheets/ivf-case-sheets.module';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
+import { PatientWelcomeModule } from '../patient-welcome/patient-welcome.module';
 import { BlockedNumbersModule } from '../blocked-numbers/blocked-numbers.module';
 
 @Module({
@@ -36,6 +37,8 @@ import { BlockedNumbersModule } from '../blocked-numbers/blocked-numbers.module'
     IvfCaseSheetsModule,
     // Booking resolves which patient on the number the visit is for.
     PatientProfilesModule,
+    // A number's first booking gets the one-time WhatsApp welcome.
+    PatientWelcomeModule,
     // Public booking is refused for numbers the clinic has blocked.
     BlockedNumbersModule,
   ],
