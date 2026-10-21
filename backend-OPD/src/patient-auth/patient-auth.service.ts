@@ -28,6 +28,7 @@ import {
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { PatientProfilesService } from '../patient-profiles/patient-profiles.service';
+import { PatientWelcomeService } from '../patient-welcome/patient-welcome.service';
 
 /** How long a sign-up code is good for, and how long a verified number stays usable. */
 const CODE_MINUTES = 10;
@@ -48,6 +49,7 @@ export class PatientAuthService {
     private readonly jwtService: JwtService,
     private readonly activity: ActivityLogService,
     private readonly whatsapp: WhatsAppService,
+    private readonly welcome: PatientWelcomeService,
     config: ConfigService,
     @InjectModel(MobileVerification)
     private readonly verificationModel: typeof MobileVerification,
@@ -225,6 +227,11 @@ export class PatientAuthService {
       summary: `Patient account created for ${dto.mobile}.`,
     });
 
+    // Fire-and-forget, like the activity log above: the account is saved and
+    // the session is about to be returned, so a courtesy message must not hold
+    // up — or fail — sign-up. Only the first door for this number sends.
+    void this.welcome.sendIfFirst(account.mobile, dto.doctor_id);
+
     return {
       ...session,
       patients: await this.profiles.listForAccount(account.id),
@@ -267,6 +274,9 @@ export class PatientAuthService {
       summary: `Patient account registered for ${dto.mobile} with one patient.`,
       metadata: { patient_profile_id: profile.id },
     });
+
+    // See `signup`: once per number, off the request's critical path.
+    void this.welcome.sendIfFirst(account.mobile, dto.doctor_id);
 
     return {
       ...session,

@@ -1028,6 +1028,15 @@ export class DoctorsService {
    * QR renderer below. Two copies of this would eventually disagree, and a QR
    * that disagrees with the link beside it is worse than no QR.
    */
+  /**
+   * The raw doctor row, or null — the lookup for a caller that treats "no such
+   * doctor" as nothing to do rather than an error (the welcome message skips a
+   * stale tenant id silently). `getOrFail` stays the one that throws.
+   */
+  async findRawById(id: string): Promise<Doctor | null> {
+    return this.doctorModel.findByPk(id);
+  }
+
   bookingUrl(doctor: Doctor): string {
     // The doctor's own base wins; otherwise the platform setting the super
     // admin controls, which itself falls back to the deploy's env var.

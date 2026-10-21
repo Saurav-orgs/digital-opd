@@ -58,6 +58,15 @@ export interface AppConfig {
     /** Name and language of the approved UTILITY template for a moved visit. */
     rescheduleTemplate: string;
     rescheduleTemplateLang: string;
+    /**
+     * Name and language of the approved UTILITY template for the one-time
+     * "welcome, here is your doctor" message. Body params, in order:
+     *   {{1}} doctor name   {{2}} booking URL
+     * Empty until Meta approves one — see the value for why there is no
+     * fallback name.
+     */
+    welcomeTemplate: string;
+    welcomeTemplateLang: string;
   };
   /**
    * Cashfree Payment Gateway, which takes the subscription payment at sign-up.
@@ -193,6 +202,15 @@ export default (): AppConfig => ({
     /** The "your appointment has moved to…" notice. Empty for the same reason. */
     rescheduleTemplate: process.env.WA_RESCHEDULE_TEMPLATE_NAME || '',
     rescheduleTemplateLang: process.env.WA_RESCHEDULE_TEMPLATE_LANG || 'en_US',
+    /**
+     * The one-time "welcome to the clinic" message, sent the first time a
+     * number registers or books. Empty for the same reason as the two above:
+     * a UTILITY template Meta has not approved cannot be sent, so until
+     * WA_WELCOME_TEMPLATE_NAME points at a live one the welcome is skipped
+     * (`canSendNotice`) rather than failed.
+     */
+    welcomeTemplate: process.env.WA_WELCOME_TEMPLATE_NAME || '',
+    welcomeTemplateLang: process.env.WA_WELCOME_TEMPLATE_LANG || 'en_US',
   },
   cashfree: {
     appId: cashfreeCredential('APP_ID'),

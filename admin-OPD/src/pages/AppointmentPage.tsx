@@ -24,6 +24,7 @@ import { PrescriptionTabs } from '../components/PrescriptionTabs';
 import { ISSUE_MODE_LABEL } from '../lib/issueMode';
 import { isIvfDoctor } from '../lib/ivfCaseSheet';
 import { isCancelled, needsReschedule } from '../lib/appointmentStatus';
+import { shortReportTitle } from '../lib/reportTitle';
 import { PrescriptionPreviewModal } from '../components/PrescriptionPreview';
 import { flushDraft } from '../lib/draftFlush';
 import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
@@ -194,7 +195,10 @@ function VisitFooter({
   onIssue: () => void;
   issuing: boolean;
   alreadyIssued: boolean;
-  /** A recording is still becoming a draft; issuing now would miss it. */
+  /**
+   * Issue cannot go through yet: a recording is still becoming a draft, or
+   * the prescription is missing a diagnosis or a medicine.
+   */
   blocked: boolean;
   blockedReason: string;
 }) {
@@ -207,14 +211,24 @@ function VisitFooter({
       {alreadyIssued ? (
         <span className="vfoot-issued">Issued to the patient</span>
       ) : (
-        <button
-          className="btn btn-primary vfoot-issue"
-          onClick={onIssue}
-          disabled={issuing || blocked}
-          title={blocked ? blockedReason : undefined}
-        >
-          {issuing ? 'Issuing…' : 'Issue to patient'}
-        </button>
+        <>
+          {/* Said out loud, not only in a `title`. A greyed-out Issue button
+              with the reason hidden in a tooltip is a dead end on a phone,
+              where there is no hover at all. */}
+          {blocked && (
+            <span className="vfoot-blocked" role="status">
+              {blockedReason}
+            </span>
+          )}
+          <button
+            className="btn btn-primary vfoot-issue"
+            onClick={onIssue}
+            disabled={issuing || blocked}
+            title={blocked ? blockedReason : undefined}
+          >
+            {issuing ? 'Issuing…' : 'Issue to patient'}
+          </button>
+        </>
       )}
     </div>
   );
@@ -515,6 +529,32 @@ export default function AppointmentPage() {
     return here ? held[here] : Object.values(held).some(Boolean);
   };
 
+  /**
+   * What a typed prescription is still missing before it can be issued, or
+   * null when it is ready.
+   *
+   * A prescription could be issued with no diagnosis at all, and with no
+   * medicine on it: the letterhead went out with a blank line where the
+   * condition should be, and the patient's copy is the only record anyone
+   * keeps of it. So the two things that make it a prescription — what is
+   * wrong, and what to take — are both required before Issue comes alive.
+   *
+   * An untouched form is not incomplete, it is a visit ending without a
+   * prescription; `onIssue` offers to close those. Only a form the doctor has
+   * started writing in is held.
+   *
+   * Read from the saved draft rather than the editor's own state, which is
+   * three components down. Autosave is `AUTOSAVE_DELAY_MS` behind the
+   * keystroke, so the button comes alive a moment after the diagnosis is
+   * typed rather than on the character.
+   */
+  const structuredGap = (draft: EPrescription | undefined): string | null => {
+    if (!contentByMode(draft).structured) return null;
+    if (!draft?.diagnosis?.trim()) return 'Add a diagnosis before issuing';
+    if ((draft?.medicines?.length ?? 0) === 0) return 'Add at least one medicine before issuing';
+    return null;
+  };
+
   /*
    * Some visits end without one. A reassurance, a referral, "come back if it
    * gets worse" — the doctor still has to be able to close the appointment,
@@ -652,6 +692,21 @@ export default function AppointmentPage() {
       toast.error(e);
       return;
     }
+    /*
+     * Checked again here because the button's own disabled state is computed
+     * from the last autosave: a doctor who deletes the diagnosis and presses
+     * Issue within the debounce window would otherwise get past it. The flush
+     * above has just pushed what is on screen, so this reads the real draft.
+     */
+    const here = issueModeRef.current;
+    if (here === null || here === 'structured') {
+      const gap = structuredGap(draft);
+      if (gap) {
+        toast.push('error', 'The prescription is not complete', `${gap}.`);
+        return;
+      }
+    }
+
     if (!hasContent(draft)) {
       /*
        * Empty tab, but the visit is not empty: the doctor photographed the pad
@@ -775,16 +830,19 @@ export default function AppointmentPage() {
                     >
                       Mark as no-show
                     </button>
+                    {/* `isCancelled`, not `consultation_status === 'rejected'`:
+                        a patient who withdraws their own booking sets
+                        `status` instead, and this item sat live on those. */}
                     <button
                       className="opts-item danger"
                       role="menuitem"
-                      disabled={consult.isPending || a.consultation_status === 'rejected'}
+                      disabled={consult.isPending || isCancelled(a)}
                       onClick={() => {
                         setOptsOpen(false);
                         setConfirmingCancel(true);
                       }}
                     >
-                      Cancel appointment
+                      {isCancelled(a) ? 'Appointment cancelled' : 'Cancel appointment'}
                     </button>
                     <button
                       className="opts-item danger"
@@ -960,20 +1018,39 @@ export default function AppointmentPage() {
               patientAge={a.patient_age}
               patientChip={<RxPatient appointment={a} />}
               footer={
-                canAct ? (
-                  <VisitFooter
-                    onPreview={openPreview}
-                    onIssue={onIssue}
-                    issuing={issue.isPending}
-                    alreadyIssued={alreadyIssued}
-                    blocked={!alreadyIssued && draftInFlight}
-                    blockedReason={
-                      recorderBusy
-                        ? 'Stop the recording first'
-                        : 'Wait for the recording to become a draft'
+                canAct
+                  ? // The rule is about a component defined inside a render,
+                    // which remounts its whole subtree on every parent render.
+                    // This is a render prop: `PrescriptionTabs` calls it to get
+                    // the footer for the tab showing and never mounts it as
+                    // JSX, so there is no element type to go unstable.
+                    // eslint-disable-next-line react/no-unstable-nested-components
+                    (rxMode) => {
+                      // Only the typed and dictated tabs have a diagnosis and
+                      // medicine rows to be missing. A handwritten page or a
+                      // photograph of a pad carries both inside the image.
+                      const gap =
+                        rxMode === 'type' || rxMode === 'voice'
+                          ? structuredGap(prescriptionQ.data)
+                          : null;
+                      return (
+                        <VisitFooter
+                          onPreview={openPreview}
+                          onIssue={onIssue}
+                          issuing={issue.isPending}
+                          alreadyIssued={alreadyIssued}
+                          blocked={!alreadyIssued && (draftInFlight || !!gap)}
+                          blockedReason={
+                            draftInFlight
+                              ? recorderBusy
+                                ? 'Stop the recording first'
+                                : 'Wait for the recording to become a draft'
+                              : (gap ?? '')
+                          }
+                        />
+                      );
                     }
-                  />
-                ) : null
+                  : null
               }
             />
           </div>
@@ -1215,7 +1292,7 @@ function ReportCard({
             onClick={() => setViewing(true)}
             title={`Open ${report.title}`}
           >
-            {report.title}
+            {shortReportTitle(report.title)}
           </button>
           <div className="report-date">
             {report.createdAt &&

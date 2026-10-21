@@ -6,6 +6,7 @@ import { SequelizeModule } from '@nestjs/sequelize';
 import { Patient } from '../database/models/patient.model';
 import { MobileVerification } from '../database/models/mobile-verification.model';
 import { PatientProfilesModule } from '../patient-profiles/patient-profiles.module';
+import { PatientWelcomeModule } from '../patient-welcome/patient-welcome.module';
 import { PatientAuthService } from './patient-auth.service';
 import { PatientAuthController } from './patient-auth.controller';
 import { PatientStrategy } from './patient.strategy';
@@ -15,6 +16,7 @@ import { PatientAuthGuard } from './patient-auth.guard';
   imports: [
     SequelizeModule.forFeature([Patient, MobileVerification]),
     PatientProfilesModule,
+    PatientWelcomeModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
