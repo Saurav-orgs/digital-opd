@@ -142,8 +142,15 @@ export function PrescriptionTabs({
    * Here rather than inside `PrescriptionEditor` because a handwritten or
    * uploaded prescription is issued the same way, and that editor renders in
    * only two of the four modes.
+   *
+   * A function when the buttons differ by tab. Issue is held until the typed
+   * prescription has a diagnosis and a medicine, and a handwritten page or a
+   * photographed pad has neither field to check — so the page needs to know
+   * which tab it is drawing for. It cannot read `issueModeRef` to find out:
+   * that ref exists precisely so the page does *not* re-render on a tab
+   * switch, and a disabled state read from it would be a render behind.
    */
-  footer?: ReactNode;
+  footer?: ReactNode | ((mode: Mode) => ReactNode);
   /**
    * Who the prescription is for, between the mode tabs and the form — the
    * place the design puts it, and the only patient detail on screen while
@@ -227,6 +234,8 @@ export function PrescriptionTabs({
     setModeState(m);
     writeMode(appointmentId, m);
   };
+  /** Preview and Issue as this tab needs them — see the `footer` prop. */
+  const footerNode = typeof footer === 'function' ? footer(mode) : footer;
   const [cameraOpen, setCameraOpen] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
@@ -445,7 +454,7 @@ export function PrescriptionTabs({
                 appointmentId={appointmentId}
                 canEdit={canEdit}
                 flushRef={flushRef}
-                footerExtras={footer}
+                footerExtras={footerNode}
               />
             </>
           )}
@@ -459,7 +468,7 @@ export function PrescriptionTabs({
             canEdit={canEdit}
             flushRef={flushRef}
             showTemplates
-            footerExtras={footer}
+            footerExtras={footerNode}
           />
         </>
       )}
@@ -633,10 +642,10 @@ export function PrescriptionTabs({
         button and an "Issued to the patient" label underneath the badge that
         had just said so.
       */}
-      {footer && !rxIssued && (shows('handwrite') || shows('upload')) && (
+      {footerNode && !rxIssued && (shows('handwrite') || shows('upload')) && (
         <div className="vfoot">
           <div className="vfoot-grow" />
-          {footer}
+          {footerNode}
         </div>
       )}
     </div>

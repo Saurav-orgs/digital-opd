@@ -3,6 +3,7 @@ import type { Appointment } from '../api/types';
 import { Badge } from './ui';
 import { PhoneIcon } from './icons';
 import { displayStatus } from '../lib/appointmentStatus';
+import { shortReportTitle } from '../lib/reportTitle';
 
 /**
  * One past visit, as a card.
@@ -83,8 +84,11 @@ export function HistoryVisit({ visit: h }: { visit: Appointment }) {
                 className="row"
                 style={{ justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}
               >
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  📄 {r.title}
+                <span
+                  title={r.title}
+                  style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  📄 {shortReportTitle(r.title)}
                 </span>
                 <a
                   className="btn btn-sm"

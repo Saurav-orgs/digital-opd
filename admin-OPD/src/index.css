@@ -1162,6 +1162,21 @@ textarea.input {
   color: var(--text);
   width: 100%;
 }
+/*
+ * A textarea is dragged, not sized. The browser's default `resize: both` let
+ * the Advice box be pulled narrower than the Diagnosis field above it, which
+ * is the one thing a form field must not do, and pulled shorter than a single
+ * line, where it collapsed to a border with the text hidden inside it. So:
+ * height only, and never below one line.
+ *
+ * `1.45em` rather than a pixel height because the phone block raises every
+ * input to 16px to stop iOS zooming on focus; em follows it.
+ */
+textarea.input {
+  resize: vertical;
+  line-height: 1.45;
+  min-height: calc(1.45em + 22px);
+}
 .input:focus,
 .select:focus,
 textarea.input:focus {
@@ -1845,6 +1860,14 @@ tr.appt-row.upcoming td:first-child {
 .rx-save-state {
   font-size: 12px;
   white-space: nowrap;
+}
+/* Why Issue is down — "Add a diagnosis before issuing". It sits immediately
+   before the button so the two read as one statement. */
+.vfoot-blocked {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: right;
 }
 
 /* ── The day axis ───────────────────────────────────────────
@@ -2890,20 +2913,35 @@ tr.appt-row.upcoming td:first-child {
     flex: 1 1 100%;
     min-height: 46px;
   }
+  /*
+   * `flex: 1 1 0; min-width: 0` shared the line equally and then let each
+   * label overflow its own box: at 375px "Save as template" needed 88px, was
+   * given 70px, and printed the rest of itself across "Save now".
+   * `.btn` is `white-space: nowrap`, so nothing was going to wrap inside the
+   * button; the row has to wrap instead. `max-content` is the floor: a button
+   * is never narrower than its own label, and the row breaks when they no
+   * longer fit.
+   */
   .vfoot .btn:not(.btn-primary):not(.vfoot-issue) {
     order: 2;
-    flex: 1 1 0;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: max-content;
   }
   .vfoot-grow {
     display: none;
   }
   .rx-save-state,
+  .vfoot-blocked,
   .vfoot-issued {
     order: 3;
     width: 100%;
     text-align: center;
     margin: 0;
+  }
+  /* Above Issue, not below it: it is the reason the button underneath is
+     grey, and read after the button it explains nothing. */
+  .vfoot-blocked {
+    order: 0;
   }
 
   /* Each medicine becomes a card: the name and its delete button share the
@@ -3798,6 +3836,20 @@ tr.appt-row.upcoming td:first-child {
 }
 .leave-item:last-child {
   border-bottom: none;
+}
+/* A report name on the Reports page. `shortReportTitle` cuts it to 15
+   characters, and this is the backstop for the name that is 15 wide
+   characters: the row keeps View and Delete, and the name elides instead of
+   shouldering them off the card. */
+.report-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 
@@ -5622,6 +5674,48 @@ tr.appt-row.upcoming td:first-child {
   color: var(--text);
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(22, 56, 50, 0.12);
+}
+
+/*
+ * On a phone the segmented control fills the card and splits into equal
+ * columns, icon over label.
+ *
+ * It used to keep its desktop shape and scroll sideways inside the header —
+ * with the scrollbar hidden, which is how the control is meant to look on a
+ * desktop that does not need it. So Upload, the last tab and the one a
+ * receptionist photographing a pad reaches for, was cut off at the card's
+ * edge with nothing on screen saying it was there at all. Equal columns with
+ * the label under the icon fit four tabs (five for an IVF card) at 360px with
+ * no scroll; `grid-auto-flow: column` takes however many tabs the card
+ * offers rather than hard-coding four.
+ */
+@media (max-width: 640px) {
+  .rx-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rx-modes {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    overflow-x: visible;
+  }
+  .rx-tab {
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    padding: 6px 2px;
+    justify-content: center;
+  }
+  .rx-tab-label {
+    font-size: 11px;
+    /* "Handwrite" and "Upload (2)" are the long ones; let them shrink rather
+       than spill out of their column. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ── Preview: the document, framed as the file it becomes ──── */

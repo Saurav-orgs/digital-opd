@@ -790,14 +790,19 @@ function DayTable({
                 Move back to pending
               </button>
             )}
+            {/* Nothing left to cancel on a visit that is already cancelled:
+                the slot is already free and the patient has already been
+                told. It stayed live on those rows, so the desk could open the
+                confirmation dialog and cancel a cancelled appointment. */}
             <button
               className="action-menu-item danger"
+              disabled={!menuRow || isCancelled(menuRow)}
               onClick={() => {
                 setMenuFor(null);
                 setCancelling(menuRow);
               }}
             >
-              Cancel appointment
+              {menuRow && isCancelled(menuRow) ? 'Appointment cancelled' : 'Cancel appointment'}
             </button>
           </div>
         )}

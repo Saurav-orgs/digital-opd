@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import { Empty, Field, Loading } from '../components/ui';
 import { DocumentIcon, EyeIcon } from '../components/icons';
 import { MAX_REPORT_MB } from '../components/ReportUpload';
+import { shortReportTitle } from '../lib/reportTitle';
 
 /**
  * Upload + view patient reports by mobile number. For a pathlab login (whose
@@ -172,8 +173,14 @@ export default function Reports() {
               {reportsQ.data.map((r) => (
                 <div key={r.id} className="leave-item">
                   <div style={{ minWidth: 0 }}>
-                    <a href={r.url} target="_blank" rel="noreferrer">
-                      <DocumentIcon size={14} /> {r.title}
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="report-link"
+                      title={r.title}
+                    >
+                      <DocumentIcon size={14} /> {shortReportTitle(r.title)}
                     </a>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {new Date(r.createdAt).toLocaleDateString()}
